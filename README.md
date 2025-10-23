@@ -1,4 +1,3 @@
-\
 # SpiralFastLoop
 
 > Fast, pragmatic training loop template for PyTorch — **CUDA / MPS / CPU**.
