@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Ryō
 
-\
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Optional, Callable, Dict, Any, Sequence, Mapping
 
@@ -121,20 +121,26 @@ class FastTrainer:
 
         # Detect if criterion supports reduction='none'
         supports_per_sample = False
-        try:
-            if hasattr(criterion, "reduction"):
-                old = criterion.reduction
+        if hasattr(criterion, "reduction"):
+            old_reduction = getattr(criterion, "reduction")
+            try:
                 criterion.reduction = "none"
-                criterion.reduction = old
-                supports_per_sample = True
-        except Exception:
-            supports_per_sample = False
+                supports_per_sample = getattr(criterion, "reduction", None) == "none"
+            except Exception:
+                supports_per_sample = False
+            finally:
+                try:
+                    criterion.reduction = old_reduction
+                except Exception:
+                    pass
 
         self.optimizer.zero_grad(set_to_none=True)
 
-        total_loss = 0.0
+        total_loss = torch.zeros((), device=self.device, dtype=torch.float64)
+        total_weight = torch.zeros((), device=self.device, dtype=torch.float64)
         total_items = 0
         step_idx = 0
+        optimizer_steps = 0
 
         for batch in loader:
             step_idx += 1
@@ -151,13 +157,25 @@ class FastTrainer:
                 # Fallback: treat entire batch as inputs, no targets (self-supervised / user handles loss)
                 inputs, targets = batch, None
 
+            batch_size = None
+            loss_weight_tensor = None
+
             with autocast_ctx(self.device, self.amp_enabled, self.amp_dtype):
                 outputs = self.model(inputs)
 
                 if targets is not None and criterion is not None:
                     if supports_per_sample and self.trigger_hook is not None:
-                        # per-sample loss for trigger decisions
-                        loss_vec = criterion(outputs, targets)
+                        reduction_to_restore = None
+                        if hasattr(criterion, "reduction") and getattr(criterion, "reduction") != "none":
+                            reduction_to_restore = getattr(criterion, "reduction")
+                            criterion.reduction = "none"
+                        try:
+                            # per-sample loss for trigger decisions
+                            loss_vec = _ensure_loss_vector(criterion(outputs, targets))
+                        finally:
+                            if reduction_to_restore is not None:
+                                criterion.reduction = reduction_to_restore
+                        batch_size = loss_vec.shape[0]
                         # Trigger may inject extra samples (e.g., hard examples)
                         trig_result = self.trigger_hook({
                             "inputs": inputs, "targets": targets, "outputs": outputs,
@@ -187,8 +205,19 @@ class FastTrainer:
                                 loss = loss_vec.mean()
                         else:
                             loss = loss_vec.mean()
+                            loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
                     else:
                         loss = criterion(outputs, targets)
+                        if isinstance(loss, torch.Tensor) and loss.ndim > 0:
+                            loss = loss.mean()
+                        reference = targets if targets is not None else inputs
+                        batch_size = _infer_batch_size(reference)
+                        loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
+                    if batch_size is None:
+                        reference = targets if targets is not None else inputs
+                        batch_size = _infer_batch_size(reference)
+                        if loss_weight_tensor is None:
+                            loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
                 else:
                     # User handles their own loss externally
                     if isinstance(outputs, torch.Tensor):
@@ -223,6 +252,7 @@ class FastTrainer:
                         self.scheduler.step()
                     except Exception:
                         pass
+                optimizer_steps += 1
 
             # Metrics
             bs = _infer_batch_size(inputs)
@@ -232,7 +262,9 @@ class FastTrainer:
 
             if (step_idx % self.log_interval) == 0:
                 m = meter.summary()
-                print(f"[Step {step_idx}] loss~{total_loss/(step_idx):.4f} | "
+                weight_value = total_weight.item()
+                avg_loss = (total_loss / total_weight).item() if weight_value > 0 else 0.0
+                print(f"[Step {step_idx}] loss~{avg_loss:.4f} | "
                       f"thr={m['samples_per_sec']:.1f}/s p50={m['p50_s']*1e3:.1f}ms p95={m['p95_s']*1e3:.1f}ms",
                       flush=True)
 
@@ -242,8 +274,13 @@ class FastTrainer:
                 metrics["cuda_max_mem_bytes"] = torch.cuda.max_memory_allocated()
             except Exception:
                 pass
-        metrics["avg_loss"] = total_loss / max(1, step_idx)
+        weight_value = total_weight.item()
+        if weight_value > 0:
+            metrics["avg_loss"] = (total_loss / total_weight).item()
+        else:
+            metrics["avg_loss"] = 0.0
         metrics["steps"] = step_idx
+        metrics["optimizer_steps"] = optimizer_steps
         metrics["samples"] = total_items
         metrics["amp"] = self.amp_enabled
         metrics["compiled"] = self.compiled

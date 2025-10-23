@@ -2,7 +2,7 @@
 
 > Fast, pragmatic training loop template for PyTorch — **CUDA / MPS / CPU**.
 
-**Status:** v0.1.1 • License: MIT • Python ≥ 3.9 • PyTorch ≥ 2.1
+**Status:** v0.1.1 • License: Apache-2.0 • Python ≥ 3.9 • PyTorch ≥ 2.1
 
 
 **SpiralFastLoop** is a fast, practical PyTorch training loop template focused on *throughput, stability, and simplicity*.  
@@ -108,6 +108,6 @@ Made with 🌀 by Ryō ∴ SpiralArchitect and SpiralReality — *Full-stack AI 
 ---
 
 ## Legal / Credits
-- © 2025 Ryō. Code licensed under **MIT** (see LICENSE). See **COPYRIGHT** and **TRADEMARKS.md** for name/branding terms.
+- © 2025 Ryō. Code licensed under **Apache 2.0** (see LICENSE). See **COPYRIGHT** and **TRADEMARKS.md** for name/branding terms.
 - This project may interact with third-party models/libraries; see **NOTICE** for their licenses.
 - How to cite: see **CITATION.cff**.
