@@ -92,7 +92,10 @@ trigger = LossStdTrigger(my_provider, LossStdConfig(std_threshold=0.15, inject_r
 trainer = FastTrainer(model, opt, trigger_hook=trigger)
 ```
 
-> **Batch structure requirements:** The tensors (or nested structures of tensors) returned by the trigger must mirror the original batch exactly (matching keys for dicts and positional elements for tuples/lists). SpiralFastLoop concatenates the original and injected batches element-wise before recomputing the forward pass. If you provide optional sample weights, supply a 1D tensor that matches the concatenated batch length and sums to a positive value.
+### Trigger hook contracts
+- `TriggerResult.extra_inputs` / `extra_targets` **must mirror** the nested structure of the original batch (tensor, tuple/list of tensors, or dict). All tensors need matching leading batch dimensions so they can be concatenated safely.
+- Optional `TriggerResult.weights` should be shaped `(B_total,)` after concatenation; mismatches raise a `ValueError` instead of silently skewing the loss.
+- For custom dataloader containers, convert to tensors (or supported structures) before returning from the trigger.
 
 ## License
 Apache 2.0 License (see `LICENSE`).
