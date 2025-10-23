@@ -26,7 +26,12 @@ class LossStdConfig:
 
 
 class LossStdTrigger:
-    """Trigger hook for requesting harder samples when the batch looks too easy."""
+    """Trigger hook for requesting harder samples when the batch looks too easy.
+
+    The trigger maintains a fractional budget and automatically resets its running
+    totals whenever the provided step counter decreases (e.g., at the start of a
+    new epoch).
+    """
 
     def __init__(
         self,
@@ -38,6 +43,12 @@ class LossStdTrigger:
         self.spent = 0  # approximate budget spent (injected samples)
         # Count of baseline samples the trigger has observed (without injections).
         self.total = 0
+        self._last_step: Optional[int] = None
+
+    def _reset_budget_counters(self) -> None:
+        """Reset running totals when a new epoch begins."""
+        self.spent = 0
+        self.total = 0
 
     def __call__(self, ctx: Dict[str, Any]) -> Optional[TriggerResult]:
         loss_vec: torch.Tensor = ctx["loss_vec"].detach()
@@ -45,7 +56,12 @@ class LossStdTrigger:
             return None
 
         device = ctx["device"]
-        step = int(ctx.get("step", 0))
+        raw_step = ctx.get("step")
+        step = int(raw_step) if raw_step is not None else 0
+        if raw_step is not None:
+            if self._last_step is not None and step < self._last_step:
+                self._reset_budget_counters()
+            self._last_step = step
 
         batch = loss_vec.numel()
         self.total += batch

@@ -92,3 +92,59 @@ def test_budget_fraction_limits_total_injections():
     assert trigger.total == 15
     assert trigger.spent <= trigger.cfg.budget_frac * trigger.total + 1e-6
     assert provider.calls["requested"] == [1]
+
+
+def test_budget_counters_reset_on_epoch_restart():
+    cfg = LossStdConfig(
+        std_threshold=10.0,
+        inject_ratio=0.5,
+        pulse_every=1000,
+        budget_frac=0.2,
+        max_injected_per_step=10,
+    )
+    provider = _make_provider()
+    trigger = LossStdTrigger(provider=provider, cfg=cfg)
+
+    ctx = {"device": "cpu", "loss_vec": torch.ones(20)}
+
+    ctx["step"] = 1
+    first = trigger(ctx)
+    assert isinstance(first, TriggerResult)
+    assert provider.calls["requested"] == [4]
+    assert trigger.total == 20
+    assert trigger.spent == 4
+
+    ctx["step"] = 0  # simulate a new epoch (step counter reset)
+    second = trigger(ctx)
+    assert isinstance(second, TriggerResult)
+    assert provider.calls["requested"] == [4, 4]
+    assert trigger.total == 20
+    assert trigger.spent == 4
+
+
+def test_budget_counters_ignore_repeated_steps():
+    cfg = LossStdConfig(
+        std_threshold=10.0,
+        inject_ratio=0.5,
+        pulse_every=1000,
+        budget_frac=1.0,
+        max_injected_per_step=10,
+    )
+    provider = _make_provider()
+    trigger = LossStdTrigger(provider=provider, cfg=cfg)
+
+    ctx = {"device": "cpu", "loss_vec": torch.ones(12)}
+
+    ctx["step"] = 5
+    first = trigger(ctx)
+    assert isinstance(first, TriggerResult)
+    assert provider.calls["requested"] == [6]
+    assert trigger.total == 12
+    assert trigger.spent == 6
+
+    ctx["step"] = 5  # repeated step should not reset counters
+    second = trigger(ctx)
+    assert isinstance(second, TriggerResult)
+    assert provider.calls["requested"] == [6, 6]
+    assert trigger.total == 24
+    assert trigger.spent == 12
