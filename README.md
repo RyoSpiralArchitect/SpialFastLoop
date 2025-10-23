@@ -2,7 +2,7 @@
 
 > Fast, pragmatic training loop template for PyTorch — **CUDA / MPS / CPU**.
 
-**Status:** v0.1.1 • License: MIT • Python ≥ 3.9 • PyTorch ≥ 2.1
+**Status:** v0.1.1 • License: Apache-2.0 • Python ≥ 3.9 • PyTorch ≥ 2.1
 
 
 **SpiralFastLoop** is a fast, practical PyTorch training loop template focused on *throughput, stability, and simplicity*.  
@@ -92,6 +92,8 @@ trigger = LossStdTrigger(my_provider, LossStdConfig(std_threshold=0.15, inject_r
 trainer = FastTrainer(model, opt, trigger_hook=trigger)
 ```
 
+> **Batch structure requirements:** The tensors (or nested structures of tensors) returned by the trigger must mirror the original batch exactly (matching keys for dicts and positional elements for tuples/lists). SpiralFastLoop concatenates the original and injected batches element-wise before recomputing the forward pass. If you provide optional sample weights, supply non-negative values (tensor, list, tuple, etc.) that broadcast to a 1D vector matching the concatenated batch length and whose sum is positive.
+
 ## License
 Apache 2.0 License (see `LICENSE`).
 
@@ -103,6 +105,6 @@ Made with 🌀 by Ryō ∴ SpiralArchitect and SpiralReality — *Full-stack AI 
 ---
 
 ## Legal / Credits
-- © 2025 Ryō. Code licensed under **MIT** (see LICENSE). See **COPYRIGHT** and **TRADEMARKS.md** for name/branding terms.
+- © 2025 Ryō. Code licensed under **Apache 2.0** (see LICENSE). See **COPYRIGHT** and **TRADEMARKS.md** for name/branding terms.
 - This project may interact with third-party models/libraries; see **NOTICE** for their licenses.
 - How to cite: see **CITATION.cff**.
