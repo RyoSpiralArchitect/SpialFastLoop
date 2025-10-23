@@ -93,7 +93,7 @@ trainer = FastTrainer(model, opt, trigger_hook=trigger)
 ```
 
 ## License
-A patch 2.0 License (see `LICENSE`).
+Apache 2.0 License (see `LICENSE`).
 
 ---
 
