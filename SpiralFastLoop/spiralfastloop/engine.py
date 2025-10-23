@@ -27,12 +27,23 @@ def _concatenate_batches(base: Any, extra: Any) -> Any:
             raise TypeError("Trigger extra batch must be a mapping matching the original batch.")
         if set(base.keys()) != set(extra.keys()):
             raise KeyError("Trigger extra batch keys must match the original batch keys.")
-        return type(base)({k: _concatenate_batches(base[k], extra[k]) for k in base.keys()})
+        merged = {k: _concatenate_batches(base[k], extra[k]) for k in base.keys()}
+        default_factory = getattr(base, "default_factory", None)
+        if hasattr(base, "default_factory"):
+            new_mapping = type(base)(default_factory)
+            new_mapping.update(merged)
+            return new_mapping
+        try:
+            return type(base)(merged)
+        except TypeError:
+            new_mapping = type(base)()
+            new_mapping.update(merged)
+            return new_mapping
     if isinstance(base, list):
         if not isinstance(extra, (list, tuple)) or len(base) != len(extra):
             raise TypeError("Trigger extra batch must match the list structure of the original batch.")
         concatenated = [_concatenate_batches(b, e) for b, e in zip(base, extra)]
-        return list(concatenated)
+        return type(base)(concatenated)
     if isinstance(base, tuple):
         if not isinstance(extra, (list, tuple)) or len(base) != len(extra):
             raise TypeError("Trigger extra batch must match the tuple structure of the original batch.")
