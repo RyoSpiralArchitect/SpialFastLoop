@@ -92,6 +92,11 @@ trigger = LossStdTrigger(my_provider, LossStdConfig(std_threshold=0.15, inject_r
 trainer = FastTrainer(model, opt, trigger_hook=trigger)
 ```
 
+### Trigger hook contracts
+- `TriggerResult.extra_inputs` / `extra_targets` **must mirror** the nested structure of the original batch (tensor, tuple/list of tensors, or dict). All tensors need matching leading batch dimensions so they can be concatenated safely.
+- Optional `TriggerResult.weights` should be shaped `(B_total,)` after concatenation; mismatches raise a `ValueError` instead of silently skewing the loss.
+- For custom dataloader containers, convert to tensors (or supported structures) before returning from the trigger.
+
 ## License
 Apache 2.0 License (see `LICENSE`).
 

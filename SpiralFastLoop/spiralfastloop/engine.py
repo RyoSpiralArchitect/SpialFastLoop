@@ -3,7 +3,7 @@
 
 \
 from dataclasses import dataclass
-from typing import Optional, Callable, Dict, Any
+from typing import Optional, Callable, Dict, Any, Sequence, Mapping
 
 import torch
 import torch.nn as nn
@@ -12,6 +12,50 @@ from .utils import (
     get_best_device, get_amp_policy, autocast_ctx, to_device,
     ThroughputMeter, maybe_channels_last, safe_compile
 )
+
+
+def _concat_batches(primary: Any, extra: Any, *, dim: int = 0) -> Any:
+    """Concatenate two batches that share the same nested structure."""
+    if extra is None:
+        return primary
+
+    if torch.is_tensor(primary):
+        if not torch.is_tensor(extra):
+            raise TypeError("Extra batch must mirror tensor structure of primary batch")
+        return torch.cat([primary, extra], dim=dim)
+
+    if isinstance(primary, (list, tuple)):
+        if not isinstance(extra, (list, tuple)):
+            raise TypeError("Extra batch must mirror list/tuple structure of primary batch")
+        if len(primary) != len(extra):
+            raise ValueError("Extra batch must match list/tuple length of primary batch")
+        concatenated = [_concat_batches(p, e, dim=dim) for p, e in zip(primary, extra)]
+        return type(primary)(concatenated)
+
+    if isinstance(primary, Mapping):
+        if not isinstance(extra, Mapping):
+            raise TypeError("Extra batch must mirror mapping structure of primary batch")
+        if primary.keys() != extra.keys():
+            missing = set(primary.keys()) ^ set(extra.keys())
+            raise ValueError(f"Extra batch mapping keys must match primary batch keys: {missing}")
+        return type(primary)({k: _concat_batches(primary[k], extra[k], dim=dim) for k in primary.keys()})
+
+    raise TypeError("Unsupported batch type for concatenation; provide matching tensors, sequences, or mappings")
+
+
+def _infer_batch_size(inputs: Any) -> int:
+    """Best-effort batch-size inference for logging/throughput metrics."""
+    if torch.is_tensor(inputs):
+        return inputs.shape[0]
+    if isinstance(inputs, Sequence) and inputs:
+        for item in inputs:
+            if torch.is_tensor(item):
+                return item.shape[0]
+    if isinstance(inputs, Mapping):
+        for value in inputs.values():
+            if torch.is_tensor(value):
+                return value.shape[0]
+    return 1
 
 @dataclass
 class TriggerResult:
@@ -120,24 +164,25 @@ class FastTrainer:
                             "loss_vec": loss_vec, "device": self.device, "step": step_idx
                         })
                         if trig_result is not None and trig_result.extra_inputs is not None:
-                            # Concatenate and recompute outputs & loss_vec
                             extra_x = to_device(trig_result.extra_inputs, self.device, non_blocking=True)
-                            extra_y = to_device(trig_result.extra_targets, self.device, non_blocking=True) if trig_result.extra_targets is not None else None
-                            # Recompute with concatenated batch
-                            if isinstance(inputs, torch.Tensor):
-                                cat_inputs = torch.cat([inputs, extra_x], dim=0)
-                            elif isinstance(inputs, (list, tuple)):
-                                cat_inputs = type(inputs)(torch.cat([inputs[0], extra_x], dim=0))  # simplistic
-                            else:
-                                cat_inputs = extra_x  # user responsibility for exotic structures
-                            outputs = self.model(cat_inputs)
+                            extra_y = (
+                                to_device(trig_result.extra_targets, self.device, non_blocking=True)
+                                if trig_result.extra_targets is not None else None
+                            )
+
+                            inputs = _concat_batches(inputs, extra_x)
                             if extra_y is not None:
-                                targets = torch.cat([targets, extra_y], dim=0)
+                                targets = _concat_batches(targets, extra_y)
+
+                            outputs = self.model(inputs)
                             loss_vec = criterion(outputs, targets)
 
                             if trig_result.weights is not None:
                                 w = trig_result.weights.to(loss_vec.device)
-                                loss = (loss_vec * w).mean()
+                                if w.shape[0] != loss_vec.shape[0]:
+                                    raise ValueError("Trigger weights must match concatenated batch length")
+                                broadcast_dims = (1,) * max(0, loss_vec.dim() - 1)
+                                loss = (loss_vec * w.view(w.shape[0], *broadcast_dims)).mean()
                             else:
                                 loss = loss_vec.mean()
                         else:
@@ -151,6 +196,7 @@ class FastTrainer:
                     else:
                         raise ValueError("No criterion provided and outputs are not a tensor.")
 
+                effective_loss = loss
                 loss = loss / self.grad_accum
 
             # Backward
@@ -179,16 +225,10 @@ class FastTrainer:
                         pass
 
             # Metrics
-            bs = None
-            if isinstance(inputs, torch.Tensor):
-                bs = inputs.shape[0]
-            elif isinstance(inputs, (list, tuple)) and len(inputs) > 0 and isinstance(inputs[0], torch.Tensor):
-                bs = inputs[0].shape[0]
-            else:
-                bs = 1
+            bs = _infer_batch_size(inputs)
             meter.tick(bs)
             total_items += bs
-            total_loss += float(loss.detach().cpu())  # avoid .item() to reduce sync; cast via cpu()
+            total_loss += float(effective_loss.detach().cpu())  # avoid .item() to reduce sync; cast via cpu()
 
             if (step_idx % self.log_interval) == 0:
                 m = meter.summary()
