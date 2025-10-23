@@ -63,8 +63,21 @@ class LossStdTrigger:
         if requested <= 0:
             return None
 
+        budget_limit = self.cfg.budget_frac * max(1, self.total)
+        remaining_budget = budget_limit - self.spent
+        if remaining_budget <= 0:
+            return None
+
+        allowed_whole = int(remaining_budget)
+        if allowed_whole <= 0:
+            return None
+        requested = min(requested, allowed_whole)
+        if requested <= 0:
+            return None
+
         extra_x, extra_y = self.provider(requested, device, ctx)
         self.spent += requested
+        self.total += requested
 
         # weights: original ones at 1.0, injected at alpha
         weights = torch.ones(batch + requested, device=loss_vec.device)

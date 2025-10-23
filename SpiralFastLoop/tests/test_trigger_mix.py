@@ -69,3 +69,25 @@ def test_pulse_fires_even_when_variance_high():
     assert provider.calls["requested"] == [1]
     assert result.weights.shape[0] == 5
     assert result.weights[-1].item() == pytest.approx(cfg.weight_alpha)
+
+
+def test_budget_fraction_limits_total_injections():
+    cfg = LossStdConfig(
+        std_threshold=10.0,
+        inject_ratio=0.6,
+        pulse_every=1000,
+        budget_frac=0.1,
+        max_injected_per_step=16,
+    )
+    provider = _make_provider()
+    trigger = LossStdTrigger(provider=provider, cfg=cfg)
+
+    ctx = {"device": "cpu"}
+    for idx, batch_losses in enumerate((torch.ones(5), torch.ones(5), torch.ones(5)), start=1):
+        ctx["loss_vec"] = batch_losses
+        ctx["step"] = idx
+        trigger(ctx)
+
+    assert trigger.spent == 1
+    assert trigger.spent <= trigger.cfg.budget_frac * trigger.total + 1e-6
+    assert provider.calls["requested"] == [1]
