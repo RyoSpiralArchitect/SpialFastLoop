@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 import json, os, time
 import torch
 from torch import nn
@@ -52,8 +52,8 @@ def main():
     # SpiralFastLoop
     loader1 = recommended_dataloader(ds, batch_size=256, device=device)
     m1 = MLP(); o1 = torch.optim.AdamW(m1.parameters(), lr=3e-4, fused=torch.cuda.is_available())
-    trainer = FastTrainer(m1, o1, grad_accum=2, use_compile=True, channels_last=False, log_interval=0)
-    fast = trainer.train_one_epoch(loader1, crit, epochs=1, stats=False)
+    trainer = FastTrainer(m1, o1, grad_accum=2, compile_mode="reduce-overhead", channels_last=False, log_interval=0)
+    fast = trainer.train_one_epoch(loader1, crit)
 
     out = {"device": str(device), "baseline": base, "spiralfastloop": fast}
     print(json.dumps(out, indent=2))
