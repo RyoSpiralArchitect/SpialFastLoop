@@ -89,5 +89,6 @@ def test_budget_fraction_limits_total_injections():
         trigger(ctx)
 
     assert trigger.spent == 1
+    assert trigger.total == 15
     assert trigger.spent <= trigger.cfg.budget_frac * trigger.total + 1e-6
     assert provider.calls["requested"] == [1]

@@ -35,8 +35,9 @@ class LossStdTrigger:
     ) -> None:
         self.provider = provider
         self.cfg = cfg or LossStdConfig()
-        self.spent = 0  # approximate budget spent (samples)
-        self.total = 0  # approximate total samples seen
+        self.spent = 0  # approximate budget spent (injected samples)
+        # Count of baseline samples the trigger has observed (without injections).
+        self.total = 0
 
     def __call__(self, ctx: Dict[str, Any]) -> Optional[TriggerResult]:
         loss_vec: torch.Tensor = ctx["loss_vec"].detach()
@@ -77,7 +78,6 @@ class LossStdTrigger:
 
         extra_x, extra_y = self.provider(requested, device, ctx)
         self.spent += requested
-        self.total += requested
 
         # weights: original ones at 1.0, injected at alpha
         weights = torch.ones(batch + requested, device=loss_vec.device)
