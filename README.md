@@ -93,7 +93,7 @@ trainer = FastTrainer(model, opt, trigger_hook=trigger)
 ```
 
 ## License
-MIT License (see `LICENSE`).
+A patch 2.0 License (see `LICENSE`).
 
 ---
 
