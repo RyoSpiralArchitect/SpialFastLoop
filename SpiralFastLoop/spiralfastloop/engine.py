@@ -9,9 +9,17 @@ import torch
 import torch.nn as nn
 
 from .utils import (
-    get_best_device, get_amp_policy, autocast_ctx, to_device,
-    ThroughputMeter, maybe_channels_last, safe_compile
+    autocast_ctx,
+    dataloader_from_dataset,
+    get_amp_policy,
+    get_best_device,
+    maybe_channels_last,
+    safe_compile,
+    ThroughputMeter,
+    to_device,
 )
+
+recommended_dataloader = dataloader_from_dataset
 
 
 def _concatenate_batches(base: Any, extra: Any) -> Any:
