@@ -1,0 +1,14 @@
+LICENSE
+NOTICE
+README.md
+pyproject.toml
+spiralfastloop/__init__.py
+spiralfastloop/engine.py
+spiralfastloop/utils.py
+spiralfastloop.egg-info/PKG-INFO
+spiralfastloop.egg-info/SOURCES.txt
+spiralfastloop.egg-info/dependency_links.txt
+spiralfastloop.egg-info/requires.txt
+spiralfastloop.egg-info/top_level.txt
+spiralfastloop/extras/surprisal_sandwich.py
+spiralfastloop/extras/trigger_mix.py

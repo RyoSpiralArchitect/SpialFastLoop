@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spiralfastloop"
+version = "0.1.1"
+description = "Fast, pragmatic training loop template for PyTorch (CUDA/MPS/CPU) with Surprisal Sandwich decoding extras."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Ryō" }]
+dependencies = ["torch>=2.1"]
+keywords = ["pytorch", "training", "cuda", "mps", "acceleration", "llm", "transformers"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence"
+]
+
+[project.optional-dependencies]
+extras = ["transformers>=4.40"]
+
+[project.urls]
+Homepage = "https://github.com/your-user/SpiralFastLoop"
+Repository = "https://github.com/your-user/SpiralFastLoop"

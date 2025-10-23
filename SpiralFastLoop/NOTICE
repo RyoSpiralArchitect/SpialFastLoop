@@ -1,0 +1,5 @@
+This project may interact with third-party machine learning models, datasets, and
+libraries. Those components are governed by their respective licenses. Example:
+- Hugging Face Transformers models (various licenses)
+- PyTorch (BSD-style)
+See their upstream repositories for license terms.
