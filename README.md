@@ -75,7 +75,7 @@ python examples/bench_synth.py
 - `examples/sr_generate_demo.py` — Surprisal Sandwich generation (HF)
 
 ## Trigger hook API
-To enable per-sample control, pass a criterion with `reduction='none'` and a `trigger_hook`:
+To enable per-sample control, pass a criterion whose `.reduction` can be switched to `'none'` and a `trigger_hook`:
 
 ```python
 from spiralfastloop.extras.trigger_mix import LossStdTrigger, LossStdConfig
@@ -91,6 +91,13 @@ def my_provider(k, device, ctx):
 trigger = LossStdTrigger(my_provider, LossStdConfig(std_threshold=0.15, inject_ratio=0.08))
 trainer = FastTrainer(model, opt, trigger_hook=trigger)
 ```
+
+**Trigger contract**
+
+- The trainer temporarily flips `criterion.reduction` to `'none'` while the trigger runs, then restores the original value. Custom losses must allow this attribute swap.
+- `TriggerResult.extra_inputs` / `extra_targets` must mirror the structure of the incoming batch (tensor, tuple/list of tensors, or dict of tensors). Each tensor dimension 0 is concatenated.
+- Optional `TriggerResult.weights` is broadcast against the per-sample loss vector and must share the same batch length. The weights are normalised by their sum, so they cannot all be zero.
+- When no criterion is supplied, `train_one_epoch` now raises an error instead of falling back to a placeholder mean loss. Provide a proper objective (or run your own loop) to avoid silent training mistakes.
 
 ## License
 Apache 2.0 License (see `LICENSE`).
