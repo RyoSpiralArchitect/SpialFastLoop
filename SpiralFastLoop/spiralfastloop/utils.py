@@ -1,11 +1,11 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Ryō
 
-\
 import os
 import time
 from contextlib import nullcontext
-from typing import Any, Iterable, Tuple, Optional
+from collections.abc import Mapping
+from typing import Any, Tuple, Optional
 
 import torch
 from torch.utils.data import DataLoader
@@ -52,10 +52,25 @@ def to_device(obj: Any, device: str, non_blocking: bool = True) -> Any:
     """Recursively move tensors (and nested structures) to device."""
     if torch.is_tensor(obj):
         return obj.to(device, non_blocking=non_blocking)
-    if isinstance(obj, (list, tuple)):
+    if isinstance(obj, list):
         return type(obj)(to_device(x, device, non_blocking) for x in obj)
-    if isinstance(obj, dict):
-        return {k: to_device(v, device, non_blocking) for k, v in obj.items()}
+    if isinstance(obj, tuple):
+        converted = tuple(to_device(x, device, non_blocking) for x in obj)
+        if hasattr(obj, "_fields"):
+            return type(obj)(*converted)
+        return type(obj)(converted)
+    if isinstance(obj, Mapping):
+        converted = {k: to_device(v, device, non_blocking) for k, v in obj.items()}
+        if hasattr(obj, "default_factory"):
+            new_mapping = type(obj)(getattr(obj, "default_factory"))
+            new_mapping.update(converted)
+            return new_mapping
+        try:
+            return type(obj)(converted)
+        except TypeError:
+            new_mapping = type(obj)()
+            new_mapping.update(converted)
+            return new_mapping
     return obj
 
 def dataloader_from_dataset(dataset, batch_size: int, device: str,
