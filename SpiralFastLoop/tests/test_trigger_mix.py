@@ -209,7 +209,7 @@ def test_fractional_budget_accumulates_until_whole_sample():
         ctx["step"] = step
         assert trigger(ctx) is None
         assert provider.calls["requested"] == []
-    assert trigger.budget_credit == pytest.approx(0.6, abs=1e-6)
+    assert trigger._budget_buffer == pytest.approx(0.6, abs=1e-6)
 
     ctx["step"] = 4
     result = trigger(ctx)
@@ -217,11 +217,37 @@ def test_fractional_budget_accumulates_until_whole_sample():
     assert provider.calls["requested"] == [1]
     assert trigger.spent == 1
     assert trigger.total == 8
-    assert trigger.budget_credit == pytest.approx(0.0, abs=1e-6)
+    assert trigger._budget_buffer == pytest.approx(0.0, abs=1e-6)
 
     ctx["step"] = 5
     assert trigger(ctx) is None
     assert provider.calls["requested"] == [1]
+
+
+def test_fractional_carry_only_tracks_excess_credit_after_clipping():
+    cfg = LossStdConfig(
+        std_threshold=10.0,
+        inject_ratio=0.6,
+        pulse_every=1000,
+        budget_frac=0.05,
+        max_injected_per_step=2,
+    )
+    provider = _make_provider()
+    trigger = LossStdTrigger(provider=provider, cfg=cfg)
+
+    ctx = {"device": "cpu", "loss_vec": torch.ones(2)}
+    for step in range(1, 4):
+        ctx["step"] = step
+        assert trigger(ctx) is None
+    assert trigger._budget_buffer == pytest.approx(0.6, abs=1e-6)
+
+    ctx.update({"step": 4, "loss_vec": torch.ones(30)})
+    result = trigger(ctx)
+    assert isinstance(result, TriggerResult)
+    assert provider.calls["requested"] == [2]
+    assert trigger.spent == 2
+    assert trigger.total == 36
+    assert trigger._budget_buffer == pytest.approx(0.4, abs=1e-6)
 
 
 def test_fractional_buffer_does_not_hold_whole_units():
@@ -242,7 +268,7 @@ def test_fractional_buffer_does_not_hold_whole_units():
     assert provider.calls["requested"] == [10]
     assert trigger.spent == 10
     assert trigger.total == 50
-    assert 0.0 <= trigger.budget_credit < 1.0
+    assert 0.0 <= trigger._budget_buffer < 1.0
 
 
 def test_pulse_resets_after_step_decrease():
