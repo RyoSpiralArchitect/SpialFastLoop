@@ -30,7 +30,8 @@ class LossStdTrigger:
 
     The trigger maintains a fractional budget and automatically resets its running
     totals whenever the provided step counter decreases (e.g., at the start of a
-    new epoch).
+    new epoch). Forced pulses fire at most once per unique step value so repeated
+    step callbacks from gradient accumulation do not spam extra requests.
     """
 
     def __init__(
@@ -44,11 +45,13 @@ class LossStdTrigger:
         # Count of baseline samples the trigger has observed (without injections).
         self.total = 0
         self._last_step: Optional[int] = None
+        self._last_pulse_step: Optional[int] = None
 
     def _reset_budget_counters(self) -> None:
         """Reset running totals when a new epoch begins."""
         self.spent = 0
         self.total = 0
+        self._last_pulse_step = None
 
     def __call__(self, ctx: Dict[str, Any]) -> Optional[TriggerResult]:
         loss_vec: torch.Tensor = ctx["loss_vec"].detach()
@@ -58,7 +61,8 @@ class LossStdTrigger:
         device = ctx["device"]
         raw_step = ctx.get("step")
         step = int(raw_step) if raw_step is not None else 0
-        if raw_step is not None:
+        has_step = raw_step is not None
+        if has_step:
             if self._last_step is not None and step < self._last_step:
                 self._reset_budget_counters()
             self._last_step = step
@@ -70,30 +74,43 @@ class LossStdTrigger:
         pulse_due = (
             self.cfg.pulse_every > 0 and step > 0 and step % self.cfg.pulse_every == 0
         )
-        need = coefvar.item() <= self.cfg.std_threshold or pulse_due
+        force_pulse = pulse_due and step != self._last_pulse_step
+        need = coefvar.item() <= self.cfg.std_threshold or force_pulse
 
         budget_ok = self.spent <= self.cfg.budget_frac * max(1, self.total)
         if not (need and budget_ok):
+            if force_pulse and has_step:
+                self._last_pulse_step = step
             return None
 
         requested = min(int(batch * self.cfg.inject_ratio), self.cfg.max_injected_per_step)
         if requested <= 0:
+            if force_pulse and has_step:
+                self._last_pulse_step = step
             return None
 
         budget_limit = self.cfg.budget_frac * max(1, self.total)
         remaining_budget = budget_limit - self.spent
         if remaining_budget <= 0:
+            if force_pulse and has_step:
+                self._last_pulse_step = step
             return None
 
         allowed_whole = int(remaining_budget)
         if allowed_whole <= 0:
+            if force_pulse and has_step:
+                self._last_pulse_step = step
             return None
         requested = min(requested, allowed_whole)
         if requested <= 0:
+            if force_pulse and has_step:
+                self._last_pulse_step = step
             return None
 
         extra_x, extra_y = self.provider(requested, device, ctx)
         self.spent += requested
+        if force_pulse:
+            self._last_pulse_step = step
 
         # weights: original ones at 1.0, injected at alpha
         weights = torch.ones(batch + requested, device=loss_vec.device)

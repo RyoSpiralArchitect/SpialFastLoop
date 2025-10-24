@@ -71,6 +71,48 @@ def test_pulse_fires_even_when_variance_high():
     assert result.weights[-1].item() == pytest.approx(cfg.weight_alpha)
 
 
+def test_forced_pulse_only_attempts_once_when_budget_blocked():
+    cfg = LossStdConfig(
+        std_threshold=0.0,
+        inject_ratio=0.5,
+        pulse_every=2,
+        budget_frac=0.0,
+        max_injected_per_step=10,
+    )
+    provider = _make_provider()
+    trigger = LossStdTrigger(provider=provider, cfg=cfg)
+
+    ctx = {"loss_vec": torch.linspace(0, 1, 6), "device": "cpu", "step": 2}
+    assert trigger(ctx) is None
+
+    ctx["step"] = 2
+    assert trigger(ctx) is None
+    assert provider.calls["requested"] == []
+
+
+def test_pulse_only_triggers_once_per_step():
+    cfg = LossStdConfig(
+        std_threshold=0.0,
+        inject_ratio=0.5,
+        pulse_every=2,
+        budget_frac=1.0,
+        max_injected_per_step=10,
+    )
+    provider = _make_provider()
+    trigger = LossStdTrigger(provider=provider, cfg=cfg)
+
+    ctx = {"loss_vec": torch.linspace(0, 1, 6), "device": "cpu", "step": 2}
+    first = trigger(ctx)
+    assert isinstance(first, TriggerResult)
+    assert provider.calls["requested"] == [3]
+
+    ctx["loss_vec"] = torch.linspace(0, 1, 6)
+    ctx["step"] = 2
+    second = trigger(ctx)
+    assert second is None
+    assert provider.calls["requested"] == [3]
+
+
 def test_budget_fraction_limits_total_injections():
     cfg = LossStdConfig(
         std_threshold=10.0,
@@ -148,3 +190,30 @@ def test_budget_counters_ignore_repeated_steps():
     assert provider.calls["requested"] == [6, 6]
     assert trigger.total == 24
     assert trigger.spent == 12
+
+
+def test_pulse_resets_after_step_decrease():
+    cfg = LossStdConfig(
+        std_threshold=0.0,
+        inject_ratio=0.5,
+        pulse_every=2,
+        budget_frac=1.0,
+        max_injected_per_step=10,
+    )
+    provider = _make_provider()
+    trigger = LossStdTrigger(provider=provider, cfg=cfg)
+
+    ctx = {"loss_vec": torch.linspace(0, 1, 6), "device": "cpu"}
+
+    ctx["step"] = 2
+    first = trigger(ctx)
+    assert isinstance(first, TriggerResult)
+    assert provider.calls["requested"] == [3]
+
+    ctx["step"] = 1
+    assert trigger(ctx) is None
+
+    ctx["step"] = 2
+    third = trigger(ctx)
+    assert isinstance(third, TriggerResult)
+    assert provider.calls["requested"] == [3, 3]
