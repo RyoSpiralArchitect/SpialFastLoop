@@ -4,6 +4,7 @@
 """Trigger utilities for dynamically mixing harder samples into training."""
 
 from dataclasses import dataclass
+from math import modf
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import torch
