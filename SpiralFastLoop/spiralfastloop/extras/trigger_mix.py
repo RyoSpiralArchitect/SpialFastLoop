@@ -4,6 +4,7 @@
 """Trigger utilities for dynamically mixing harder samples into training."""
 
 from dataclasses import dataclass
+from math import floor
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import torch
@@ -105,21 +106,23 @@ class LossStdTrigger:
             return None
 
         allowed_whole = int(available_budget)
+        fractional_credit = max(0.0, available_budget - allowed_whole)
         if allowed_whole <= 0:
-            self._budget_buffer = available_budget
+            self._budget_buffer = fractional_credit
             if force_pulse and has_step:
                 self._last_pulse_step = step
             return None
         requested = min(requested, allowed_whole)
         if requested <= 0:
-            self._budget_buffer = available_budget
+            self._budget_buffer = fractional_credit
             if force_pulse and has_step:
                 self._last_pulse_step = step
             return None
 
         extra_x, extra_y = self.provider(requested, device, ctx)
         self.spent += requested
-        self._budget_buffer = max(0.0, available_budget - requested)
+        leftover = max(0.0, available_budget - requested)
+        self._budget_buffer = max(0.0, leftover - floor(leftover))
         if force_pulse:
             self._last_pulse_step = step
 

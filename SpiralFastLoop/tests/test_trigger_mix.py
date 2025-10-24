@@ -224,6 +224,27 @@ def test_fractional_budget_accumulates_until_whole_sample():
     assert provider.calls["requested"] == [1]
 
 
+def test_fractional_buffer_does_not_hold_whole_units():
+    cfg = LossStdConfig(
+        std_threshold=10.0,
+        inject_ratio=0.2,
+        pulse_every=1000,
+        budget_frac=1.0,
+        max_injected_per_step=128,
+    )
+    provider = _make_provider()
+    trigger = LossStdTrigger(provider=provider, cfg=cfg)
+
+    ctx = {"device": "cpu", "loss_vec": torch.ones(50), "step": 1}
+    result = trigger(ctx)
+
+    assert isinstance(result, TriggerResult)
+    assert provider.calls["requested"] == [10]
+    assert trigger.spent == 10
+    assert trigger.total == 50
+    assert 0.0 <= trigger._budget_buffer < 1.0
+
+
 def test_pulse_resets_after_step_decrease():
     cfg = LossStdConfig(
         std_threshold=0.0,
