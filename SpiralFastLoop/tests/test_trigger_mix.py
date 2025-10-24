@@ -1,3 +1,4 @@
+import math
 import sys
 from pathlib import Path
 
@@ -130,10 +131,10 @@ def test_budget_fraction_limits_total_injections():
         ctx["step"] = idx
         trigger(ctx)
 
-    assert trigger.spent == 1
+    assert trigger.spent == 2
     assert trigger.total == 15
-    assert trigger.spent <= trigger.cfg.budget_frac * trigger.total + 1e-6
-    assert provider.calls["requested"] == [1]
+    assert trigger.spent <= math.ceil(trigger.cfg.budget_frac * trigger.total)
+    assert provider.calls["requested"] == [1, 1]
 
 
 def test_budget_counters_reset_on_epoch_restart():
@@ -190,6 +191,58 @@ def test_budget_counters_ignore_repeated_steps():
     assert provider.calls["requested"] == [6, 6]
     assert trigger.total == 24
     assert trigger.spent == 12
+
+
+def test_fractional_budget_accumulates_until_whole_sample():
+    cfg = LossStdConfig(
+        std_threshold=10.0,
+        inject_ratio=0.6,
+        pulse_every=1000,
+        budget_frac=0.05,
+        max_injected_per_step=10,
+    )
+    provider = _make_provider()
+    trigger = LossStdTrigger(provider=provider, cfg=cfg)
+
+    ctx = {"device": "cpu", "loss_vec": torch.ones(2)}
+    for step in range(1, 4):
+        ctx["step"] = step
+        assert trigger(ctx) is None
+        assert provider.calls["requested"] == []
+    assert trigger._budget_buffer == pytest.approx(0.6, abs=1e-6)
+
+    ctx["step"] = 4
+    result = trigger(ctx)
+    assert isinstance(result, TriggerResult)
+    assert provider.calls["requested"] == [1]
+    assert trigger.spent == 1
+    assert trigger.total == 8
+    assert trigger._budget_buffer == pytest.approx(0.0, abs=1e-6)
+
+    ctx["step"] = 5
+    assert trigger(ctx) is None
+    assert provider.calls["requested"] == [1]
+
+
+def test_fractional_buffer_does_not_hold_whole_units():
+    cfg = LossStdConfig(
+        std_threshold=10.0,
+        inject_ratio=0.2,
+        pulse_every=1000,
+        budget_frac=1.0,
+        max_injected_per_step=128,
+    )
+    provider = _make_provider()
+    trigger = LossStdTrigger(provider=provider, cfg=cfg)
+
+    ctx = {"device": "cpu", "loss_vec": torch.ones(50), "step": 1}
+    result = trigger(ctx)
+
+    assert isinstance(result, TriggerResult)
+    assert provider.calls["requested"] == [10]
+    assert trigger.spent == 10
+    assert trigger.total == 50
+    assert 0.0 <= trigger._budget_buffer < 1.0
 
 
 def test_pulse_resets_after_step_decrease():
