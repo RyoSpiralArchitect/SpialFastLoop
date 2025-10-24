@@ -30,8 +30,10 @@ class LossStdTrigger:
 
     The trigger maintains a fractional budget and automatically resets its running
     totals whenever the provided step counter decreases (e.g., at the start of a
-    new epoch). Forced pulses fire at most once per unique step value so repeated
-    step callbacks from gradient accumulation do not spam extra requests.
+    new epoch). Fractional budget allowances are accumulated across calls so that
+    tiny per-step credits eventually release a whole extra sample. Forced pulses
+    fire at most once per unique step value so repeated step callbacks from
+    gradient accumulation do not spam extra requests.
     """
 
     def __init__(
@@ -46,12 +48,22 @@ class LossStdTrigger:
         self.total = 0
         self._last_step: Optional[int] = None
         self._last_pulse_step: Optional[int] = None
+        # Accumulate fractional budget so tiny allowances eventually release
+        # whole extra samples instead of being lost to flooring.
+        self._budget_buffer: float = 0.0
+
+    @staticmethod
+    def _drop_rounding_noise(value: float) -> float:
+        """Elide microscopic float residue that should count as zero."""
+
+        return 0.0 if abs(value) < 1e-12 else value
 
     def _reset_budget_counters(self) -> None:
         """Reset running totals when a new epoch begins."""
         self.spent = 0
         self.total = 0
         self._last_pulse_step = None
+        self._budget_buffer = 0.0
 
     def __call__(self, ctx: Dict[str, Any]) -> Optional[TriggerResult]:
         loss_vec: torch.Tensor = ctx["loss_vec"].detach()
@@ -91,24 +103,37 @@ class LossStdTrigger:
 
         budget_limit = self.cfg.budget_frac * max(1, self.total)
         remaining_budget = budget_limit - self.spent
-        if remaining_budget <= 0:
+        available_budget = max(0.0, remaining_budget + self._budget_buffer)
+        if available_budget <= 0.0:
+            self._budget_buffer = 0.0
             if force_pulse and has_step:
                 self._last_pulse_step = step
             return None
 
-        allowed_whole = int(remaining_budget)
+        allowed_whole = int(available_budget)
+        fractional_credit = self._drop_rounding_noise(
+            max(0.0, available_budget - allowed_whole)
+        )
         if allowed_whole <= 0:
+            self._budget_buffer = fractional_credit
             if force_pulse and has_step:
                 self._last_pulse_step = step
             return None
         requested = min(requested, allowed_whole)
         if requested <= 0:
+            self._budget_buffer = fractional_credit
             if force_pulse and has_step:
                 self._last_pulse_step = step
             return None
 
         extra_x, extra_y = self.provider(requested, device, ctx)
         self.spent += requested
+        leftover_available = max(0.0, available_budget - requested)
+        remaining_budget_after = max(0.0, remaining_budget - requested)
+        carryover_credit = self._drop_rounding_noise(
+            max(0.0, leftover_available - remaining_budget_after)
+        )
+        self._budget_buffer = carryover_credit
         if force_pulse:
             self._last_pulse_step = step
 
