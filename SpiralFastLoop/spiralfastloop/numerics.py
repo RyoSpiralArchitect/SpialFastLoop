@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
 __all__ = [
@@ -80,7 +80,7 @@ def _stochastic_round(value: float, unit: float, rng: random.Random) -> float:
     return lower * unit
 
 
-@dataclass
+@dataclass(slots=True)
 class HybridCompensatedAccumulator:
     """Running sum with compensation and stochastic rounding.
 
@@ -100,18 +100,28 @@ class HybridCompensatedAccumulator:
     the incoming value is large compared with the total we favour Neumaier’s
     formulation because it is more robust to cancellation.  Otherwise the
     classic Kahan step is used which carries slightly less overhead when the
-    numbers are of similar scale.
+    numbers are of similar scale.  Instances can be snapshotted and restored
+    to support long-lived processes or distributed reducers.
     """
 
     unit: float = 0.01
     rng: Optional[random.Random] = None
+    initial_total: float = 0.0
+    initial_compensation: float = 0.0
+    _rng: random.Random = field(init=False, repr=False)
+    _total: float = field(init=False, repr=False)
+    _compensation: float = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.unit) or self.unit <= 0.0:
             raise ValueError("unit must be a positive, finite float")
+        if not math.isfinite(self.initial_total):
+            raise ValueError("initial_total must be finite")
+        if not math.isfinite(self.initial_compensation):
+            raise ValueError("initial_compensation must be finite")
         self._rng = self.rng or random.Random()
-        self._total = 0.0
-        self._compensation = 0.0
+        self._total = float(self.initial_total)
+        self._compensation = float(self.initial_compensation)
 
     # ------------------------------------------------------------------
     # Mutation helpers
@@ -124,9 +134,13 @@ class HybridCompensatedAccumulator:
             raise ValueError("value must be finite")
 
         if abs(self._total) > abs(value):
-            self._total, self._compensation = _kahan_step(self._total, self._compensation, value)
+            self._total, self._compensation = _kahan_step(
+                self._total, self._compensation, value
+            )
         else:
-            self._total, self._compensation = _neumaier_step(self._total, self._compensation, value)
+            self._total, self._compensation = _neumaier_step(
+                self._total, self._compensation, value
+            )
 
     def extend(self, values: Iterable[float]) -> None:
         """Add multiple values into the accumulator."""
@@ -163,8 +177,9 @@ class HybridCompensatedAccumulator:
         preserved precision.
         """
 
-        rounded = _stochastic_round(self.total, self.unit, self._rng)
-        residual = self.total - rounded
+        total = self.total
+        rounded = _stochastic_round(total, self.unit, self._rng)
+        residual = total - rounded
         self._total = residual
         self._compensation = 0.0
         return rounded
@@ -174,3 +189,19 @@ class HybridCompensatedAccumulator:
 
         self._total = 0.0
         self._compensation = 0.0
+
+    # ------------------------------------------------------------------
+    # State helpers
+    # ------------------------------------------------------------------
+    def snapshot(self) -> tuple[float, float]:
+        """Return the raw total/compensation pair for persistence."""
+
+        return self._total, self._compensation
+
+    def restore(self, total: float, compensation: float) -> None:
+        """Restore a previously captured state."""
+
+        if not math.isfinite(total) or not math.isfinite(compensation):
+            raise ValueError("snapshot values must be finite")
+        self._total = float(total)
+        self._compensation = float(compensation)

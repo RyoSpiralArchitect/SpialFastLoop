@@ -1,11 +1,14 @@
 import math
 import random
+
 import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+if str(PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_ROOT))
 
 from spiralfastloop.numerics import HybridCompensatedAccumulator
 
@@ -38,6 +41,22 @@ def test_reset_clears_state() -> None:
     assert acc.compensation == 0.0
 
 
+def test_snapshot_and_restore_round_trip() -> None:
+    rng = random.Random(99)
+    acc = HybridCompensatedAccumulator(unit=0.1, rng=rng)
+    acc.extend([0.05, 0.07, -0.02])
+    snapshot = acc.snapshot()
+
+    restored = HybridCompensatedAccumulator(
+        unit=0.1, rng=random.Random(99), initial_total=snapshot[0], initial_compensation=snapshot[1]
+    )
+    assert math.isclose(restored.total, acc.total, rel_tol=0.0, abs_tol=1e-15)
+
+    restored.add(0.04)
+    acc.add(0.04)
+    assert math.isclose(restored.total, acc.total, rel_tol=0.0, abs_tol=1e-15)
+
+
 def test_stochastic_rounding_is_unbiased_over_many_trials() -> None:
     trials = 10_000
     target = 1.237  # requires fractional rounding
@@ -58,3 +77,16 @@ def test_negative_totals_round_correctly() -> None:
     rounded = acc.drain()
     assert rounded in {-0.2, -0.15}
     assert math.isclose(rounded + acc.residual, -0.20, rel_tol=0.0, abs_tol=1e-12)
+
+
+def test_restore_rejects_non_finite() -> None:
+    acc = HybridCompensatedAccumulator()
+    with pytest.raises(ValueError):
+        acc.restore(float("nan"), 0.0)
+
+
+def test_initial_state_validation() -> None:
+    with pytest.raises(ValueError):
+        HybridCompensatedAccumulator(initial_total=float("inf"))
+    with pytest.raises(ValueError):
+        HybridCompensatedAccumulator(initial_compensation=float("nan"))
