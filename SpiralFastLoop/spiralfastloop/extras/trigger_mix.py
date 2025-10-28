@@ -53,6 +53,12 @@ class LossStdTrigger:
         # whole extra samples instead of being lost to flooring.
         self._budget_buffer: float = 0.0
 
+    @staticmethod
+    def _drop_rounding_noise(value: float) -> float:
+        """Elide microscopic float residue that should count as zero."""
+
+        return 0.0 if abs(value) < 1e-12 else value
+
     def _reset_budget_counters(self) -> None:
         """Reset running totals when a new epoch begins."""
         self.spent = 0
@@ -106,9 +112,9 @@ class LossStdTrigger:
             return None
 
         allowed_whole = int(available_budget)
-        fractional_credit = max(0.0, available_budget - allowed_whole)
-        if fractional_credit < 1e-12:
-            fractional_credit = 0.0
+        fractional_credit = self._drop_rounding_noise(
+            max(0.0, available_budget - allowed_whole)
+        )
         if allowed_whole <= 0:
             self._budget_buffer = fractional_credit
             if force_pulse and has_step:
@@ -124,12 +130,10 @@ class LossStdTrigger:
         extra_x, extra_y = self.provider(requested, device, ctx)
         self.spent += requested
         leftover_available = max(0.0, available_budget - requested)
-        remaining_budget_after = max(
-            0.0, self.cfg.budget_frac * max(1, self.total) - self.spent
+        remaining_budget_after = max(0.0, remaining_budget - requested)
+        carryover_credit = self._drop_rounding_noise(
+            max(0.0, leftover_available - remaining_budget_after)
         )
-        carryover_credit = max(0.0, leftover_available - remaining_budget_after)
-        if carryover_credit < 1e-12:
-            carryover_credit = 0.0
         self._budget_buffer = carryover_credit
         if force_pulse:
             self._last_pulse_step = step
