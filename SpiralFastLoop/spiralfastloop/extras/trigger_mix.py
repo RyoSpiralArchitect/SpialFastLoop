@@ -24,6 +24,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 import torch
 
 from ..engine import TriggerResult
+from ..metrics import GLOBAL_NORMALIZATION_METRICS, NormalizationMetricsCollector
 
 # Exposed tolerances so downstream callers (or tests) can tune them if their
 # loss scales differ drastically from the default cross-entropy-ish regime.
@@ -65,6 +66,7 @@ class LossStdTrigger:
         self,
         provider: Callable[[int, str, Dict[str, Any]], Tuple[Any, Any]],
         cfg: Optional[LossStdConfig] = None,
+        normalization_metrics: Optional[NormalizationMetricsCollector] = None,
     ) -> None:
         self.provider = provider
         self.cfg = cfg or LossStdConfig()
@@ -76,9 +78,9 @@ class LossStdTrigger:
         # Accumulate fractional budget so tiny allowances eventually release
         # whole extra samples instead of being lost to flooring.
         self._budget_buffer: float = 0.0
+        self._norm_metrics = normalization_metrics or GLOBAL_NORMALIZATION_METRICS
 
-    @staticmethod
-    def _drop_rounding_noise(value: float) -> float:
+    def _drop_rounding_noise(self, value: float, *, context: str = "budget_buffer") -> float:
         """Elide microscopic float residue that should count as zero.
 
         The fractional budget buffer is dimensionless (counts of samples) so
@@ -87,7 +89,10 @@ class LossStdTrigger:
         downstream users can retune it for different numerical regimes.
         """
 
-        return 0.0 if abs(value) < FRACTION_NORMALIZATION_EPS else value
+        normalized = 0.0 if abs(value) < FRACTION_NORMALIZATION_EPS else value
+        if self._norm_metrics is not None:
+            self._norm_metrics.record(value, normalized, context=context)
+        return normalized
 
     def _reset_budget_counters(self) -> None:
         """Reset running totals when a new epoch begins."""
@@ -145,7 +150,7 @@ class LossStdTrigger:
 
         allowed_whole = int(available_budget)
         fractional_credit = self._drop_rounding_noise(
-            max(0.0, available_budget - allowed_whole)
+            max(0.0, available_budget - allowed_whole), context="fractional_credit"
         )
         if allowed_whole <= 0:
             self._budget_buffer = fractional_credit
@@ -164,7 +169,7 @@ class LossStdTrigger:
         leftover_available = max(0.0, available_budget - requested)
         remaining_budget_after = max(0.0, remaining_budget - requested)
         carryover_credit = self._drop_rounding_noise(
-            max(0.0, leftover_available - remaining_budget_after)
+            max(0.0, leftover_available - remaining_budget_after), context="carryover_credit"
         )
         self._budget_buffer = carryover_credit
         if force_pulse:

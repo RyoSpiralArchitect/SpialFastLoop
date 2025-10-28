@@ -4,4 +4,13 @@
 __version__ = "0.1.1"
 from .engine import FastTrainer, recommended_dataloader
 from . import utils
-__all__ = ["FastTrainer", "recommended_dataloader", "utils", "__version__"]
+from .metrics import GLOBAL_NORMALIZATION_METRICS, NormalizationMetricsCollector
+
+__all__ = [
+    "FastTrainer",
+    "GLOBAL_NORMALIZATION_METRICS",
+    "NormalizationMetricsCollector",
+    "recommended_dataloader",
+    "utils",
+    "__version__",
+]
