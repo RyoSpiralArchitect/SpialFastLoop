@@ -21,6 +21,7 @@ from spiralfastloop.extras.trigger_mix import (
     LossStdConfig,
     LossStdTrigger,
 )
+from spiralfastloop.metrics import NormalizationMetricsCollector
 
 _FIXTURES_DIR = Path(__file__).resolve().parent
 if str(_FIXTURES_DIR) not in sys.path:
