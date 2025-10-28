@@ -1,7 +1,21 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 Ryō
 
-"""Trigger utilities for dynamically mixing harder samples into training."""
+"""Trigger utilities for dynamically mixing harder samples into training.
+
+The helpers in this module work with per-sample losses whose magnitudes are
+typically ``O(1)`` but may accumulate fractional budget credits over many calls.
+Two tiny epsilons are exposed to make the behaviour easy to reason about and
+retune:
+
+``FRACTION_NORMALIZATION_EPS``
+    Drops rounding residue when tracking fractional budgets so we do not leak
+    microscopic negative numbers back into subsequent calls.
+
+``COEFVAR_STABILIZER``
+    Prevents division-by-zero when the mean per-sample loss is extremely close
+    to zero during coefficient-of-variation checks.
+"""
 
 from dataclasses import dataclass
 from math import modf
@@ -11,7 +25,17 @@ import torch
 
 from ..engine import TriggerResult
 
-__all__ = ["LossStdConfig", "LossStdTrigger"]
+# Exposed tolerances so downstream callers (or tests) can tune them if their
+# loss scales differ drastically from the default cross-entropy-ish regime.
+FRACTION_NORMALIZATION_EPS = 1e-12
+COEFVAR_STABILIZER = 1e-8
+
+__all__ = [
+    "LossStdConfig",
+    "LossStdTrigger",
+    "FRACTION_NORMALIZATION_EPS",
+    "COEFVAR_STABILIZER",
+]
 
 
 @dataclass
@@ -55,9 +79,15 @@ class LossStdTrigger:
 
     @staticmethod
     def _drop_rounding_noise(value: float) -> float:
-        """Elide microscopic float residue that should count as zero."""
+        """Elide microscopic float residue that should count as zero.
 
-        return 0.0 if abs(value) < 1e-12 else value
+        The fractional budget buffer is dimensionless (counts of samples) so
+        residue below :data:`FRACTION_NORMALIZATION_EPS` is too small to be
+        meaningful.  The epsilon is intentionally module-level so tests and
+        downstream users can retune it for different numerical regimes.
+        """
+
+        return 0.0 if abs(value) < FRACTION_NORMALIZATION_EPS else value
 
     def _reset_budget_counters(self) -> None:
         """Reset running totals when a new epoch begins."""
@@ -83,7 +113,9 @@ class LossStdTrigger:
         batch = loss_vec.numel()
         self.total += batch
 
-        coefvar = loss_vec.std(unbiased=False) / (loss_vec.mean().abs() + 1e-8)
+        coefvar = loss_vec.std(unbiased=False) / (
+            loss_vec.mean().abs() + COEFVAR_STABILIZER
+        )
         pulse_due = (
             self.cfg.pulse_every > 0 and step > 0 and step % self.cfg.pulse_every == 0
         )

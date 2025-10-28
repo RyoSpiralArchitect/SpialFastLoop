@@ -8,7 +8,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop.engine import TriggerResult
-from spiralfastloop.extras.trigger_mix import LossStdConfig, LossStdTrigger
+from spiralfastloop.extras.trigger_mix import (
+    COEFVAR_STABILIZER,
+    FRACTION_NORMALIZATION_EPS,
+    LossStdConfig,
+    LossStdTrigger,
+)
 
 
 def _make_provider(outputs=None):
@@ -25,6 +30,50 @@ def _make_provider(outputs=None):
 
     provider.calls = calls
     return provider
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (0.0, 0.0),
+        (FRACTION_NORMALIZATION_EPS * 0.5, 0.0),
+        (-FRACTION_NORMALIZATION_EPS * 0.5, 0.0),
+        (FRACTION_NORMALIZATION_EPS, FRACTION_NORMALIZATION_EPS),
+        (-FRACTION_NORMALIZATION_EPS, -FRACTION_NORMALIZATION_EPS),
+        (FRACTION_NORMALIZATION_EPS * 8, FRACTION_NORMALIZATION_EPS * 8),
+        (-FRACTION_NORMALIZATION_EPS * 8, -FRACTION_NORMALIZATION_EPS * 8),
+        (1e6, 1e6),
+        (-1e6, -1e6),
+    ],
+)
+def test_drop_rounding_noise_handles_signed_residue(value, expected):
+    trigger = LossStdTrigger(provider=_make_provider())
+    result = trigger._drop_rounding_noise(value)
+    if expected == 0.0:
+        assert result == 0.0
+    else:
+        assert result == pytest.approx(expected)
+
+
+def test_drop_rounding_noise_matches_previous_logic():
+    trigger = LossStdTrigger(provider=_make_provider())
+
+    def legacy_drop(val):
+        return 0.0 if abs(val) < 1e-12 else val
+
+    samples = [
+        -1e-14,
+        -FRACTION_NORMALIZATION_EPS,
+        -FRACTION_NORMALIZATION_EPS * 2.3,
+        -1.0,
+        0.0,
+        FRACTION_NORMALIZATION_EPS * 0.25,
+        FRACTION_NORMALIZATION_EPS,
+        FRACTION_NORMALIZATION_EPS * 3.1,
+        42.0,
+    ]
+    for sample in samples:
+        assert trigger._drop_rounding_noise(sample) == legacy_drop(sample)
 
 
 def test_trigger_skips_when_variability_high():
@@ -296,3 +345,27 @@ def test_pulse_resets_after_step_decrease():
     third = trigger(ctx)
     assert isinstance(third, TriggerResult)
     assert provider.calls["requested"] == [3, 3]
+
+
+def test_near_zero_mean_losses_still_trigger_injection():
+    provider = _make_provider()
+    cfg = LossStdConfig(
+        std_threshold=0.2,
+        inject_ratio=0.5,
+        weight_alpha=1.7,
+        pulse_every=1000,
+        budget_frac=1.0,
+        max_injected_per_step=4,
+    )
+    trigger = LossStdTrigger(provider=provider, cfg=cfg)
+
+    tiny = torch.tensor([1e-10, -1e-10], dtype=torch.float64)
+    ctx = {"loss_vec": tiny, "device": "cpu", "step": 1}
+
+    expected_coefvar = tiny.std(unbiased=False) / (tiny.mean().abs() + COEFVAR_STABILIZER)
+    assert expected_coefvar.item() <= cfg.std_threshold
+
+    result = trigger(ctx)
+    assert isinstance(result, TriggerResult)
+    assert provider.calls["requested"] == [1]
+    assert result.weights.shape[0] == 3
