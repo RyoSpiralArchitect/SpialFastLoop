@@ -5,7 +5,10 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import torch
-from hypothesis import HealthCheck, given, settings, strategies as st
+import pytest
+
+hypothesis = pytest.importorskip("hypothesis")
+from hypothesis import HealthCheck, given, settings, strategies as st  # type: ignore
 
 from spiralfastloop.engine import (
     _concatenate_batches,
