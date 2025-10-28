@@ -94,6 +94,20 @@ trainer = FastTrainer(model, opt, trigger_hook=trigger)
 
 > **Batch structure requirements:** The tensors (or nested structures of tensors) returned by the trigger must mirror the original batch exactly (matching keys for dicts and positional elements for tuples/lists). SpiralFastLoop concatenates the original and injected batches element-wise before recomputing the forward pass. If you provide optional sample weights, supply a 1D tensor that matches the concatenated batch length and sums to a positive value.
 
+### Trigger tolerances
+
+`spiralfastloop.extras.trigger_mix` exposes two module-level tolerances that keep
+its floating-point bookkeeping predictable:
+
+- `FRACTION_NORMALIZATION_EPS = 1e-12` drops rounding residue when fractional
+  sample budget credits are accumulated across steps. The value is unit-less and
+  roughly corresponds to "less than a trillionth of a sample".
+- `COEFVAR_STABILIZER = 1e-8` ensures the coefficient-of-variation check stays
+  finite even when the mean per-sample loss is numerically close to zero. This
+  is effectively "0.00000001 loss" and is safe for typical cross-entropy scales.
+
+Override them if you operate with vastly different loss magnitudes.
+
 ## License
 Apache 2.0 License (see `LICENSE`).
 
