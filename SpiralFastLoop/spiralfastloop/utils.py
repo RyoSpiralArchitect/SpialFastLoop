@@ -3,12 +3,13 @@
 
 import os
 import time
-from contextlib import nullcontext
 from collections.abc import Mapping
-from typing import Any, Tuple, Optional
+from contextlib import nullcontext
+from typing import Any, Optional, Tuple
 
 import torch
 from torch.utils.data import DataLoader
+
 
 def get_best_device() -> str:
     """Pick the best available device among CUDA, MPS, CPU."""
@@ -17,6 +18,7 @@ def get_best_device() -> str:
     if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
         return "mps"
     return "cpu"
+
 
 def get_amp_policy(device: str, use_amp: Optional[bool] = "auto") -> Tuple[bool, torch.dtype, bool]:
     """
@@ -43,10 +45,12 @@ def get_amp_policy(device: str, use_amp: Optional[bool] = "auto") -> Tuple[bool,
     else:
         return False, torch.float32, False
 
+
 def autocast_ctx(device: str, enabled: bool, amp_dtype: torch.dtype):
     if not enabled:
         return nullcontext()
     return torch.autocast(device_type=device, dtype=amp_dtype)
+
 
 def to_device(obj: Any, device: str, non_blocking: bool = True) -> Any:
     """Recursively move tensors (and nested structures) to device."""
@@ -73,12 +77,17 @@ def to_device(obj: Any, device: str, non_blocking: bool = True) -> Any:
             return new_mapping
     return obj
 
-def dataloader_from_dataset(dataset, batch_size: int, device: str,
-                            num_workers: Optional[int] = None,
-                            prefetch_factor: int = 2,
-                            persistent: bool = True,
-                            pin_memory: Optional[bool] = None,
-                            shuffle: bool = True) -> DataLoader:
+
+def dataloader_from_dataset(
+    dataset,
+    batch_size: int,
+    device: str,
+    num_workers: Optional[int] = None,
+    prefetch_factor: int = 2,
+    persistent: bool = True,
+    pin_memory: Optional[bool] = None,
+    shuffle: bool = True,
+) -> DataLoader:
     """Create a DataLoader with sensible performance defaults."""
     if num_workers is None:
         try:
@@ -86,15 +95,21 @@ def dataloader_from_dataset(dataset, batch_size: int, device: str,
         except Exception:
             num_workers = 2
     if pin_memory is None:
-        pin_memory = (device == "cuda")
+        pin_memory = device == "cuda"
     return DataLoader(
-        dataset, batch_size=batch_size, shuffle=shuffle,
-        num_workers=num_workers, prefetch_factor=prefetch_factor,
-        persistent_workers=persistent, pin_memory=pin_memory
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
+        persistent_workers=persistent,
+        pin_memory=pin_memory,
     )
+
 
 class ThroughputMeter:
     """Measure batch latencies and throughput."""
+
     def __init__(self):
         self.batch_times = []
         self.last = time.perf_counter()
@@ -111,7 +126,7 @@ class ThroughputMeter:
         if not xs:
             return 0.0
         xs_sorted = sorted(xs)
-        k = max(0, min(len(xs_sorted)-1, int(round((p/100.0)*(len(xs_sorted)-1)))))
+        k = max(0, min(len(xs_sorted) - 1, int(round((p / 100.0) * (len(xs_sorted) - 1)))))
         return xs_sorted[k]
 
     def summary(self):
@@ -121,6 +136,7 @@ class ThroughputMeter:
         thr = (self.samples / total) if total > 0 else 0.0
         return {"p50_s": p50, "p95_s": p95, "samples_per_sec": thr}
 
+
 def maybe_channels_last(model, channels_last: bool = False):
     if not channels_last:
         return model
@@ -128,6 +144,7 @@ def maybe_channels_last(model, channels_last: bool = False):
         return model.to(memory_format=torch.channels_last)
     except Exception:
         return model
+
 
 def safe_compile(model, mode: str = "reduce-overhead"):
     """Compile model if torch.compile exists and succeeds."""

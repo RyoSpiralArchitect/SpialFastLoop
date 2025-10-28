@@ -3,19 +3,19 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Optional, Callable, Dict, Any
+from typing import Any, Callable, Dict, Optional
 
 import torch
 import torch.nn as nn
 
 from .utils import (
+    ThroughputMeter,
     autocast_ctx,
     dataloader_from_dataset,
     get_amp_policy,
     get_best_device,
     maybe_channels_last,
     safe_compile,
-    ThroughputMeter,
     to_device,
 )
 
@@ -49,12 +49,16 @@ def _concatenate_batches(base: Any, extra: Any) -> Any:
             return new_mapping
     if isinstance(base, list):
         if not isinstance(extra, (list, tuple)) or len(base) != len(extra):
-            raise TypeError("Trigger extra batch must match the list structure of the original batch.")
+            raise TypeError(
+                "Trigger extra batch must match the list structure of the original batch."
+            )
         concatenated = [_concatenate_batches(b, e) for b, e in zip(base, extra)]
         return type(base)(concatenated)
     if isinstance(base, tuple):
         if not isinstance(extra, (list, tuple)) or len(base) != len(extra):
-            raise TypeError("Trigger extra batch must match the tuple structure of the original batch.")
+            raise TypeError(
+                "Trigger extra batch must match the tuple structure of the original batch."
+            )
         concatenated = [_concatenate_batches(b, e) for b, e in zip(base, extra)]
         if hasattr(base, "_fields"):
             return type(base)(*concatenated)
@@ -80,7 +84,9 @@ def _infer_batch_size(batch: Any) -> int:
             raise ValueError("Unable to infer batch size from mapping inputs provided by trigger.")
         unique = set(candidate_values)
         if len(unique) != 1:
-            raise ValueError("Inconsistent batch sizes detected in mapping inputs provided by trigger.")
+            raise ValueError(
+                "Inconsistent batch sizes detected in mapping inputs provided by trigger."
+            )
         return candidate_values[0]
     if isinstance(batch, (list, tuple)):
         candidate_values = []
@@ -97,7 +103,9 @@ def _infer_batch_size(batch: Any) -> int:
             raise ValueError("Unable to infer batch size from sequence inputs provided by trigger.")
         unique = set(candidate_values)
         if len(unique) != 1:
-            raise ValueError("Inconsistent batch sizes detected in sequence inputs provided by trigger.")
+            raise ValueError(
+                "Inconsistent batch sizes detected in sequence inputs provided by trigger."
+            )
         return candidate_values[0]
     if batch is None:
         raise ValueError("Cannot infer batch size from None input.")
@@ -113,11 +121,13 @@ def _ensure_loss_vector(loss_tensor: torch.Tensor) -> torch.Tensor:
         raise ValueError("Loss tensor must have a non-zero batch dimension.")
     return loss_tensor.reshape(loss_tensor.shape[0], -1).mean(dim=1)
 
+
 @dataclass
 class TriggerResult:
     extra_inputs: Any = None
     extra_targets: Any = None
     weights: Optional[torch.Tensor] = None  # shape [B_total] or None
+
 
 class FastTrainer:
     """
@@ -130,16 +140,22 @@ class FastTrainer:
       - Sync reduction (.item() minimized, zero_grad(set_to_none=True))
       - Optional Trigger hook for dynamic hard-sample injection (loss_std-driven)
     """
-    def __init__(self, model: nn.Module, optimizer: torch.optim.Optimizer,
-                 scheduler: Optional[Any] = None, *,
-                 device: Optional[str] = None,
-                 use_amp: Optional[bool] = "auto",
-                 compile_mode: str = "reduce-overhead",
-                 grad_accum: int = 1,
-                 channels_last: bool = False,
-                 clip_grad_norm: Optional[float] = None,
-                 log_interval: int = 50,
-                 trigger_hook: Optional[Callable[[Dict[str, Any]], Optional[TriggerResult]]] = None):
+
+    def __init__(
+        self,
+        model: nn.Module,
+        optimizer: torch.optim.Optimizer,
+        scheduler: Optional[Any] = None,
+        *,
+        device: Optional[str] = None,
+        use_amp: Optional[bool] = "auto",
+        compile_mode: str = "reduce-overhead",
+        grad_accum: int = 1,
+        channels_last: bool = False,
+        clip_grad_norm: Optional[float] = None,
+        log_interval: int = 50,
+        trigger_hook: Optional[Callable[[Dict[str, Any]], Optional[TriggerResult]]] = None,
+    ):
         self.device = device or get_best_device()
         self.model = model.to(self.device)
         self.model = maybe_channels_last(self.model, channels_last=channels_last)
@@ -210,7 +226,8 @@ class FastTrainer:
             elif isinstance(batch, dict) and "inputs" in batch and "targets" in batch:
                 inputs, targets = batch["inputs"], batch["targets"]
             else:
-                # Fallback: treat entire batch as inputs, no targets (self-supervised / user handles loss)
+                # Fallback: treat the entire batch as inputs when targets are missing.
+                # This covers self-supervised workloads or custom loss handling.
                 inputs, targets = batch, None
 
             batch_size = None
@@ -222,7 +239,10 @@ class FastTrainer:
                 if targets is not None and criterion is not None:
                     if supports_per_sample and self.trigger_hook is not None:
                         reduction_to_restore = None
-                        if hasattr(criterion, "reduction") and getattr(criterion, "reduction") != "none":
+                        if (
+                            hasattr(criterion, "reduction")
+                            and getattr(criterion, "reduction") != "none"
+                        ):
                             reduction_to_restore = getattr(criterion, "reduction")
                             criterion.reduction = "none"
                         try:
@@ -233,23 +253,42 @@ class FastTrainer:
                                 criterion.reduction = reduction_to_restore
                         batch_size = loss_vec.shape[0]
                         # Trigger may inject extra samples (e.g., hard examples)
-                        trig_result = self.trigger_hook({
-                            "inputs": inputs, "targets": targets, "outputs": outputs,
-                            "loss_vec": loss_vec, "device": self.device, "step": step_idx
-                        })
+                        trig_result = self.trigger_hook(
+                            {
+                                "inputs": inputs,
+                                "targets": targets,
+                                "outputs": outputs,
+                                "loss_vec": loss_vec,
+                                "device": self.device,
+                                "step": step_idx,
+                            }
+                        )
                         weights = None
                         if trig_result is not None:
                             if trig_result.extra_inputs is not None:
                                 # Concatenate and recompute outputs & loss_vec
-                                extra_x = to_device(trig_result.extra_inputs, self.device, non_blocking=True)
-                                extra_y = to_device(trig_result.extra_targets, self.device, non_blocking=True) if trig_result.extra_targets is not None else None
+                                extra_x = to_device(
+                                    trig_result.extra_inputs, self.device, non_blocking=True
+                                )
+                                extra_y = (
+                                    to_device(
+                                        trig_result.extra_targets, self.device, non_blocking=True
+                                    )
+                                    if trig_result.extra_targets is not None
+                                    else None
+                                )
                                 inputs = _concatenate_batches(inputs, extra_x)
                                 if extra_y is None:
-                                    raise ValueError("Trigger provided extra inputs without matching targets.")
+                                    raise ValueError(
+                                        "Trigger provided extra inputs without matching targets."
+                                    )
                                 targets = _concatenate_batches(targets, extra_y)
                                 outputs = self.model(inputs)
                                 reduction_to_restore = None
-                                if hasattr(criterion, "reduction") and getattr(criterion, "reduction") != "none":
+                                if (
+                                    hasattr(criterion, "reduction")
+                                    and getattr(criterion, "reduction") != "none"
+                                ):
                                     reduction_to_restore = getattr(criterion, "reduction")
                                     criterion.reduction = "none"
                                 try:
@@ -263,7 +302,10 @@ class FastTrainer:
                         if weights is not None:
                             w = weights.to(loss_vec.device, dtype=loss_vec.dtype)
                             if w.ndim != 1 or w.shape[0] != loss_vec.shape[0]:
-                                raise ValueError("Trigger weights must be a 1D tensor that matches the concatenated batch size.")
+                                raise ValueError(
+                                    "Trigger weights must be a 1D tensor "
+                                    "that matches the concatenated batch size."
+                                )
                             weight_sum = w.sum()
                             weight_sum_detached = weight_sum.detach()
                             if not torch.isfinite(weight_sum_detached):
@@ -271,24 +313,34 @@ class FastTrainer:
                             if weight_sum_detached.item() <= 0:
                                 raise ValueError("Trigger weights must sum to a positive value.")
                             loss = (loss_vec * w).sum() / weight_sum
-                            loss_weight_tensor = weight_sum_detached.to(device=total_loss.device, dtype=total_loss.dtype)
+                            loss_weight_tensor = weight_sum_detached.to(
+                                device=total_loss.device, dtype=total_loss.dtype
+                            )
                         else:
                             loss = loss_vec.mean()
-                            loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
+                            loss_weight_tensor = total_loss.new_tensor(
+                                batch_size, dtype=total_loss.dtype
+                            )
                     else:
                         loss = criterion(outputs, targets)
                         if isinstance(loss, torch.Tensor) and loss.ndim > 0:
                             loss = loss.mean()
                         reference = targets if targets is not None else inputs
                         batch_size = _infer_batch_size(reference)
-                        loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
+                        loss_weight_tensor = total_loss.new_tensor(
+                            batch_size, dtype=total_loss.dtype
+                        )
                     if batch_size is None:
                         reference = targets if targets is not None else inputs
                         batch_size = _infer_batch_size(reference)
                         if loss_weight_tensor is None:
-                            loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
+                            loss_weight_tensor = total_loss.new_tensor(
+                                batch_size, dtype=total_loss.dtype
+                            )
                 else:
-                    raise ValueError("No criterion provided for supervised step; supply a loss function.")
+                    raise ValueError(
+                        "No criterion provided for supervised step; supply a loss function."
+                    )
                 raw_loss = loss
                 loss = loss / self.grad_accum
 
@@ -335,9 +387,14 @@ class FastTrainer:
                 m = meter.summary()
                 weight_value = total_weight.item()
                 avg_loss = (total_loss / total_weight).item() if weight_value > 0 else 0.0
-                print(f"[Step {step_idx}] loss~{avg_loss:.4f} | "
-                      f"thr={m['samples_per_sec']:.1f}/s p50={m['p50_s']*1e3:.1f}ms p95={m['p95_s']*1e3:.1f}ms",
-                      flush=True)
+                throughput = m["samples_per_sec"]
+                latency_p50 = m["p50_s"] * 1e3
+                latency_p95 = m["p95_s"] * 1e3
+                print(
+                    f"[Step {step_idx}] loss~{avg_loss:.4f} | "
+                    f"thr={throughput:.1f}/s p50={latency_p50:.1f}ms p95={latency_p95:.1f}ms",
+                    flush=True,
+                )
 
         metrics = meter.summary()
         if self.device == "cuda":

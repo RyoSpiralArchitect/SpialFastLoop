@@ -18,7 +18,6 @@ retune:
 """
 
 from dataclasses import dataclass
-from math import modf
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import torch
@@ -113,12 +112,8 @@ class LossStdTrigger:
         batch = loss_vec.numel()
         self.total += batch
 
-        coefvar = loss_vec.std(unbiased=False) / (
-            loss_vec.mean().abs() + COEFVAR_STABILIZER
-        )
-        pulse_due = (
-            self.cfg.pulse_every > 0 and step > 0 and step % self.cfg.pulse_every == 0
-        )
+        coefvar = loss_vec.std(unbiased=False) / (loss_vec.mean().abs() + COEFVAR_STABILIZER)
+        pulse_due = self.cfg.pulse_every > 0 and step > 0 and step % self.cfg.pulse_every == 0
         force_pulse = pulse_due and step != self._last_pulse_step
         need = coefvar.item() <= self.cfg.std_threshold or force_pulse
 
@@ -144,9 +139,7 @@ class LossStdTrigger:
             return None
 
         allowed_whole = int(available_budget)
-        fractional_credit = self._drop_rounding_noise(
-            max(0.0, available_budget - allowed_whole)
-        )
+        fractional_credit = self._drop_rounding_noise(max(0.0, available_budget - allowed_whole))
         if allowed_whole <= 0:
             self._budget_buffer = fractional_credit
             if force_pulse and has_step:

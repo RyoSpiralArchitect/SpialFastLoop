@@ -25,3 +25,20 @@ extras = ["transformers>=4.40"]
 [project.urls]
 Homepage = "https://github.com/your-user/SpiralFastLoop"
 Repository = "https://github.com/your-user/SpiralFastLoop"
+
+[tool.black]
+line-length = 100
+target-version = ["py39"]
+extend-exclude = '(^build/|^dist/|^\.venv/|^\.mypy_cache/|^spiralfastloop\.egg-info/)'
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["spiralfastloop"]
+skip = ["build", "dist", ".venv", "spiralfastloop.egg-info"]
+combine_as_imports = true
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore = ["E203", "W503", "B009"]
+exclude = [".git", "__pycache__", "build", "dist", ".venv", "spiralfastloop.egg-info"]

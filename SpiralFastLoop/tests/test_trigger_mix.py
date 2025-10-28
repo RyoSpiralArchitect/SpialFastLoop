@@ -2,13 +2,13 @@ import math
 import sys
 from pathlib import Path
 
-import torch
 import pytest
+import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from spiralfastloop.engine import TriggerResult
-from spiralfastloop.extras.trigger_mix import (
+from spiralfastloop.engine import TriggerResult  # noqa: E402
+from spiralfastloop.extras.trigger_mix import (  # noqa: E402
     COEFVAR_STABILIZER,
     FRACTION_NORMALIZATION_EPS,
     LossStdConfig,
