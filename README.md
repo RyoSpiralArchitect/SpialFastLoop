@@ -78,7 +78,11 @@ python examples/bench_synth.py
 To enable per-sample control, pass a criterion with `reduction='none'` and a `trigger_hook`:
 
 ```python
-from spiralfastloop.extras.trigger_mix import LossStdTrigger, LossStdConfig
+from spiralfastloop.extras.trigger_mix import (
+    FRACTION_NORMALIZATION_EPS,
+    LossStdTrigger,
+    LossStdConfig,
+)
 
 def my_provider(k, device, ctx):
     # Return k extra hard samples (inputs, targets)
@@ -89,6 +93,8 @@ def my_provider(k, device, ctx):
     return inputs[idx], targets[idx]
 
 trigger = LossStdTrigger(my_provider, LossStdConfig(std_threshold=0.15, inject_ratio=0.08))
+# Tune FRACTION_NORMALIZATION_EPS if your fractional budget accounting requires a
+# different rounding tolerance (default is 1e-12 sample units).
 trainer = FastTrainer(model, opt, trigger_hook=trigger)
 ```
 

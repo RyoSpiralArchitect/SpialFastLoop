@@ -5,13 +5,18 @@
 
 from dataclasses import dataclass
 from math import modf
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, Final
 
 import torch
 
 from ..engine import TriggerResult
 
-__all__ = ["LossStdConfig", "LossStdTrigger"]
+__all__ = ["FRACTION_NORMALIZATION_EPS", "LossStdConfig", "LossStdTrigger"]
+
+# Tiny residuals arise when we aggregate fractional budget credit with floating
+# point arithmetic.  Values below this threshold are treated as zero so that
+# the trigger does not get stuck holding imperceptible credit.
+FRACTION_NORMALIZATION_EPS: Final[float] = 1e-12
 
 
 @dataclass
@@ -55,9 +60,17 @@ class LossStdTrigger:
 
     @staticmethod
     def _drop_rounding_noise(value: float) -> float:
-        """Elide microscopic float residue that should count as zero."""
+        """Remove sub-epsilon residues from fractional accounting.
 
-        return 0.0 if abs(value) < 1e-12 else value
+        The trigger keeps a running fractional budget so tiny per-step credits
+        eventually release an extra sample.  When we subtract whole numbers from
+        that buffer we can be left with residues on the order of 1e-16 to
+        1e-12.  Treating those leftovers as genuine credit can indefinitely
+        delay the next release, so we normalise any absolute value below
+        :data:`FRACTION_NORMALIZATION_EPS` (measured in *sample* units) to zero.
+        """
+
+        return 0.0 if abs(value) < FRACTION_NORMALIZATION_EPS else value
 
     def _reset_budget_counters(self) -> None:
         """Reset running totals when a new epoch begins."""

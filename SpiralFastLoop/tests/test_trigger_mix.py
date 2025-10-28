@@ -8,7 +8,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop.engine import TriggerResult
-from spiralfastloop.extras.trigger_mix import LossStdConfig, LossStdTrigger
+from spiralfastloop.extras.trigger_mix import (
+    FRACTION_NORMALIZATION_EPS,
+    LossStdConfig,
+    LossStdTrigger,
+)
 
 
 def _make_provider(outputs=None):
@@ -26,6 +30,78 @@ def _make_provider(outputs=None):
     provider.calls = calls
     return provider
 
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (0.0, 0.0),
+        (1e-16, 0.0),
+        (-5e-13, 0.0),
+        (FRACTION_NORMALIZATION_EPS - 1e-15, 0.0),
+        (FRACTION_NORMALIZATION_EPS, FRACTION_NORMALIZATION_EPS),
+        (-FRACTION_NORMALIZATION_EPS, -FRACTION_NORMALIZATION_EPS),
+        (1e-9, 1e-9),
+        (-1e-3, -1e-3),
+        (1e6, 1e6),
+    ],
+)
+def test_drop_rounding_noise_handles_extreme_residues(value, expected):
+    """Ensure the helper keeps regression behaviour around the epsilon."""
+
+    result = LossStdTrigger._drop_rounding_noise(value)
+    if expected == 0.0:
+        assert result == 0.0
+    else:
+        assert result == pytest.approx(expected)
+
+
+def test_drop_rounding_noise_regression_on_fractional_carry():
+    """A rounding residue barely under epsilon should be discarded."""
+
+    noisy_total = 1.0 + (FRACTION_NORMALIZATION_EPS * 0.5)
+    cleaned = LossStdTrigger._drop_rounding_noise(noisy_total - int(noisy_total))
+    assert cleaned == 0.0
+
+
+def test_budget_buffer_drops_sub_epsilon_residue():
+    """Budget buffer should clear imperceptible carry-over credit."""
+
+    cfg = LossStdConfig(
+        std_threshold=10.0,
+        inject_ratio=0.5,
+        pulse_every=1000,
+        budget_frac=0.0,
+        max_injected_per_step=10,
+    )
+    provider = _make_provider()
+    trigger = LossStdTrigger(provider=provider, cfg=cfg)
+    trigger._budget_buffer = FRACTION_NORMALIZATION_EPS * 0.6
+
+    ctx = {"loss_vec": torch.ones(4), "device": "cpu", "step": 1}
+    assert trigger(ctx) is None
+    assert provider.calls["requested"] == []
+    assert trigger._budget_buffer == 0.0
+
+
+def test_budget_buffer_retains_meaningful_fractional_credit():
+    """Carry-over slightly above epsilon should be preserved for later."""
+
+    cfg = LossStdConfig(
+        std_threshold=10.0,
+        inject_ratio=0.5,
+        pulse_every=1000,
+        budget_frac=0.0,
+        max_injected_per_step=10,
+    )
+    provider = _make_provider()
+    trigger = LossStdTrigger(provider=provider, cfg=cfg)
+    retained_credit = FRACTION_NORMALIZATION_EPS * 1.5
+    trigger._budget_buffer = retained_credit
+
+    ctx = {"loss_vec": torch.ones(4), "device": "cpu", "step": 1}
+    assert trigger(ctx) is None
+    assert provider.calls["requested"] == []
+    assert trigger._budget_buffer == pytest.approx(retained_credit)
 
 def test_trigger_skips_when_variability_high():
     cfg = LossStdConfig(std_threshold=0.1, inject_ratio=0.5, pulse_every=10, budget_frac=1.0)
