@@ -17,8 +17,9 @@ retune:
     to zero during coefficient-of-variation checks.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from math import modf
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import torch
@@ -70,9 +71,9 @@ class LossStdTrigger:
     ) -> None:
         self.provider = provider
         self.cfg = cfg or LossStdConfig()
-        self.spent = 0  # approximate budget spent (injected samples)
+        self.spent: int = 0  # approximate budget spent (injected samples)
         # Count of baseline samples the trigger has observed (without injections).
-        self.total = 0
+        self.total: int = 0
         self._last_step: Optional[int] = None
         self._last_pulse_step: Optional[int] = None
         # Accumulate fractional budget so tiny allowances eventually release
@@ -102,7 +103,10 @@ class LossStdTrigger:
         self._budget_buffer = 0.0
 
     def __call__(self, ctx: Dict[str, Any]) -> Optional[TriggerResult]:
-        loss_vec: torch.Tensor = ctx["loss_vec"].detach()
+        loss_tensor = ctx["loss_vec"]
+        if not isinstance(loss_tensor, torch.Tensor):
+            raise TypeError("Loss vector in trigger context must be a torch.Tensor.")
+        loss_vec = loss_tensor.detach()
         if loss_vec.numel() == 0:
             return None
 

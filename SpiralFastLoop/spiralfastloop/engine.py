@@ -1,26 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 Ryō
 
-from collections.abc import Mapping
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
-from typing import Optional, Callable, Dict, Any
+from typing import Any, Callable, Dict, Optional, cast
 
 import torch
 import torch.nn as nn
 
 from .utils import (
+    AmpSetting,
+    ThroughputMeter,
     autocast_ctx,
     dataloader_from_dataset,
     get_amp_policy,
     get_best_device,
     maybe_channels_last,
     safe_compile,
-    ThroughputMeter,
     to_device,
 )
 
 recommended_dataloader = dataloader_from_dataset
-
 
 def _concatenate_batches(base: Any, extra: Any) -> Any:
     """Concatenate two batched structures along their first dimension."""
@@ -36,17 +38,15 @@ def _concatenate_batches(base: Any, extra: Any) -> Any:
         if set(base.keys()) != set(extra.keys()):
             raise KeyError("Trigger extra batch keys must match the original batch keys.")
         merged = {k: _concatenate_batches(base[k], extra[k]) for k in base.keys()}
-        default_factory = getattr(base, "default_factory", None)
+        mapping_type = cast(Any, type(base))
         if hasattr(base, "default_factory"):
-            new_mapping = type(base)(default_factory)
-            new_mapping.update(merged)
+            default_factory = getattr(base, "default_factory")
+            new_mapping = mapping_type(default_factory)
+            cast(MutableMapping[Any, Any], new_mapping).update(merged)
             return new_mapping
-        try:
-            return type(base)(merged)
-        except TypeError:
-            new_mapping = type(base)()
-            new_mapping.update(merged)
-            return new_mapping
+        new_mapping = mapping_type()
+        cast(MutableMapping[Any, Any], new_mapping).update(merged)
+        return new_mapping
     if isinstance(base, list):
         if not isinstance(extra, (list, tuple)) or len(base) != len(extra):
             raise TypeError("Trigger extra batch must match the list structure of the original batch.")
@@ -130,17 +130,22 @@ class FastTrainer:
       - Sync reduction (.item() minimized, zero_grad(set_to_none=True))
       - Optional Trigger hook for dynamic hard-sample injection (loss_std-driven)
     """
-    def __init__(self, model: nn.Module, optimizer: torch.optim.Optimizer,
-                 scheduler: Optional[Any] = None, *,
-                 device: Optional[str] = None,
-                 use_amp: Optional[bool] = "auto",
-                 compile_mode: str = "reduce-overhead",
-                 grad_accum: int = 1,
-                 channels_last: bool = False,
-                 clip_grad_norm: Optional[float] = None,
-                 log_interval: int = 50,
-                 trigger_hook: Optional[Callable[[Dict[str, Any]], Optional[TriggerResult]]] = None):
-        self.device = device or get_best_device()
+    def __init__(
+        self,
+        model: nn.Module,
+        optimizer: torch.optim.Optimizer,
+        scheduler: Optional[Any] = None,
+        *,
+        device: Optional[str] = None,
+        use_amp: AmpSetting = "auto",
+        compile_mode: str = "reduce-overhead",
+        grad_accum: int = 1,
+        channels_last: bool = False,
+        clip_grad_norm: Optional[float] = None,
+        log_interval: int = 50,
+        trigger_hook: Optional[Callable[[Dict[str, Any]], Optional[TriggerResult]]] = None,
+    ) -> None:
+        self.device: str = device or get_best_device()
         self.model = model.to(self.device)
         self.model = maybe_channels_last(self.model, channels_last=channels_last)
         self.optimizer = optimizer
@@ -166,7 +171,13 @@ class FastTrainer:
             except Exception:
                 pass
 
-    def train_one_epoch(self, loader, criterion, *, steps: Optional[int] = None) -> Dict[str, Any]:
+    def train_one_epoch(
+        self,
+        loader: Iterable[Any],
+        criterion: Any,
+        *,
+        steps: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """
         Train for one epoch (or a fixed number of steps if steps is provided).
         Expects criterion to support reduction='mean'. If trigger_hook is set and
@@ -213,8 +224,8 @@ class FastTrainer:
                 # Fallback: treat entire batch as inputs, no targets (self-supervised / user handles loss)
                 inputs, targets = batch, None
 
-            batch_size = None
-            loss_weight_tensor = None
+            batch_size: Optional[int] = None
+            loss_weight_tensor: Optional[torch.Tensor] = None
 
             with autocast_ctx(self.device, self.amp_enabled, self.amp_dtype):
                 outputs = self.model(inputs)
@@ -237,12 +248,16 @@ class FastTrainer:
                             "inputs": inputs, "targets": targets, "outputs": outputs,
                             "loss_vec": loss_vec, "device": self.device, "step": step_idx
                         })
-                        weights = None
+                        weights: Optional[torch.Tensor] = None
                         if trig_result is not None:
                             if trig_result.extra_inputs is not None:
                                 # Concatenate and recompute outputs & loss_vec
                                 extra_x = to_device(trig_result.extra_inputs, self.device, non_blocking=True)
-                                extra_y = to_device(trig_result.extra_targets, self.device, non_blocking=True) if trig_result.extra_targets is not None else None
+                                extra_y = (
+                                    to_device(trig_result.extra_targets, self.device, non_blocking=True)
+                                    if trig_result.extra_targets is not None
+                                    else None
+                                )
                                 inputs = _concatenate_batches(inputs, extra_x)
                                 if extra_y is None:
                                     raise ValueError("Trigger provided extra inputs without matching targets.")
@@ -339,7 +354,7 @@ class FastTrainer:
                       f"thr={m['samples_per_sec']:.1f}/s p50={m['p50_s']*1e3:.1f}ms p95={m['p95_s']*1e3:.1f}ms",
                       flush=True)
 
-        metrics = meter.summary()
+        metrics: Dict[str, Any] = dict(meter.summary())
         if self.device == "cuda":
             try:
                 metrics["cuda_max_mem_bytes"] = torch.cuda.max_memory_allocated()

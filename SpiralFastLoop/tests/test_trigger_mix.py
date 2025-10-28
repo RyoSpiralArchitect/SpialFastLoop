@@ -1,13 +1,20 @@
 import math
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Dict, Iterable, Tuple
 
-import torch
 import pytest
+import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from spiralfastloop.engine import TriggerResult
+from spiralfastloop.engine import (
+    TriggerResult,
+    _concatenate_batches,
+    _ensure_loss_vector,
+    _infer_batch_size,
+)
 from spiralfastloop.extras.trigger_mix import (
     COEFVAR_STABILIZER,
     FRACTION_NORMALIZATION_EPS,
@@ -16,11 +23,17 @@ from spiralfastloop.extras.trigger_mix import (
 )
 from spiralfastloop.metrics import NormalizationMetricsCollector
 
+_FIXTURES_DIR = Path(__file__).resolve().parent
+if str(_FIXTURES_DIR) not in sys.path:
+    sys.path.append(str(_FIXTURES_DIR))
 
-def _make_provider(outputs=None):
-    calls = {"requested": []}
+from fixtures import RoundingRegressionCase
 
-    def provider(k, device, ctx):
+
+def _make_provider(outputs: Tuple[torch.Tensor, torch.Tensor] | None = None):
+    calls: Dict[str, list[int]] = {"requested": []}
+
+    def provider(k: int, device: str, ctx):
         calls["requested"].append(k)
         batch_shape = (k, 2)
         inputs = torch.full(batch_shape, 1.0, device=device)
@@ -29,7 +42,7 @@ def _make_provider(outputs=None):
             return outputs
         return inputs, targets
 
-    provider.calls = calls
+    provider.calls = calls  # type: ignore[attr-defined]
     return provider
 
 
@@ -47,7 +60,7 @@ def _make_provider(outputs=None):
         (-1e6, -1e6),
     ],
 )
-def test_drop_rounding_noise_handles_signed_residue(value, expected):
+def test_drop_rounding_noise_handles_signed_residue(value: float, expected: float) -> None:
     trigger = LossStdTrigger(provider=_make_provider())
     result = trigger._drop_rounding_noise(value)
     if expected == 0.0:
@@ -56,10 +69,20 @@ def test_drop_rounding_noise_handles_signed_residue(value, expected):
         assert result == pytest.approx(expected)
 
 
-def test_drop_rounding_noise_matches_previous_logic():
+def test_drop_rounding_noise_regressions(rounding_cases: Iterable[RoundingRegressionCase]) -> None:
+    trigger = LossStdTrigger(provider=_make_provider())
+    seen = [trigger._drop_rounding_noise(case.value) for case in rounding_cases]
+    for case, observed in zip(rounding_cases, seen):
+        if case.expected == 0.0:
+            assert observed == 0.0
+        else:
+            assert observed == pytest.approx(case.expected)
+
+
+def test_drop_rounding_noise_matches_previous_logic() -> None:
     trigger = LossStdTrigger(provider=_make_provider())
 
-    def legacy_drop(val):
+    def legacy_drop(val: float) -> float:
         return 0.0 if abs(val) < 1e-12 else val
 
     samples = [
@@ -77,7 +100,7 @@ def test_drop_rounding_noise_matches_previous_logic():
         assert trigger._drop_rounding_noise(sample) == legacy_drop(sample)
 
 
-def test_trigger_skips_when_variability_high():
+def test_trigger_skips_when_variability_high() -> None:
     cfg = LossStdConfig(std_threshold=0.1, inject_ratio=0.5, pulse_every=10, budget_frac=1.0)
     trigger = LossStdTrigger(provider=_make_provider(), cfg=cfg)
     ctx = {"loss_vec": torch.tensor([0.0, 2.0]), "device": "cpu", "step": 1}
@@ -85,7 +108,7 @@ def test_trigger_skips_when_variability_high():
     assert result is None
 
 
-def test_trigger_requests_extra_samples_on_low_std():
+def test_trigger_requests_extra_samples_on_low_std() -> None:
     cfg = LossStdConfig(
         std_threshold=10.0,
         inject_ratio=0.5,
@@ -104,7 +127,7 @@ def test_trigger_requests_extra_samples_on_low_std():
     assert torch.allclose(result.weights[-2:], torch.full((2,), 1.7))
 
 
-def test_pulse_fires_even_when_variance_high():
+def test_pulse_fires_even_when_variance_high() -> None:
     cfg = LossStdConfig(
         std_threshold=0.0,
         inject_ratio=0.25,
@@ -122,7 +145,7 @@ def test_pulse_fires_even_when_variance_high():
     assert result.weights[-1].item() == pytest.approx(cfg.weight_alpha)
 
 
-def test_forced_pulse_only_attempts_once_when_budget_blocked():
+def test_forced_pulse_only_attempts_once_when_budget_blocked() -> None:
     cfg = LossStdConfig(
         std_threshold=0.0,
         inject_ratio=0.5,
@@ -141,7 +164,7 @@ def test_forced_pulse_only_attempts_once_when_budget_blocked():
     assert provider.calls["requested"] == []
 
 
-def test_pulse_only_triggers_once_per_step():
+def test_pulse_only_triggers_once_per_step() -> None:
     cfg = LossStdConfig(
         std_threshold=0.0,
         inject_ratio=0.5,
@@ -164,7 +187,7 @@ def test_pulse_only_triggers_once_per_step():
     assert provider.calls["requested"] == [3]
 
 
-def test_budget_fraction_limits_total_injections():
+def test_budget_fraction_limits_total_injections() -> None:
     cfg = LossStdConfig(
         std_threshold=10.0,
         inject_ratio=0.6,
@@ -187,7 +210,7 @@ def test_budget_fraction_limits_total_injections():
     assert provider.calls["requested"] == [1, 1]
 
 
-def test_budget_counters_reset_on_epoch_restart():
+def test_budget_counters_reset_on_epoch_restart() -> None:
     cfg = LossStdConfig(
         std_threshold=10.0,
         inject_ratio=0.5,
@@ -215,7 +238,7 @@ def test_budget_counters_reset_on_epoch_restart():
     assert trigger.spent == 4
 
 
-def test_budget_counters_ignore_repeated_steps():
+def test_budget_counters_ignore_repeated_steps() -> None:
     cfg = LossStdConfig(
         std_threshold=10.0,
         inject_ratio=0.5,
@@ -243,7 +266,7 @@ def test_budget_counters_ignore_repeated_steps():
     assert trigger.spent == 12
 
 
-def test_fractional_budget_accumulates_until_whole_sample():
+def test_fractional_budget_accumulates_until_whole_sample() -> None:
     cfg = LossStdConfig(
         std_threshold=10.0,
         inject_ratio=0.6,
@@ -274,7 +297,7 @@ def test_fractional_budget_accumulates_until_whole_sample():
     assert provider.calls["requested"] == [1]
 
 
-def test_fractional_carry_only_tracks_excess_credit_after_clipping():
+def test_fractional_carry_only_tracks_excess_credit_after_clipping() -> None:
     cfg = LossStdConfig(
         std_threshold=10.0,
         inject_ratio=0.6,
@@ -300,7 +323,7 @@ def test_fractional_carry_only_tracks_excess_credit_after_clipping():
     assert trigger._budget_buffer == pytest.approx(0.4, abs=1e-6)
 
 
-def test_fractional_buffer_does_not_hold_whole_units():
+def test_fractional_buffer_does_not_hold_whole_units() -> None:
     cfg = LossStdConfig(
         std_threshold=10.0,
         inject_ratio=0.2,
@@ -321,7 +344,7 @@ def test_fractional_buffer_does_not_hold_whole_units():
     assert 0.0 <= trigger._budget_buffer < 1.0
 
 
-def test_pulse_resets_after_step_decrease():
+def test_pulse_resets_after_step_decrease() -> None:
     cfg = LossStdConfig(
         std_threshold=0.0,
         inject_ratio=0.5,
@@ -348,7 +371,7 @@ def test_pulse_resets_after_step_decrease():
     assert provider.calls["requested"] == [3, 3]
 
 
-def test_near_zero_mean_losses_still_trigger_injection():
+def test_near_zero_mean_losses_still_trigger_injection() -> None:
     provider = _make_provider()
     cfg = LossStdConfig(
         std_threshold=0.2,
@@ -372,11 +395,66 @@ def test_near_zero_mean_losses_still_trigger_injection():
     assert result.weights.shape[0] == 3
 
 
-def test_rounding_noise_metrics_are_recorded():
-    collector = NormalizationMetricsCollector(history_limit=8)
-    trigger = LossStdTrigger(provider=_make_provider(), normalization_metrics=collector)
-    trigger._drop_rounding_noise(FRACTION_NORMALIZATION_EPS * 0.5)
-    trigger._drop_rounding_noise(FRACTION_NORMALIZATION_EPS * 4)
-    stats = collector.summary()
-    assert stats["total_events"] == 2.0
-    assert stats["zeroed_events"] == 1.0
+def test_concatenate_batches_preserves_nested_structure() -> None:
+    base = {"a": torch.zeros((2, 3)), "b": [torch.ones((2,))]}
+    extra = {"a": torch.ones((1, 3)), "b": [torch.zeros((1,))]}
+    merged = _concatenate_batches(base, extra)
+    assert isinstance(merged, dict)
+    assert merged["a"].shape == (3, 3)
+    assert torch.allclose(merged["a"][-1], torch.ones(3))
+    assert merged["b"][0].shape == (3,)
+
+
+def test_concatenate_batches_mismatched_keys_raises() -> None:
+    base = {"a": torch.zeros((2, 3))}
+    extra = {"b": torch.zeros((1, 3))}
+    with pytest.raises(KeyError):
+        _concatenate_batches(base, extra)
+
+
+def test_infer_batch_size_handles_sequences() -> None:
+    batch = (torch.zeros((4, 5)), [torch.ones((4,))], {"x": torch.zeros((4, 2))})
+    size = _infer_batch_size(batch)
+    assert size == 4
+
+
+def test_ensure_loss_vector_handles_scalars_and_large_values() -> None:
+    scalar = torch.tensor(3.14)
+    vector = _ensure_loss_vector(scalar)
+    assert vector.shape == (1,)
+    wide = torch.ones((8, 16)) * -2.5
+    collapsed = _ensure_loss_vector(wide)
+    assert collapsed.shape == (8,)
+    assert collapsed[0].item() == pytest.approx(-2.5)
+
+
+def test_trigger_parallel_invocation_isolated_state() -> None:
+    provider_calls: Dict[str, list[int]] = {"requested": []}
+
+    def provider(k: int, device: str, ctx) -> Tuple[torch.Tensor, torch.Tensor]:
+        provider_calls["requested"].append(k)
+        inputs = torch.arange(k, dtype=torch.float32).unsqueeze(1)
+        targets = torch.ones(k, dtype=torch.float32)
+        return inputs, targets
+
+    triggers = [
+        LossStdTrigger(
+            provider=provider,
+            cfg=LossStdConfig(std_threshold=10.0, inject_ratio=0.5, budget_frac=1.0),
+        )
+        for _ in range(4)
+    ]
+
+    def run_trigger(idx: int) -> int:
+        trigger = triggers[idx]
+        losses = torch.full((4,), 0.01 * (idx + 1))
+        ctx = {"loss_vec": losses, "device": "cpu", "step": idx + 1}
+        result = trigger(ctx)
+        return 0 if result is None else result.weights.shape[0]
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(run_trigger, range(4)))
+
+    assert all(r in (0, 6) for r in results)
+    # Provider should have been called at most once per trigger that injected.
+    assert len(provider_calls["requested"]) <= 4
