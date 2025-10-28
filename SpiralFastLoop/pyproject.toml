@@ -21,6 +21,10 @@ classifiers = [
 
 [project.optional-dependencies]
 extras = ["transformers>=4.40"]
+tests = [
+  "pytest>=7.0",
+  "hypothesis>=6.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/your-user/SpiralFastLoop"

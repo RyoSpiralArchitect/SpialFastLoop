@@ -14,6 +14,7 @@ from spiralfastloop.extras.trigger_mix import (
     LossStdConfig,
     LossStdTrigger,
 )
+from spiralfastloop.metrics import NormalizationMetricsCollector
 
 
 def _make_provider(outputs=None):
@@ -369,3 +370,13 @@ def test_near_zero_mean_losses_still_trigger_injection():
     assert isinstance(result, TriggerResult)
     assert provider.calls["requested"] == [1]
     assert result.weights.shape[0] == 3
+
+
+def test_rounding_noise_metrics_are_recorded():
+    collector = NormalizationMetricsCollector(history_limit=8)
+    trigger = LossStdTrigger(provider=_make_provider(), normalization_metrics=collector)
+    trigger._drop_rounding_noise(FRACTION_NORMALIZATION_EPS * 0.5)
+    trigger._drop_rounding_noise(FRACTION_NORMALIZATION_EPS * 4)
+    stats = collector.summary()
+    assert stats["total_events"] == 2.0
+    assert stats["zeroed_events"] == 1.0
