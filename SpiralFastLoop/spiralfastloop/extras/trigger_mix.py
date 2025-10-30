@@ -18,8 +18,8 @@ retune:
 """
 
 from dataclasses import dataclass
-from math import modf
-from typing import Any, Callable, Dict, Optional, Tuple
+from decimal import Decimal, getcontext
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import torch
 
@@ -29,6 +29,10 @@ from ..engine import TriggerResult
 # loss scales differ drastically from the default cross-entropy-ish regime.
 FRACTION_NORMALIZATION_EPS = 1e-12
 COEFVAR_STABILIZER = 1e-8
+
+getcontext().prec = 28
+_FRACTION_EPS_DECIMAL = Decimal(str(FRACTION_NORMALIZATION_EPS))
+
 
 __all__ = [
     "LossStdConfig",
@@ -68,17 +72,17 @@ class LossStdTrigger:
     ) -> None:
         self.provider = provider
         self.cfg = cfg or LossStdConfig()
-        self.spent = 0  # approximate budget spent (injected samples)
+        self._spent: Decimal = Decimal(0)
         # Count of baseline samples the trigger has observed (without injections).
-        self.total = 0
+        self._total: Decimal = Decimal(0)
         self._last_step: Optional[int] = None
         self._last_pulse_step: Optional[int] = None
         # Accumulate fractional budget so tiny allowances eventually release
         # whole extra samples instead of being lost to flooring.
-        self._budget_buffer: float = 0.0
+        self._budget_buffer: Decimal = Decimal(0)
 
     @staticmethod
-    def _drop_rounding_noise(value: float) -> float:
+    def _drop_rounding_noise(value: Union[float, Decimal]) -> Decimal:
         """Elide microscopic float residue that should count as zero.
 
         The fractional budget buffer is dimensionless (counts of samples) so
@@ -87,14 +91,34 @@ class LossStdTrigger:
         downstream users can retune it for different numerical regimes.
         """
 
-        return 0.0 if abs(value) < FRACTION_NORMALIZATION_EPS else value
+        if isinstance(value, Decimal):
+            dec_value = value
+        else:
+            dec_value = Decimal(str(value))
+        return Decimal(0) if abs(dec_value) < _FRACTION_EPS_DECIMAL else dec_value
+
+    @property
+    def spent(self) -> Decimal:
+        return self._spent
+
+    @spent.setter
+    def spent(self, value: Union[int, float, Decimal]) -> None:
+        self._spent = Decimal(str(value))
+
+    @property
+    def total(self) -> Decimal:
+        return self._total
+
+    @total.setter
+    def total(self, value: Union[int, float, Decimal]) -> None:
+        self._total = Decimal(str(value))
 
     def _reset_budget_counters(self) -> None:
         """Reset running totals when a new epoch begins."""
-        self.spent = 0
-        self.total = 0
+        self._spent = Decimal(0)
+        self._total = Decimal(0)
         self._last_pulse_step = None
-        self._budget_buffer = 0.0
+        self._budget_buffer = Decimal(0)
 
     def __call__(self, ctx: Dict[str, Any]) -> Optional[TriggerResult]:
         loss_vec: torch.Tensor = ctx["loss_vec"].detach()
@@ -111,7 +135,7 @@ class LossStdTrigger:
             self._last_step = step
 
         batch = loss_vec.numel()
-        self.total += batch
+        self._total += Decimal(batch)
 
         coefvar = loss_vec.std(unbiased=False) / (
             loss_vec.mean().abs() + COEFVAR_STABILIZER
@@ -122,30 +146,32 @@ class LossStdTrigger:
         force_pulse = pulse_due and step != self._last_pulse_step
         need = coefvar.item() <= self.cfg.std_threshold or force_pulse
 
-        budget_ok = self.spent <= self.cfg.budget_frac * max(1, self.total)
+        budget_limit = Decimal(str(self.cfg.budget_frac)) * max(Decimal(1), self._total)
+        budget_ok = self._spent <= budget_limit
         if not (need and budget_ok):
             if force_pulse and has_step:
                 self._last_pulse_step = step
             return None
 
-        requested = min(int(batch * self.cfg.inject_ratio), self.cfg.max_injected_per_step)
+        requested = min(
+            int(batch * self.cfg.inject_ratio), self.cfg.max_injected_per_step
+        )
         if requested <= 0:
             if force_pulse and has_step:
                 self._last_pulse_step = step
             return None
 
-        budget_limit = self.cfg.budget_frac * max(1, self.total)
-        remaining_budget = budget_limit - self.spent
-        available_budget = max(0.0, remaining_budget + self._budget_buffer)
-        if available_budget <= 0.0:
-            self._budget_buffer = 0.0
+        remaining_budget = budget_limit - self._spent
+        available_budget = max(Decimal(0), remaining_budget + self._budget_buffer)
+        if available_budget <= 0:
+            self._budget_buffer = Decimal(0)
             if force_pulse and has_step:
                 self._last_pulse_step = step
             return None
 
         allowed_whole = int(available_budget)
         fractional_credit = self._drop_rounding_noise(
-            max(0.0, available_budget - allowed_whole)
+            max(Decimal(0), available_budget - Decimal(allowed_whole))
         )
         if allowed_whole <= 0:
             self._budget_buffer = fractional_credit
@@ -160,11 +186,11 @@ class LossStdTrigger:
             return None
 
         extra_x, extra_y = self.provider(requested, device, ctx)
-        self.spent += requested
-        leftover_available = max(0.0, available_budget - requested)
-        remaining_budget_after = max(0.0, remaining_budget - requested)
+        self._spent += Decimal(requested)
+        leftover_available = max(Decimal(0), available_budget - Decimal(requested))
+        remaining_budget_after = max(Decimal(0), remaining_budget - Decimal(requested))
         carryover_credit = self._drop_rounding_noise(
-            max(0.0, leftover_available - remaining_budget_after)
+            max(Decimal(0), leftover_available - remaining_budget_after)
         )
         self._budget_buffer = carryover_credit
         if force_pulse:
@@ -173,4 +199,6 @@ class LossStdTrigger:
         # weights: original ones at 1.0, injected at alpha
         weights = torch.ones(batch + requested, device=loss_vec.device)
         weights[-requested:] = self.cfg.weight_alpha
-        return TriggerResult(extra_inputs=extra_x, extra_targets=extra_y, weights=weights)
+        return TriggerResult(
+            extra_inputs=extra_x, extra_targets=extra_y, weights=weights
+        )

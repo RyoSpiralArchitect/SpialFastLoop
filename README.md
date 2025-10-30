@@ -74,6 +74,19 @@ python examples/bench_synth.py
 - `examples/bench_synth.py` — synthetic speed test
 - `examples/sr_generate_demo.py` — Surprisal Sandwich generation (HF)
 
+## Development & Quality Gates
+
+```bash
+pip install -e SpiralFastLoop[dev]
+pre-commit run --all-files
+pytest --cov
+```
+
+- `pre-commit` enforces Black/Isort/Flake8/Mypy.
+- `pytest --cov` produces branch coverage for `spiralfastloop`.
+- `scripts/collect_metrics.py` runs the coverage suite and a lightweight
+  throughput smoke test to track regressions over time.
+
 ## Trigger hook API
 To enable per-sample control, pass a criterion with `reduction='none'` and a `trigger_hook`:
 

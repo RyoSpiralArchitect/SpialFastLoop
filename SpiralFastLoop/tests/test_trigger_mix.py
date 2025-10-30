@@ -1,11 +1,7 @@
 import math
-import sys
-from pathlib import Path
 
-import torch
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import torch
 
 from spiralfastloop.engine import TriggerResult
 from spiralfastloop.extras.trigger_mix import (
@@ -48,7 +44,7 @@ def _make_provider(outputs=None):
 )
 def test_drop_rounding_noise_handles_signed_residue(value, expected):
     trigger = LossStdTrigger(provider=_make_provider())
-    result = trigger._drop_rounding_noise(value)
+    result = float(trigger._drop_rounding_noise(value))
     if expected == 0.0:
         assert result == 0.0
     else:
@@ -73,11 +69,13 @@ def test_drop_rounding_noise_matches_previous_logic():
         42.0,
     ]
     for sample in samples:
-        assert trigger._drop_rounding_noise(sample) == legacy_drop(sample)
+        assert float(trigger._drop_rounding_noise(sample)) == legacy_drop(sample)
 
 
 def test_trigger_skips_when_variability_high():
-    cfg = LossStdConfig(std_threshold=0.1, inject_ratio=0.5, pulse_every=10, budget_frac=1.0)
+    cfg = LossStdConfig(
+        std_threshold=0.1, inject_ratio=0.5, pulse_every=10, budget_frac=1.0
+    )
     trigger = LossStdTrigger(provider=_make_provider(), cfg=cfg)
     ctx = {"loss_vec": torch.tensor([0.0, 2.0]), "device": "cpu", "step": 1}
     result = trigger(ctx)
@@ -175,14 +173,18 @@ def test_budget_fraction_limits_total_injections():
     trigger = LossStdTrigger(provider=provider, cfg=cfg)
 
     ctx = {"device": "cpu"}
-    for idx, batch_losses in enumerate((torch.ones(5), torch.ones(5), torch.ones(5)), start=1):
+    for idx, batch_losses in enumerate(
+        (torch.ones(5), torch.ones(5), torch.ones(5)), start=1
+    ):
         ctx["loss_vec"] = batch_losses
         ctx["step"] = idx
         trigger(ctx)
 
     assert trigger.spent == 2
     assert trigger.total == 15
-    assert trigger.spent <= math.ceil(trigger.cfg.budget_frac * trigger.total)
+    assert float(trigger.spent) <= math.ceil(
+        trigger.cfg.budget_frac * float(trigger.total)
+    )
     assert provider.calls["requested"] == [1, 1]
 
 
@@ -258,7 +260,7 @@ def test_fractional_budget_accumulates_until_whole_sample():
         ctx["step"] = step
         assert trigger(ctx) is None
         assert provider.calls["requested"] == []
-    assert trigger._budget_buffer == pytest.approx(0.6, abs=1e-6)
+    assert float(trigger._budget_buffer) == pytest.approx(0.6, abs=1e-6)
 
     ctx["step"] = 4
     result = trigger(ctx)
@@ -266,7 +268,7 @@ def test_fractional_budget_accumulates_until_whole_sample():
     assert provider.calls["requested"] == [1]
     assert trigger.spent == 1
     assert trigger.total == 8
-    assert trigger._budget_buffer == pytest.approx(0.0, abs=1e-6)
+    assert float(trigger._budget_buffer) == pytest.approx(0.0, abs=1e-6)
 
     ctx["step"] = 5
     assert trigger(ctx) is None
@@ -288,7 +290,7 @@ def test_fractional_carry_only_tracks_excess_credit_after_clipping():
     for step in range(1, 4):
         ctx["step"] = step
         assert trigger(ctx) is None
-    assert trigger._budget_buffer == pytest.approx(0.6, abs=1e-6)
+    assert float(trigger._budget_buffer) == pytest.approx(0.6, abs=1e-6)
 
     ctx.update({"step": 4, "loss_vec": torch.ones(30)})
     result = trigger(ctx)
@@ -296,7 +298,7 @@ def test_fractional_carry_only_tracks_excess_credit_after_clipping():
     assert provider.calls["requested"] == [2]
     assert trigger.spent == 2
     assert trigger.total == 36
-    assert trigger._budget_buffer == pytest.approx(0.4, abs=1e-6)
+    assert float(trigger._budget_buffer) == pytest.approx(0.4, abs=1e-6)
 
 
 def test_fractional_buffer_does_not_hold_whole_units():
@@ -317,7 +319,7 @@ def test_fractional_buffer_does_not_hold_whole_units():
     assert provider.calls["requested"] == [10]
     assert trigger.spent == 10
     assert trigger.total == 50
-    assert 0.0 <= trigger._budget_buffer < 1.0
+    assert 0.0 <= float(trigger._budget_buffer) < 1.0
 
 
 def test_pulse_resets_after_step_decrease():
@@ -362,7 +364,9 @@ def test_near_zero_mean_losses_still_trigger_injection():
     tiny = torch.tensor([1e-10, -1e-10], dtype=torch.float64)
     ctx = {"loss_vec": tiny, "device": "cpu", "step": 1}
 
-    expected_coefvar = tiny.std(unbiased=False) / (tiny.mean().abs() + COEFVAR_STABILIZER)
+    expected_coefvar = tiny.std(unbiased=False) / (
+        tiny.mean().abs() + COEFVAR_STABILIZER
+    )
     assert expected_coefvar.item() <= cfg.std_threshold
 
     result = trigger(ctx)

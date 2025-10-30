@@ -3,15 +3,37 @@
 
 """Surprisal Sandwich generation helpers built on top of ``transformers``."""
 
-from typing import Optional, Tuple
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Optional, Tuple
 
 import torch
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    LogitsProcessor,
-    LogitsProcessorList,
-)
+
+try:  # pragma: no cover - optional dependency
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoTokenizer,
+        LogitsProcessor,
+        LogitsProcessorList,
+    )
+except ImportError:  # pragma: no cover
+    AutoModelForCausalLM = Any  # type: ignore[assignment]
+    AutoTokenizer = Any  # type: ignore[assignment]
+    LogitsProcessor = Any  # type: ignore[assignment]
+    LogitsProcessorList = Any  # type: ignore[assignment]
+
+if TYPE_CHECKING:
+    from transformers import (  # type: ignore[import-not-found]
+        AutoModelForCausalLM as _AutoModelForCausalLM,
+        AutoTokenizer as _AutoTokenizer,
+        LogitsProcessor as _LogitsProcessor,
+        LogitsProcessorList as _LogitsProcessorList,
+    )
+
+    AutoModelForCausalLM = _AutoModelForCausalLM
+    AutoTokenizer = _AutoTokenizer
+    LogitsProcessor = _LogitsProcessor
+    LogitsProcessorList = _LogitsProcessorList
 
 __all__ = [
     "AntiTopKMiddle",
@@ -19,32 +41,42 @@ __all__ = [
     "surprise_repair_generate",
 ]
 
+
 class AntiTopKMiddle(LogitsProcessor):
     """
     In the middle span of generation, apply a strong penalty to the current top-K tokens
     (i.e., "what would most naturally come next") to inject surprise.
     """
-    def __init__(self, start_frac: float = 0.45, end_frac: float = 0.7,
-                 topk: int = 5, alpha: float = 10.0):
+
+    def __init__(
+        self,
+        start_frac: float = 0.45,
+        end_frac: float = 0.7,
+        topk: int = 5,
+        alpha: float = 10.0,
+    ):
         assert 0.0 <= start_frac < end_frac <= 1.0
         self.sf, self.ef = start_frac, end_frac
         self.topk, self.alpha = topk, alpha
         self.step = 0
-        self.max_steps = None
+        self.max_steps: Optional[int] = None
 
     def __call__(self, input_ids, scores):
         if self.max_steps is None:
             return scores
-        pos = self.step; self.step += 1
-        if self.sf*self.max_steps <= pos < self.ef*self.max_steps:
+        pos = self.step
+        self.step += 1
+        if self.sf * self.max_steps <= pos < self.ef * self.max_steps:
             vals, idx = torch.topk(scores, self.topk, dim=-1)
             scores.scatter_(dim=-1, index=idx, src=vals - self.alpha)
         return scores
+
 
 class CoherenceTailBoost(LogitsProcessor):
     """
     In the tail region, lightly boost coherence via a tiny LM's logits (optional).
     """
+
     def __init__(
         self,
         start_frac: float = 0.7,
@@ -53,39 +85,44 @@ class CoherenceTailBoost(LogitsProcessor):
         primary_tokenizer: Optional[AutoTokenizer] = None,
         tiny_tokenizer: Optional[AutoTokenizer] = None,
     ):
-        self.sf, self.mu, self.tiny = start_frac, mu, tiny_model
+        self.sf, self.mu = start_frac, mu
+        self.tiny: Optional[AutoModelForCausalLM] = tiny_model
         self.step = 0
-        self.max_steps = None
+        self.max_steps: Optional[int] = None
         self.past = None
-        self.primary_tokenizer = primary_tokenizer
-        self.tiny_tokenizer = tiny_tokenizer
+        self.primary_tokenizer: Optional[AutoTokenizer] = primary_tokenizer
+        self.tiny_tokenizer: Optional[AutoTokenizer] = tiny_tokenizer
         self._tokenizers_compatible = False
-        if self.tiny is not None and self.tiny_tokenizer is not None and primary_tokenizer is not None:
-            try:
-                self._tokenizers_compatible = (
-                    primary_tokenizer.get_vocab() == tiny_tokenizer.get_vocab()
-                )
-            except Exception:
-                self._tokenizers_compatible = False
+        if self.tiny is not None and self.tiny_tokenizer is not None:
+            if primary_tokenizer is not None:
+                try:
+                    self._tokenizers_compatible = (
+                        primary_tokenizer.get_vocab() == self.tiny_tokenizer.get_vocab()
+                    )
+                except Exception:
+                    self._tokenizers_compatible = False
 
     @torch.no_grad()
     def __call__(self, input_ids, scores):
         if self.max_steps is None or self.tiny is None:
             return scores
-        pos = self.step; self.step += 1
+        pos = self.step
+        self.step += 1
         if pos >= self.sf * self.max_steps:
             if self._tokenizers_compatible:
                 tiny_input_ids = input_ids.to(self.tiny.device)
                 past = self.past
             else:
-                if self.primary_tokenizer is None or self.tiny_tokenizer is None:
+                primary_tok = self.primary_tokenizer
+                tiny_tok = self.tiny_tokenizer
+                if primary_tok is None or tiny_tok is None:
                     return scores
-                text = self.primary_tokenizer.decode(
+                text = primary_tok.decode(
                     input_ids[0],
                     skip_special_tokens=False,
                     clean_up_tokenization_spaces=False,
                 )
-                tiny_encoding = self.tiny_tokenizer(
+                tiny_encoding = tiny_tok(
                     text,
                     return_tensors="pt",
                     add_special_tokens=False,
@@ -103,13 +140,19 @@ class CoherenceTailBoost(LogitsProcessor):
             scores = scores + self.mu * tiny_logits
         return scores
 
+
 @torch.no_grad()
-def surprise_repair_generate(prompt: str, main_name: str,
-                             tiny_name: Optional[str] = None,
-                             max_new_tokens: int = 64,
-                             middle: Tuple[float, float] = (0.45, 0.7),
-                             alpha: float = 10.0, topk: int = 5, mu: float = 0.4,
-                             **genkw) -> str:
+def surprise_repair_generate(
+    prompt: str,
+    main_name: str,
+    tiny_name: Optional[str] = None,
+    max_new_tokens: int = 64,
+    middle: Tuple[float, float] = (0.45, 0.7),
+    alpha: float = 10.0,
+    topk: int = 5,
+    mu: float = 0.4,
+    **genkw,
+) -> str:
     tok = AutoTokenizer.from_pretrained(main_name)
     main = AutoModelForCausalLM.from_pretrained(main_name, device_map="auto").eval()
 
@@ -119,7 +162,9 @@ def surprise_repair_generate(prompt: str, main_name: str,
         tiny_tok = AutoTokenizer.from_pretrained(tiny_name)
         tiny = AutoModelForCausalLM.from_pretrained(tiny_name, device_map="auto").eval()
 
-    anti = AntiTopKMiddle(start_frac=middle[0], end_frac=middle[1], topk=topk, alpha=alpha)
+    anti = AntiTopKMiddle(
+        start_frac=middle[0], end_frac=middle[1], topk=topk, alpha=alpha
+    )
     coh = CoherenceTailBoost(
         start_frac=middle[1],
         mu=mu,
@@ -134,8 +179,12 @@ def surprise_repair_generate(prompt: str, main_name: str,
     anti.max_steps = coh.max_steps = max_new_tokens
 
     out = main.generate(
-        **ids, max_new_tokens=max_new_tokens,
-        do_sample=True, top_p=0.9, temperature=0.8,
-        logits_processor=processors, **genkw
+        **ids,
+        max_new_tokens=max_new_tokens,
+        do_sample=True,
+        top_p=0.9,
+        temperature=0.8,
+        logits_processor=processors,
+        **genkw,
     )
     return tok.decode(out[0], skip_special_tokens=True)
