@@ -56,7 +56,7 @@ HF demo:
 python examples/sr_generate_demo.py
 ```
 
-## Benchmarks (example — fill with your measurements)
+## Benchmarks 
 | Device | Baseline (plain loop) | SpiralFastLoop | Speedup |
 |-------:|-----------------------:|---------------:|--------:|
 | GTX 1650 (CUDA) | 450 samples/s | 610 samples/s | 1.35× |
