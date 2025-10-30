@@ -229,6 +229,8 @@ class ThroughputMeter:
         self.last: float = initial_time
         self.samples: int = 0
         self.total_time: float = 0.0
+        self.total_batches: int = 0
+        self._last_duration: float = 0.0
         self._median = _PSquareQuantile(0.5)
         self._p95 = _PSquareQuantile(0.95)
 
@@ -239,12 +241,20 @@ class ThroughputMeter:
         self.record(elapsed, batch_size)
 
     def record(self, duration_s: float, batch_size: int) -> None:
-        if duration_s < 0.0:
-            raise ValueError("Duration must be non-negative.")
-        self.samples += int(batch_size)
-        self.total_time += float(duration_s)
-        self._median.add(duration_s)
-        self._p95.add(duration_s)
+        if duration_s < 0.0 or not math.isfinite(duration_s):
+            raise ValueError("Duration must be a finite, non-negative value.")
+
+        batch = int(batch_size)
+        if batch < 0:
+            raise ValueError("Batch size must be non-negative.")
+
+        duration = float(duration_s)
+        self.total_batches += 1
+        self.samples += batch
+        self.total_time += duration
+        self._last_duration = duration
+        self._median.add(duration)
+        self._p95.add(duration)
 
     def summary(self) -> Dict[str, float]:
         total = self.total_time
@@ -253,7 +263,13 @@ class ThroughputMeter:
             "p50_s": self._median.value(),
             "p95_s": self._p95.value(),
             "samples_per_sec": thr,
+            "total_time_s": total,
+            "batches": float(self.total_batches),
+            "last_duration_s": self._last_duration,
         }
+
+    def __len__(self) -> int:
+        return self.total_batches
 
 def maybe_channels_last(model: nn.Module, channels_last: bool = False) -> nn.Module:
     if not channels_last:
