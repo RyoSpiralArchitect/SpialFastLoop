@@ -2,62 +2,64 @@ import random
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+try:
+    from spiralfastloop.auto_epsilon import AutoEpsilonOptimizer
+except ModuleNotFoundError:  # pragma: no cover - local editable checkout
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from spiralfastloop.auto_epsilon import AutoEpsilonOptimizer
 
-from spiralfastloop.auto_epsilon import AutoEpsilonOptimizer, simulate_replay
 
-
-def _generate_batches(seed: int, n_batches: int = 6, batch_size: int = 256):
+def _generate_residuals(seed: int = 7, total: int = 400) -> list[float]:
     rng = random.Random(seed)
-    batches = []
-    for _ in range(n_batches):
-        dominant = rng.uniform(0.02, 0.08)
-        noise = rng.uniform(0.001, 0.008)
-        batch = []
-        for _ in range(batch_size):
-            if rng.random() < 0.35:
-                batch.append(rng.gauss(0.0, noise))
-            else:
-                batch.append(rng.gauss(0.0, dominant))
-        batches.append(batch)
-    return batches
+    samples: list[float] = []
+    for _ in range(total):
+        if rng.random() < 0.65:
+            samples.append(rng.gauss(0.0, 0.015))
+        else:
+            samples.append(rng.gauss(0.0, 0.08))
+    return samples
 
 
-def test_optimizer_updates_towards_reasonable_threshold():
-    batches = _generate_batches(42)
+def test_auto_epsilon_reduces_unnecessary_zeroing():
+    residuals = _generate_residuals()
+    optimiser = AutoEpsilonOptimizer(
+        initial_epsilon=0.08,
+        bounds=(0.01, 0.12),
+        optimisation_interval=25,
+        optimisation_steps=3,
+        min_history=60,
+        smoothing=0.4,
+        weight_zero=0.55,
+        weight_error=0.45,
+        random_state=123,
+    )
 
-    optimizer = AutoEpsilonOptimizer(
-        bounds=(1e-5, 0.2),
+    for value in residuals:
+        optimiser.observe(value)
+
+    report = optimiser.report()
+    baseline = optimiser.evaluate(residuals=residuals, epsilon=0.08)
+
+    assert report.total == baseline.total
+    assert 0.0025 <= report.epsilon <= 0.12
+    assert report.zero_ratio < baseline.zero_ratio
+    assert report.avg_abs_error <= baseline.avg_abs_error + 0.015
+
+
+def test_auto_epsilon_history_is_stable():
+    residuals = _generate_residuals(seed=99)
+    optimiser = AutoEpsilonOptimizer(
         initial_epsilon=0.05,
-        normalization_weight=0.75,
-        stability_weight=0.05,
-        random_state=1,
+        bounds=(0.002, 0.1),
+        optimisation_interval=20,
+        optimisation_steps=4,
+        min_history=50,
+        smoothing=0.5,
+        random_state=11,
     )
 
-    learned_epsilons = [optimizer.update(batch)["epsilon"] for batch in batches]
+    for value in residuals:
+        optimiser.observe(value)
 
-    assert learned_epsilons[0] < 0.02
-    assert learned_epsilons[-1] < 0.01
-    assert learned_epsilons[-1] > 1e-4
-
-
-def test_simulation_reports_superior_metrics_for_adaptive_epsilon():
-    batches = _generate_batches(7, n_batches=5)
-
-    optimizer = AutoEpsilonOptimizer(
-        bounds=(1e-5, 0.15),
-        initial_epsilon=0.04,
-        normalization_weight=0.5,
-        stability_weight=0.1,
-        random_state=3,
-    )
-
-    results = simulate_replay(batches, optimizer=optimizer, baseline_epsilon=0.04)
-
-    baseline = results["baseline"]
-    learned = results["learned"]
-
-    assert learned["unnecessary_normalisations"] <= baseline["unnecessary_normalisations"]
-    assert learned["mean_error"] <= baseline["mean_error"] * 1.6
-    assert learned["epsilon_mean"] < baseline["epsilon_mean"]
-
+    history_std = optimiser.report().epsilon_std
+    assert history_std < 0.02
