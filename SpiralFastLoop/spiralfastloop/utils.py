@@ -6,6 +6,7 @@ from __future__ import annotations
 import math
 import os
 import time
+from collections import deque
 from collections.abc import Mapping, MutableMapping
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Callable, Dict, Optional, Tuple, Union, Literal, cast
@@ -223,16 +224,73 @@ class _PSquareQuantile:
 class ThroughputMeter:
     """Measure batch latencies and throughput with streaming quantile estimates."""
 
-    def __init__(self, *, time_fn: Optional[Callable[[], float]] = None) -> None:
+    class _BatchTimer(AbstractContextManager["ThroughputMeter._BatchTimer"]):
+        def __init__(
+            self,
+            meter: "ThroughputMeter",
+            batch_size: int,
+            *,
+            record_on_exception: bool,
+        ) -> None:
+            self._meter = meter
+            self._batch_size = batch_size
+            self._record_on_exception = record_on_exception
+            self._start: Optional[float] = None
+
+        def __enter__(self) -> "ThroughputMeter._BatchTimer":
+            self._start = self._meter._time_fn()
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            end = self._meter._time_fn()
+            self._meter.last = end
+            if self._start is None:
+                return False
+            duration = max(0.0, end - self._start)
+            should_record = exc_type is None or self._record_on_exception
+            if should_record:
+                self._meter.record(duration, self._batch_size)
+            return False
+
+    def __init__(
+        self,
+        *,
+        time_fn: Optional[Callable[[], float]] = None,
+        smoothing: Optional[float] = 0.2,
+        window: int = 32,
+    ) -> None:
+        if smoothing is not None:
+            if not (0.0 < smoothing <= 1.0):
+                raise ValueError("smoothing must be in the interval (0, 1].")
+        window_int = int(window)
+        if window_int < 0:
+            raise ValueError("window must be non-negative.")
         self._time_fn: Callable[[], float] = time_fn or time.perf_counter
-        initial_time = self._time_fn()
-        self.last: float = initial_time
-        self.samples: int = 0
-        self.total_time: float = 0.0
-        self.total_batches: int = 0
-        self._last_duration: float = 0.0
+        self._smoothing = smoothing
+        self._window_limit = window_int
+        self._window_records: deque[tuple[float, int]] = deque()
+        self._window_duration = 0.0
+        self._window_samples = 0
+        self._window_batches = 0
+        self.reset()
+
+    def reset(self) -> None:
+        """Clear the meter's accumulated state while keeping the time source."""
+        self.last = self._time_fn()
+        self.samples = 0
+        self._total_time = 0.0
+        self._time_correction = 0.0
+        self._batches = 0
         self._median = _PSquareQuantile(0.5)
         self._p95 = _PSquareQuantile(0.95)
+        self._last_duration = 0.0
+        self._min_duration = math.inf
+        self._max_duration = 0.0
+        self._ema_throughput: Optional[float] = None
+        self._window_records.clear()
+        self._window_duration = 0.0
+        self._window_samples = 0
+        self._window_batches = 0
 
     def tick(self, batch_size: int) -> None:
         now = self._time_fn()
@@ -241,35 +299,97 @@ class ThroughputMeter:
         self.record(elapsed, batch_size)
 
     def record(self, duration_s: float, batch_size: int) -> None:
-        if duration_s < 0.0 or not math.isfinite(duration_s):
-            raise ValueError("Duration must be a finite, non-negative value.")
-
-        batch = int(batch_size)
-        if batch < 0:
-            raise ValueError("Batch size must be non-negative.")
-
+        if duration_s < 0.0:
+            raise ValueError("Duration must be non-negative.")
+        if not math.isfinite(duration_s):
+            raise ValueError("Duration must be finite.")
+        batch_size_int = int(batch_size)
+        if batch_size_int <= 0:
+            raise ValueError("batch_size must be a positive integer.")
+        self.samples += batch_size_int
         duration = float(duration_s)
-        self.total_batches += 1
-        self.samples += batch
-        self.total_time += duration
-        self._last_duration = duration
+        self._accumulate_total_time(duration)
+        self._batches += 1
         self._median.add(duration)
         self._p95.add(duration)
+        self._last_duration = duration
+        if duration < self._min_duration:
+            self._min_duration = duration
+        if duration > self._max_duration:
+            self._max_duration = duration
+
+        if self._window_limit:
+            if self._window_batches == self._window_limit:
+                old_duration, old_samples = self._window_records.popleft()
+                self._window_duration -= old_duration
+                self._window_samples -= old_samples
+                self._window_batches -= 1
+            self._window_records.append((duration, batch_size_int))
+            self._window_duration += duration
+            self._window_samples += batch_size_int
+            self._window_batches += 1
+
+        if self._smoothing is not None and duration > 0.0:
+            throughput = batch_size_int / duration
+            if self._ema_throughput is None:
+                self._ema_throughput = throughput
+            else:
+                alpha = self._smoothing
+                assert alpha is not None
+                self._ema_throughput = alpha * throughput + (1.0 - alpha) * self._ema_throughput
+        elif self._ema_throughput is None and self._smoothing is not None:
+            self._ema_throughput = 0.0
 
     def summary(self) -> Dict[str, float]:
-        total = self.total_time
+        total = self._total_time
         thr = (self.samples / total) if total > 0.0 else 0.0
+        batches = self._batches
+        avg_batch = (total / batches) if batches > 0 else 0.0
+        min_batch = self._min_duration if batches > 0 and math.isfinite(self._min_duration) else 0.0
+        max_batch = self._max_duration if batches > 0 else 0.0
+        ema = self._ema_throughput if self._ema_throughput is not None else 0.0
+        window_thr = 0.0
+        if self._window_duration > 0.0 and self._window_batches > 0:
+            window_thr = self._window_samples / self._window_duration
         return {
             "p50_s": self._median.value(),
             "p95_s": self._p95.value(),
             "samples_per_sec": thr,
+            "avg_batch_s": avg_batch,
             "total_time_s": total,
-            "batches": float(self.total_batches),
-            "last_duration_s": self._last_duration,
+            "batches": float(batches),
+            "samples": float(self.samples),
+            "last_batch_s": self._last_duration if batches > 0 else 0.0,
+            "min_batch_s": min_batch,
+            "max_batch_s": max_batch,
+            "ema_samples_per_sec": ema,
+            "window_samples_per_sec": window_thr,
+            "window_time_s": self._window_duration if self._window_batches > 0 else 0.0,
+            "window_batches": float(self._window_batches),
+            "window_samples": float(self._window_samples),
         }
 
-    def __len__(self) -> int:
-        return self.total_batches
+    def time_batch(
+        self,
+        batch_size: int,
+        *,
+        record_on_exception: bool = False,
+    ) -> "ThroughputMeter._BatchTimer":
+        return ThroughputMeter._BatchTimer(
+            self,
+            batch_size,
+            record_on_exception=record_on_exception,
+        )
+
+    def _accumulate_total_time(self, duration: float) -> None:
+        y = duration - self._time_correction
+        t = self._total_time + y
+        self._time_correction = (t - self._total_time) - y
+        self._total_time = t
+
+    @property
+    def total_time(self) -> float:
+        return self._total_time
 
 def maybe_channels_last(model: nn.Module, channels_last: bool = False) -> nn.Module:
     if not channels_last:
