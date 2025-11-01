@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import math
 import os
 import time
-from collections.abc import Mapping, MutableMapping, Sequence
+from collections import deque
+from collections.abc import Mapping, MutableMapping
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Callable, Dict, Optional, Tuple, Union, Literal, cast
 
@@ -114,33 +116,280 @@ def dataloader_from_dataset(
         persistent_workers=persistent, pin_memory=pin_memory
     )
 
+class _PSquareQuantile:
+    """Streaming percentile estimator using the P² algorithm."""
+
+    def __init__(self, quantile: float) -> None:
+        if not (0.0 < quantile < 1.0):
+            raise ValueError("quantile must be in (0, 1)")
+        self.quantile = float(quantile)
+        self._initial: list[float] = []
+        self._q: Optional[list[float]] = None
+        self._n: Optional[list[int]] = None
+        self._np: Optional[list[float]] = None
+        self._dn: Optional[list[float]] = None
+
+    def add(self, value: float) -> None:
+        if not math.isfinite(value):
+            return
+        if self._q is None or self._n is None or self._np is None or self._dn is None:
+            self._initial.append(float(value))
+            if len(self._initial) == 5:
+                self._initial.sort()
+                self._q = self._initial.copy()
+                self._n = [i + 1 for i in range(5)]
+                q = self.quantile
+                self._np = [
+                    1.0,
+                    1.0 + 2.0 * q,
+                    1.0 + 4.0 * q,
+                    3.0 + 2.0 * q,
+                    5.0,
+                ]
+                self._dn = [0.0, q / 2.0, q, (1.0 + q) / 2.0, 1.0]
+            return
+
+        q_values = self._q
+        positions = self._n
+        desired = self._np
+        increments = self._dn
+        assert q_values is not None and positions is not None and desired is not None and increments is not None
+
+        if value < q_values[0]:
+            q_values[0] = float(value)
+            k = 0
+        elif value >= q_values[4]:
+            q_values[4] = float(value)
+            k = 3
+        else:
+            k = 0
+            while k < 3 and value >= q_values[k + 1]:
+                k += 1
+
+        for i in range(k + 1, 5):
+            positions[i] += 1
+
+        for i in range(5):
+            desired[i] += increments[i]
+
+        for i in range(1, 4):
+            d = desired[i] - positions[i]
+            if (d >= 1.0 and positions[i + 1] - positions[i] > 1) or (d <= -1.0 and positions[i - 1] - positions[i] < -1):
+                step = 1 if d > 0 else -1
+                candidate = self._parabolic_update(i, step)
+                lower = q_values[i - 1]
+                upper = q_values[i + 1]
+                if lower < candidate < upper:
+                    q_values[i] = candidate
+                else:
+                    q_values[i] = self._linear_update(i, step)
+                positions[i] += step
+
+    def value(self) -> float:
+        if self._q is not None:
+            return float(self._q[2])
+        if not self._initial:
+            return 0.0
+        ordered = sorted(self._initial)
+        if len(ordered) == 1:
+            return float(ordered[0])
+        index = int(round(self.quantile * (len(ordered) - 1)))
+        index = max(0, min(len(ordered) - 1, index))
+        return float(ordered[index])
+
+    def _parabolic_update(self, idx: int, step: int) -> float:
+        assert self._q is not None and self._n is not None
+        q_values = self._q
+        positions = self._n
+        numerator = step * (
+            (positions[idx] - positions[idx - 1] + step) * (q_values[idx + 1] - q_values[idx]) / (positions[idx + 1] - positions[idx])
+            + (positions[idx + 1] - positions[idx] - step) * (q_values[idx] - q_values[idx - 1]) / (positions[idx] - positions[idx - 1])
+        )
+        denominator = positions[idx + 1] - positions[idx - 1]
+        if denominator == 0:
+            return q_values[idx]
+        return q_values[idx] + numerator / denominator
+
+    def _linear_update(self, idx: int, step: int) -> float:
+        assert self._q is not None and self._n is not None
+        q_values = self._q
+        positions = self._n
+        neighbour = idx + step
+        denominator = positions[neighbour] - positions[idx]
+        if denominator == 0:
+            return q_values[idx]
+        return q_values[idx] + step * (q_values[neighbour] - q_values[idx]) / denominator
+
+
 class ThroughputMeter:
-    """Measure batch latencies and throughput."""
-    def __init__(self) -> None:
-        self.batch_times: list[float] = []
-        self.last: float = time.perf_counter()
-        self.samples: int = 0
+    """Measure batch latencies and throughput with streaming quantile estimates."""
+
+    class _BatchTimer(AbstractContextManager["ThroughputMeter._BatchTimer"]):
+        def __init__(
+            self,
+            meter: "ThroughputMeter",
+            batch_size: int,
+            *,
+            record_on_exception: bool,
+        ) -> None:
+            self._meter = meter
+            self._batch_size = batch_size
+            self._record_on_exception = record_on_exception
+            self._start: Optional[float] = None
+
+        def __enter__(self) -> "ThroughputMeter._BatchTimer":
+            self._start = self._meter._time_fn()
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            end = self._meter._time_fn()
+            self._meter.last = end
+            if self._start is None:
+                return False
+            duration = max(0.0, end - self._start)
+            should_record = exc_type is None or self._record_on_exception
+            if should_record:
+                self._meter.record(duration, self._batch_size)
+            return False
+
+    def __init__(
+        self,
+        *,
+        time_fn: Optional[Callable[[], float]] = None,
+        smoothing: Optional[float] = 0.2,
+        window: int = 32,
+    ) -> None:
+        if smoothing is not None:
+            if not (0.0 < smoothing <= 1.0):
+                raise ValueError("smoothing must be in the interval (0, 1].")
+        window_int = int(window)
+        if window_int < 0:
+            raise ValueError("window must be non-negative.")
+        self._time_fn: Callable[[], float] = time_fn or time.perf_counter
+        self._smoothing = smoothing
+        self._window_limit = window_int
+        self._window_records: deque[tuple[float, int]] = deque()
+        self._window_duration = 0.0
+        self._window_samples = 0
+        self._window_batches = 0
+        self.reset()
+
+    def reset(self) -> None:
+        """Clear the meter's accumulated state while keeping the time source."""
+        self.last = self._time_fn()
+        self.samples = 0
+        self._total_time = 0.0
+        self._time_correction = 0.0
+        self._batches = 0
+        self._median = _PSquareQuantile(0.5)
+        self._p95 = _PSquareQuantile(0.95)
+        self._last_duration = 0.0
+        self._min_duration = math.inf
+        self._max_duration = 0.0
+        self._ema_throughput: Optional[float] = None
+        self._window_records.clear()
+        self._window_duration = 0.0
+        self._window_samples = 0
+        self._window_batches = 0
 
     def tick(self, batch_size: int) -> None:
-        now = time.perf_counter()
-        self.batch_times.append(now - self.last)
-        self.samples += batch_size
+        now = self._time_fn()
+        elapsed = max(0.0, now - self.last)
         self.last = now
+        self.record(elapsed, batch_size)
 
-    @staticmethod
-    def _percentile(xs: Sequence[float], p: float) -> float:
-        if not xs:
-            return 0.0
-        xs_sorted = sorted(xs)
-        k = max(0, min(len(xs_sorted)-1, int(round((p/100.0)*(len(xs_sorted)-1)))))
-        return xs_sorted[k]
+    def record(self, duration_s: float, batch_size: int) -> None:
+        if duration_s < 0.0:
+            raise ValueError("Duration must be non-negative.")
+        if not math.isfinite(duration_s):
+            raise ValueError("Duration must be finite.")
+        batch_size_int = int(batch_size)
+        if batch_size_int <= 0:
+            raise ValueError("batch_size must be a positive integer.")
+        self.samples += batch_size_int
+        duration = float(duration_s)
+        self._accumulate_total_time(duration)
+        self._batches += 1
+        self._median.add(duration)
+        self._p95.add(duration)
+        self._last_duration = duration
+        if duration < self._min_duration:
+            self._min_duration = duration
+        if duration > self._max_duration:
+            self._max_duration = duration
+
+        if self._window_limit:
+            if self._window_batches == self._window_limit:
+                old_duration, old_samples = self._window_records.popleft()
+                self._window_duration -= old_duration
+                self._window_samples -= old_samples
+                self._window_batches -= 1
+            self._window_records.append((duration, batch_size_int))
+            self._window_duration += duration
+            self._window_samples += batch_size_int
+            self._window_batches += 1
+
+        if self._smoothing is not None and duration > 0.0:
+            throughput = batch_size_int / duration
+            if self._ema_throughput is None:
+                self._ema_throughput = throughput
+            else:
+                alpha = self._smoothing
+                assert alpha is not None
+                self._ema_throughput = alpha * throughput + (1.0 - alpha) * self._ema_throughput
+        elif self._ema_throughput is None and self._smoothing is not None:
+            self._ema_throughput = 0.0
 
     def summary(self) -> Dict[str, float]:
-        p50 = self._percentile(self.batch_times, 50)
-        p95 = self._percentile(self.batch_times, 95)
-        total = sum(self.batch_times) if self.batch_times else 0.0
-        thr = (self.samples / total) if total > 0 else 0.0
-        return {"p50_s": p50, "p95_s": p95, "samples_per_sec": thr}
+        total = self._total_time
+        thr = (self.samples / total) if total > 0.0 else 0.0
+        batches = self._batches
+        avg_batch = (total / batches) if batches > 0 else 0.0
+        min_batch = self._min_duration if batches > 0 and math.isfinite(self._min_duration) else 0.0
+        max_batch = self._max_duration if batches > 0 else 0.0
+        ema = self._ema_throughput if self._ema_throughput is not None else 0.0
+        window_thr = 0.0
+        if self._window_duration > 0.0 and self._window_batches > 0:
+            window_thr = self._window_samples / self._window_duration
+        return {
+            "p50_s": self._median.value(),
+            "p95_s": self._p95.value(),
+            "samples_per_sec": thr,
+            "avg_batch_s": avg_batch,
+            "total_time_s": total,
+            "batches": float(batches),
+            "samples": float(self.samples),
+            "last_batch_s": self._last_duration if batches > 0 else 0.0,
+            "min_batch_s": min_batch,
+            "max_batch_s": max_batch,
+            "ema_samples_per_sec": ema,
+            "window_samples_per_sec": window_thr,
+            "window_time_s": self._window_duration if self._window_batches > 0 else 0.0,
+            "window_batches": float(self._window_batches),
+            "window_samples": float(self._window_samples),
+        }
+
+    def time_batch(
+        self,
+        batch_size: int,
+        *,
+        record_on_exception: bool = False,
+    ) -> "ThroughputMeter._BatchTimer":
+        return ThroughputMeter._BatchTimer(
+            self,
+            batch_size,
+            record_on_exception=record_on_exception,
+        )
+
+    def _accumulate_total_time(self, duration: float) -> None:
+        y = duration - self._time_correction
+        t = self._total_time + y
+        self._time_correction = (t - self._total_time) - y
+        self._total_time = t
+
+    @property
+    def total_time(self) -> float:
+        return self._total_time
 
 def maybe_channels_last(model: nn.Module, channels_last: bool = False) -> nn.Module:
     if not channels_last:
