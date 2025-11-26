@@ -117,6 +117,8 @@ def dataloader_from_dataset(
     )
 
 class _PSquareQuantile:
+    __slots__ = ("quantile", "_initial", "_q", "_n", "_np", "_dn")
+
     """Streaming percentile estimator using the P² algorithm."""
 
     def __init__(self, quantile: float) -> None:
@@ -132,28 +134,32 @@ class _PSquareQuantile:
     def add(self, value: float) -> None:
         if not math.isfinite(value):
             return
-        if self._q is None or self._n is None or self._np is None or self._dn is None:
-            self._initial.append(float(value))
-            if len(self._initial) == 5:
-                self._initial.sort()
-                self._q = self._initial.copy()
-                self._n = [i + 1 for i in range(5)]
+
+        q_values = self._q
+        positions = self._n
+        desired = self._np
+        increments = self._dn
+
+        if q_values is None or positions is None or desired is None or increments is None:
+            initial = self._initial
+            initial.append(float(value))
+            if len(initial) == 5:
+                initial.sort()
+                q_values = initial.copy()
                 q = self.quantile
-                self._np = [
+                positions = [i + 1 for i in range(5)]
+                desired = [
                     1.0,
                     1.0 + 2.0 * q,
                     1.0 + 4.0 * q,
                     3.0 + 2.0 * q,
                     5.0,
                 ]
-                self._dn = [0.0, q / 2.0, q, (1.0 + q) / 2.0, 1.0]
+                increments = [0.0, q / 2.0, q, (1.0 + q) / 2.0, 1.0]
+                self._q, self._n, self._np, self._dn = q_values, positions, desired, increments
             return
 
-        q_values = self._q
-        positions = self._n
-        desired = self._np
-        increments = self._dn
-        assert q_values is not None and positions is not None and desired is not None and increments is not None
+        assert positions is not None and desired is not None and increments is not None
 
         if value < q_values[0]:
             q_values[0] = float(value)
@@ -222,9 +228,32 @@ class _PSquareQuantile:
 
 
 class ThroughputMeter:
+    __slots__ = (
+        "_time_fn",
+        "_smoothing",
+        "_window_limit",
+        "_window_records",
+        "_window_duration",
+        "_window_samples",
+        "_window_batches",
+        "last",
+        "samples",
+        "_total_time",
+        "_time_correction",
+        "_batches",
+        "_median",
+        "_p95",
+        "_last_duration",
+        "_min_duration",
+        "_max_duration",
+        "_ema_throughput",
+    )
+
     """Measure batch latencies and throughput with streaming quantile estimates."""
 
     class _BatchTimer(AbstractContextManager["ThroughputMeter._BatchTimer"]):
+        __slots__ = ("_meter", "_batch_size", "_record_on_exception", "_start")
+
         def __init__(
             self,
             meter: "ThroughputMeter",
@@ -306,38 +335,45 @@ class ThroughputMeter:
         batch_size_int = int(batch_size)
         if batch_size_int <= 0:
             raise ValueError("batch_size must be a positive integer.")
-        self.samples += batch_size_int
         duration = float(duration_s)
+
+        self.samples += batch_size_int
         self._accumulate_total_time(duration)
         self._batches += 1
-        self._median.add(duration)
-        self._p95.add(duration)
+
+        median = self._median
+        p95 = self._p95
+        median.add(duration)
+        p95.add(duration)
         self._last_duration = duration
+
         if duration < self._min_duration:
             self._min_duration = duration
         if duration > self._max_duration:
             self._max_duration = duration
 
-        if self._window_limit:
-            if self._window_batches == self._window_limit:
-                old_duration, old_samples = self._window_records.popleft()
+        window_limit = self._window_limit
+        if window_limit:
+            window_records = self._window_records
+            if self._window_batches == window_limit:
+                old_duration, old_samples = window_records.popleft()
                 self._window_duration -= old_duration
                 self._window_samples -= old_samples
                 self._window_batches -= 1
-            self._window_records.append((duration, batch_size_int))
+            window_records.append((duration, batch_size_int))
             self._window_duration += duration
             self._window_samples += batch_size_int
             self._window_batches += 1
 
-        if self._smoothing is not None and duration > 0.0:
+        smoothing = self._smoothing
+        if smoothing is not None and duration > 0.0:
             throughput = batch_size_int / duration
-            if self._ema_throughput is None:
+            ema = self._ema_throughput
+            if ema is None:
                 self._ema_throughput = throughput
             else:
-                alpha = self._smoothing
-                assert alpha is not None
-                self._ema_throughput = alpha * throughput + (1.0 - alpha) * self._ema_throughput
-        elif self._ema_throughput is None and self._smoothing is not None:
+                self._ema_throughput = smoothing * throughput + (1.0 - smoothing) * ema
+        elif self._ema_throughput is None and smoothing is not None:
             self._ema_throughput = 0.0
 
     def summary(self) -> Dict[str, float]:
