@@ -249,6 +249,8 @@ class ThroughputMeter:
         "_ema_throughput",
         "_track_distribution",
         "_track_window",
+        "_best_time_per_sample",
+        "_fast_mode",
     )
 
     """Measure batch latencies and throughput with streaming quantile estimates.
@@ -299,7 +301,12 @@ class ThroughputMeter:
         window: int = 32,
         track_distribution: bool = True,
         track_window: bool = True,
+        fast_mode: bool = False,
     ) -> None:
+        if fast_mode:
+            track_distribution = False
+            track_window = False
+            smoothing = None
         if smoothing is not None:
             if not (0.0 < smoothing <= 1.0):
                 raise ValueError("smoothing must be in the interval (0, 1].")
@@ -308,6 +315,7 @@ class ThroughputMeter:
             raise ValueError("window must be non-negative.")
         self._track_distribution = bool(track_distribution)
         self._track_window = bool(track_window)
+        self._fast_mode = bool(fast_mode)
         self._time_fn: Callable[[], float] = time_fn or time.perf_counter
         self._smoothing = smoothing
         self._window_limit = window_int if self._track_window else 0
@@ -334,6 +342,7 @@ class ThroughputMeter:
         self._window_duration = 0.0
         self._window_samples = 0
         self._window_batches = 0
+        self._best_time_per_sample: Optional[float] = None
 
     def tick(self, batch_size: int) -> None:
         now = self._time_fn()
@@ -359,6 +368,12 @@ class ThroughputMeter:
             self._min_duration = duration
         if duration > self._max_duration:
             self._max_duration = duration
+
+        if duration > 0.0:
+            time_per_sample = duration / batch_size_int
+            best = self._best_time_per_sample
+            if best is None or time_per_sample < best:
+                self._best_time_per_sample = time_per_sample
 
         if self._track_distribution:
             median = self._median
@@ -401,6 +416,10 @@ class ThroughputMeter:
         min_batch = self._min_duration if batches > 0 and math.isfinite(self._min_duration) else 0.0
         max_batch = self._max_duration if batches > 0 else 0.0
         ema = self._ema_throughput if self._ema_throughput is not None else 0.0
+        best_sps = 0.0
+        if self._best_time_per_sample:
+            best_sps = 1.0 / self._best_time_per_sample
+        headroom = (best_sps / thr) if thr > 0.0 else 0.0
         if self._track_distribution and self._median is not None and self._p95 is not None:
             p50 = self._median.value()
             p95 = self._p95.value()
@@ -428,6 +447,8 @@ class ThroughputMeter:
             "window_samples": float(self._window_samples),
             "distribution_tracked": self._track_distribution,
             "window_tracked": self._track_window,
+            "best_samples_per_sec": best_sps,
+            "headroom_ratio": headroom,
         }
 
     def time_batch(

@@ -1,6 +1,7 @@
 from collections.abc import Mapping
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -11,6 +12,7 @@ hypothesis = pytest.importorskip("hypothesis")
 from hypothesis import HealthCheck, given, settings, strategies as st  # type: ignore
 
 from spiralfastloop.engine import (
+    _configure_cuda_backends,
     _concatenate_batches,
     _ensure_loss_vector,
     _infer_batch_size,
@@ -184,6 +186,23 @@ def test_infer_batch_size_matches_manual(batch):
     expected = _expected_batch_size(batch)
     inferred = _infer_batch_size(batch)
     assert inferred == expected
+
+
+def test_configure_cuda_backends_updates_flags():
+    dummy = SimpleNamespace(
+        backends=SimpleNamespace(
+            cuda=SimpleNamespace(matmul=SimpleNamespace(allow_tf32=False)),
+            cudnn=SimpleNamespace(benchmark=False),
+        )
+    )
+
+    _configure_cuda_backends(True, True, torch_mod=dummy)
+    assert dummy.backends.cuda.matmul.allow_tf32 is True
+    assert dummy.backends.cudnn.benchmark is True
+
+    _configure_cuda_backends(False, False, torch_mod=dummy)
+    assert dummy.backends.cuda.matmul.allow_tf32 is False
+    assert dummy.backends.cudnn.benchmark is False
 
 
 @st.composite

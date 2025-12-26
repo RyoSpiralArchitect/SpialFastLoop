@@ -24,6 +24,28 @@ from .utils import (
 
 recommended_dataloader = dataloader_from_dataset
 
+
+def _configure_cuda_backends(
+    enable_tf32: bool,
+    cudnn_benchmark: bool,
+    torch_mod: Any = torch,
+) -> None:
+    """Toggle CUDA backend knobs with a safe, testable helper."""
+    try:
+        cuda_backends = getattr(getattr(torch_mod, "backends", None), "cuda", None)
+        matmul_backend = getattr(cuda_backends, "matmul", None)
+        if matmul_backend is not None and hasattr(matmul_backend, "allow_tf32"):
+            matmul_backend.allow_tf32 = bool(enable_tf32)
+    except Exception:
+        pass
+    try:
+        cudnn_backend = getattr(getattr(torch_mod, "backends", None), "cudnn", None)
+        if cudnn_backend is not None and hasattr(cudnn_backend, "benchmark"):
+            cudnn_backend.benchmark = bool(cudnn_benchmark)
+    except Exception:
+        pass
+
+
 def _concatenate_batches(base: Any, extra: Any) -> Any:
     """Concatenate two batched structures along their first dimension."""
     if base is None:
@@ -144,6 +166,8 @@ class FastTrainer:
         clip_grad_norm: Optional[float] = None,
         log_interval: int = 50,
         trigger_hook: Optional[Callable[[Dict[str, Any]], Optional[TriggerResult]]] = None,
+        enable_tf32: bool = True,
+        cudnn_benchmark: bool = True,
     ) -> None:
         self.device: str = device or get_best_device()
         self.model = model.to(self.device)
@@ -166,6 +190,7 @@ class FastTrainer:
 
         # CUDA fast matmul precision
         if self.device == "cuda":
+            _configure_cuda_backends(enable_tf32, cudnn_benchmark)
             try:
                 torch.set_float32_matmul_precision("high")
             except Exception:
