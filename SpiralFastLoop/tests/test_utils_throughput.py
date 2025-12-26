@@ -122,6 +122,22 @@ def test_throughput_meter_can_skip_distribution_tracking():
     assert summary["distribution_tracked"] is False
 
 
+def test_throughput_meter_can_skip_window_tracking():
+    meter = ThroughputMeter(track_window=False, window=4)
+    durations = [0.1, 0.2, 0.15]
+
+    for duration in durations:
+        meter.record(duration, 5)
+
+    summary = meter.summary()
+
+    assert summary["window_tracked"] is False
+    assert summary["window_batches"] == 0.0
+    assert summary["window_samples"] == 0.0
+    assert summary["window_time_s"] == 0.0
+    assert summary["window_samples_per_sec"] == 0.0
+
+
 def test_throughput_meter_time_batch_context_records_and_handles_exceptions():
     class FakeClock:
         def __init__(self) -> None:

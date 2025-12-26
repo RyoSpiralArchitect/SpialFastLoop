@@ -248,6 +248,7 @@ class ThroughputMeter:
         "_max_duration",
         "_ema_throughput",
         "_track_distribution",
+        "_track_window",
     )
 
     """Measure batch latencies and throughput with streaming quantile estimates.
@@ -255,6 +256,9 @@ class ThroughputMeter:
     Set ``track_distribution=False`` to avoid P² percentile maintenance when you
     only need aggregate throughput numbers, reducing Python overhead inside
     tight training loops.
+
+    Set ``track_window=False`` to skip the moving window book-keeping when you
+    only care about global throughput.
     """
 
     class _BatchTimer(AbstractContextManager["ThroughputMeter._BatchTimer"]):
@@ -294,6 +298,7 @@ class ThroughputMeter:
         smoothing: Optional[float] = 0.2,
         window: int = 32,
         track_distribution: bool = True,
+        track_window: bool = True,
     ) -> None:
         if smoothing is not None:
             if not (0.0 < smoothing <= 1.0):
@@ -302,9 +307,10 @@ class ThroughputMeter:
         if window_int < 0:
             raise ValueError("window must be non-negative.")
         self._track_distribution = bool(track_distribution)
+        self._track_window = bool(track_window)
         self._time_fn: Callable[[], float] = time_fn or time.perf_counter
         self._smoothing = smoothing
-        self._window_limit = window_int
+        self._window_limit = window_int if self._track_window else 0
         self._window_records: deque[tuple[float, int]] = deque()
         self._window_duration = 0.0
         self._window_samples = 0
@@ -421,6 +427,7 @@ class ThroughputMeter:
             "window_batches": float(self._window_batches),
             "window_samples": float(self._window_samples),
             "distribution_tracked": self._track_distribution,
+            "window_tracked": self._track_window,
         }
 
     def time_batch(
@@ -440,6 +447,12 @@ class ThroughputMeter:
         """Return whether percentile tracking is enabled."""
 
         return self._track_distribution
+
+    @property
+    def window_tracked(self) -> bool:
+        """Return whether moving-window stats are maintained."""
+
+        return self._track_window
 
     def _accumulate_total_time(self, duration: float) -> None:
         y = duration - self._time_correction
