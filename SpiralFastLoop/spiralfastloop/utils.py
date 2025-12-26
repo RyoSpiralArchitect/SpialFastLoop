@@ -247,9 +247,15 @@ class ThroughputMeter:
         "_min_duration",
         "_max_duration",
         "_ema_throughput",
+        "_track_distribution",
     )
 
-    """Measure batch latencies and throughput with streaming quantile estimates."""
+    """Measure batch latencies and throughput with streaming quantile estimates.
+
+    Set ``track_distribution=False`` to avoid P² percentile maintenance when you
+    only need aggregate throughput numbers, reducing Python overhead inside
+    tight training loops.
+    """
 
     class _BatchTimer(AbstractContextManager["ThroughputMeter._BatchTimer"]):
         __slots__ = ("_meter", "_batch_size", "_record_on_exception", "_start")
@@ -287,6 +293,7 @@ class ThroughputMeter:
         time_fn: Optional[Callable[[], float]] = None,
         smoothing: Optional[float] = 0.2,
         window: int = 32,
+        track_distribution: bool = True,
     ) -> None:
         if smoothing is not None:
             if not (0.0 < smoothing <= 1.0):
@@ -294,6 +301,7 @@ class ThroughputMeter:
         window_int = int(window)
         if window_int < 0:
             raise ValueError("window must be non-negative.")
+        self._track_distribution = bool(track_distribution)
         self._time_fn: Callable[[], float] = time_fn or time.perf_counter
         self._smoothing = smoothing
         self._window_limit = window_int
@@ -310,8 +318,8 @@ class ThroughputMeter:
         self._total_time = 0.0
         self._time_correction = 0.0
         self._batches = 0
-        self._median = _PSquareQuantile(0.5)
-        self._p95 = _PSquareQuantile(0.95)
+        self._median = _PSquareQuantile(0.5) if self._track_distribution else None
+        self._p95 = _PSquareQuantile(0.95) if self._track_distribution else None
         self._last_duration = 0.0
         self._min_duration = math.inf
         self._max_duration = 0.0
@@ -341,16 +349,19 @@ class ThroughputMeter:
         self._accumulate_total_time(duration)
         self._batches += 1
 
-        median = self._median
-        p95 = self._p95
-        median.add(duration)
-        p95.add(duration)
-        self._last_duration = duration
-
         if duration < self._min_duration:
             self._min_duration = duration
         if duration > self._max_duration:
             self._max_duration = duration
+
+        if self._track_distribution:
+            median = self._median
+            p95 = self._p95
+            if median is not None:
+                median.add(duration)
+            if p95 is not None:
+                p95.add(duration)
+        self._last_duration = duration
 
         window_limit = self._window_limit
         if window_limit:
@@ -384,12 +395,18 @@ class ThroughputMeter:
         min_batch = self._min_duration if batches > 0 and math.isfinite(self._min_duration) else 0.0
         max_batch = self._max_duration if batches > 0 else 0.0
         ema = self._ema_throughput if self._ema_throughput is not None else 0.0
+        if self._track_distribution and self._median is not None and self._p95 is not None:
+            p50 = self._median.value()
+            p95 = self._p95.value()
+        else:
+            p50 = 0.0
+            p95 = 0.0
         window_thr = 0.0
         if self._window_duration > 0.0 and self._window_batches > 0:
             window_thr = self._window_samples / self._window_duration
         return {
-            "p50_s": self._median.value(),
-            "p95_s": self._p95.value(),
+            "p50_s": p50,
+            "p95_s": p95,
             "samples_per_sec": thr,
             "avg_batch_s": avg_batch,
             "total_time_s": total,
