@@ -138,6 +138,20 @@ def test_throughput_meter_can_skip_window_tracking():
     assert summary["window_samples_per_sec"] == 0.0
 
 
+def test_throughput_meter_fast_mode_tracks_best_speed_and_headroom():
+    meter = ThroughputMeter(fast_mode=True)
+    meter.record(0.2, 4)  # 20 samples/s
+    meter.record(0.1, 8)  # 80 samples/s (best)
+
+    summary = meter.summary()
+
+    assert meter.distribution_tracked is False
+    assert meter.window_tracked is False
+    assert summary["best_samples_per_sec"] == pytest.approx(80.0, rel=1e-6)
+    assert summary["samples_per_sec"] == pytest.approx(12 / 0.3, rel=1e-6)
+    assert summary["headroom_ratio"] == pytest.approx(80.0 / summary["samples_per_sec"], rel=1e-6)
+
+
 def test_throughput_meter_time_batch_context_records_and_handles_exceptions():
     class FakeClock:
         def __init__(self) -> None:
