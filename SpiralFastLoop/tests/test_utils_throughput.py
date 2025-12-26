@@ -103,6 +103,23 @@ def test_throughput_meter_tracks_window_and_extrema():
     assert summary["ema_samples_per_sec"] == pytest.approx(102.0833, rel=1e-4)
 
 
+def test_throughput_meter_can_skip_distribution_tracking():
+    meter = ThroughputMeter(track_distribution=False, smoothing=None)
+    durations = [0.1, 0.05, 0.08]
+    for duration in durations:
+        meter.record(duration, 4)
+
+    summary = meter.summary()
+
+    assert meter._median is None
+    assert meter._p95 is None
+    assert summary["p50_s"] == 0.0
+    assert summary["p95_s"] == 0.0
+    assert summary["min_batch_s"] == pytest.approx(min(durations))
+    assert summary["max_batch_s"] == pytest.approx(max(durations))
+    assert summary["ema_samples_per_sec"] == 0.0
+
+
 def test_throughput_meter_time_batch_context_records_and_handles_exceptions():
     class FakeClock:
         def __init__(self) -> None:
