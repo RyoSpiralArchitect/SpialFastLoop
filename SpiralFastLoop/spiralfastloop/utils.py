@@ -420,6 +420,7 @@ class ThroughputMeter:
             "window_time_s": self._window_duration if self._window_batches > 0 else 0.0,
             "window_batches": float(self._window_batches),
             "window_samples": float(self._window_samples),
+            "distribution_tracked": self._track_distribution,
         }
 
     def time_batch(
@@ -433,6 +434,12 @@ class ThroughputMeter:
             batch_size,
             record_on_exception=record_on_exception,
         )
+
+    @property
+    def distribution_tracked(self) -> bool:
+        """Return whether percentile tracking is enabled."""
+
+        return self._track_distribution
 
     def _accumulate_total_time(self, duration: float) -> None:
         y = duration - self._time_correction

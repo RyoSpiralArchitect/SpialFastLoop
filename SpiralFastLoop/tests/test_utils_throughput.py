@@ -38,6 +38,7 @@ def test_throughput_meter_matches_percentiles_with_stream_data():
     assert summary["avg_batch_s"] == pytest.approx(total_time / len(durations), rel=1e-6)
     assert summary["batches"] == pytest.approx(len(durations))
     assert summary["samples"] == pytest.approx(total_samples)
+    assert summary["distribution_tracked"] is True
 
 
 def test_throughput_meter_allows_custom_time_source():
@@ -118,6 +119,7 @@ def test_throughput_meter_can_skip_distribution_tracking():
     assert summary["min_batch_s"] == pytest.approx(min(durations))
     assert summary["max_batch_s"] == pytest.approx(max(durations))
     assert summary["ema_samples_per_sec"] == 0.0
+    assert summary["distribution_tracked"] is False
 
 
 def test_throughput_meter_time_batch_context_records_and_handles_exceptions():
