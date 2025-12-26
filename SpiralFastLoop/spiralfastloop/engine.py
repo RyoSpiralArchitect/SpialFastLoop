@@ -29,17 +29,32 @@ def _configure_cuda_backends(
     enable_tf32: bool,
     cudnn_benchmark: bool,
     reduced_precision_reduction: bool = True,
+    enable_flash_sdp: Optional[bool] = True,
+    enable_mem_efficient_sdp: Optional[bool] = True,
+    enable_math_sdp: Optional[bool] = False,
     torch_mod: Any = torch,
 ) -> None:
     """Toggle CUDA backend knobs with a safe, testable helper."""
     try:
         cuda_backends = getattr(getattr(torch_mod, "backends", None), "cuda", None)
+        cuda_module = cuda_backends
         matmul_backend = getattr(cuda_backends, "matmul", None)
         if matmul_backend is not None and hasattr(matmul_backend, "allow_tf32"):
             matmul_backend.allow_tf32 = bool(enable_tf32)
         for attr in ("allow_fp16_reduced_precision_reduction", "allow_bf16_reduced_precision_reduction"):
             if matmul_backend is not None and hasattr(matmul_backend, attr):
                 setattr(matmul_backend, attr, bool(reduced_precision_reduction))
+        sdp_toggles = (
+            ("enable_flash_sdp", enable_flash_sdp),
+            ("enable_mem_efficient_sdp", enable_mem_efficient_sdp),
+            ("enable_math_sdp", enable_math_sdp),
+        )
+        for fn_name, value in sdp_toggles:
+            if value is None:
+                continue
+            fn = getattr(cuda_module, fn_name, None)
+            if callable(fn):
+                fn(bool(value))
     except Exception:
         pass
     try:
@@ -173,6 +188,9 @@ class FastTrainer:
         enable_tf32: bool = True,
         cudnn_benchmark: bool = True,
         reduced_precision_reduction: bool = True,
+        enable_flash_sdp: Optional[bool] = True,
+        enable_mem_efficient_sdp: Optional[bool] = True,
+        enable_math_sdp: Optional[bool] = False,
     ) -> None:
         self.device: str = device or get_best_device()
         self.model = model.to(self.device)
@@ -195,7 +213,14 @@ class FastTrainer:
 
         # CUDA fast matmul precision
         if self.device == "cuda":
-            _configure_cuda_backends(enable_tf32, cudnn_benchmark, reduced_precision_reduction)
+            _configure_cuda_backends(
+                enable_tf32,
+                cudnn_benchmark,
+                reduced_precision_reduction,
+                enable_flash_sdp,
+                enable_mem_efficient_sdp,
+                enable_math_sdp,
+            )
             try:
                 torch.set_float32_matmul_precision("high")
             except Exception:

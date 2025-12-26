@@ -196,6 +196,13 @@ else:
 
 
 def test_configure_cuda_backends_updates_flags():
+    called = {"flash": False, "mem_eff": False, "math": False}
+
+    def _flagger(key):
+        def setter(val: bool) -> None:
+            called[key] = val
+        return setter
+
     dummy = SimpleNamespace(
         backends=SimpleNamespace(
             cuda=SimpleNamespace(
@@ -203,23 +210,32 @@ def test_configure_cuda_backends_updates_flags():
                     allow_tf32=False,
                     allow_fp16_reduced_precision_reduction=False,
                     allow_bf16_reduced_precision_reduction=False,
-                )
+                ),
+                enable_flash_sdp=_flagger("flash"),
+                enable_mem_efficient_sdp=_flagger("mem_eff"),
+                enable_math_sdp=_flagger("math"),
             ),
             cudnn=SimpleNamespace(benchmark=False),
         )
     )
 
-    _configure_cuda_backends(True, True, True, torch_mod=dummy)
+    _configure_cuda_backends(True, True, True, True, True, False, torch_mod=dummy)
     assert dummy.backends.cuda.matmul.allow_tf32 is True
     assert dummy.backends.cuda.matmul.allow_fp16_reduced_precision_reduction is True
     assert dummy.backends.cuda.matmul.allow_bf16_reduced_precision_reduction is True
     assert dummy.backends.cudnn.benchmark is True
+    assert called["flash"] is True
+    assert called["mem_eff"] is True
+    assert called["math"] is False
 
-    _configure_cuda_backends(False, False, False, torch_mod=dummy)
+    _configure_cuda_backends(False, False, False, False, False, True, torch_mod=dummy)
     assert dummy.backends.cuda.matmul.allow_tf32 is False
     assert dummy.backends.cuda.matmul.allow_fp16_reduced_precision_reduction is False
     assert dummy.backends.cuda.matmul.allow_bf16_reduced_precision_reduction is False
     assert dummy.backends.cudnn.benchmark is False
+    assert called["flash"] is False
+    assert called["mem_eff"] is False
+    assert called["math"] is True
 
 
 if HAVE_HYPOTHESIS:
