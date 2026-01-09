@@ -215,6 +215,7 @@ class FastTrainer:
         enable_flash_sdp: Optional[bool] = True,
         enable_mem_efficient_sdp: Optional[bool] = True,
         enable_math_sdp: Optional[bool] = False,
+        meter_fast_mode: bool = False,
     ) -> None:
         if distributed is True:
             self.dist_ctx = init_distributed(backend=distributed_backend)
@@ -236,6 +237,7 @@ class FastTrainer:
         self.trigger_hook = trigger_hook
         self.logger = logger
         self.log_on_rank0 = log_on_rank0
+        self.meter_fast_mode = bool(meter_fast_mode)
 
         # AMP policy
         self.amp_enabled, self.amp_dtype, use_scaler = get_amp_policy(self.device, use_amp)
@@ -313,7 +315,7 @@ class FastTrainer:
         sampler = getattr(loader, "sampler", None)
         if isinstance(sampler, DistributedSampler) and epoch is not None:
             sampler.set_epoch(epoch)
-        meter = ThroughputMeter()
+        meter = ThroughputMeter(fast_mode=self.meter_fast_mode)
 
         # Detect if criterion supports reduction='none'
         supports_per_sample = False
@@ -525,6 +527,25 @@ class FastTrainer:
         self._log_metrics("train", metrics, epoch=epoch, mode="epoch")
         return metrics
 
+    def fit(
+        self,
+        dataset: torch.utils.data.Dataset[Any],
+        criterion: Any,
+        *,
+        batch_size: int = 256,
+        steps: Optional[int] = None,
+        epoch: Optional[int] = None,
+        **loader_kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Train on a dataset with a minimal-parameter entrypoint."""
+        loader = dataloader_from_dataset(
+            dataset,
+            batch_size=batch_size,
+            device=self.device,
+            **loader_kwargs,
+        )
+        return self.train_one_epoch(loader, criterion, steps=steps, epoch=epoch)
+
     def evaluate(
         self,
         loader: Iterable[Any],
@@ -539,7 +560,7 @@ class FastTrainer:
         sampler = getattr(loader, "sampler", None)
         if isinstance(sampler, DistributedSampler) and epoch is not None:
             sampler.set_epoch(epoch)
-        meter = ThroughputMeter()
+        meter = ThroughputMeter(fast_mode=self.meter_fast_mode)
         total_loss = torch.zeros((), device=self.device, dtype=torch.float64)
         total_weight = torch.zeros((), device=self.device, dtype=torch.float64)
         total_items = 0
