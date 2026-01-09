@@ -522,6 +522,7 @@ class FastTrainer:
         metrics["device"] = self.device
         metrics["world_size"] = self.dist_ctx.world_size
         metrics["rank"] = self.dist_ctx.rank
+        self._log_metrics("train", metrics, epoch=epoch, mode="epoch")
         return metrics
 
     def evaluate(
@@ -625,6 +626,7 @@ class FastTrainer:
         for key, total in metric_sums.items():
             denom = metric_weights.get(key, 0.0)
             metrics[key] = total / denom if denom else 0.0
+        self._log_metrics("eval", metrics, epoch=epoch, mode="epoch")
         return metrics
 
     def predict(
