@@ -9,11 +9,13 @@ import time
 from collections import deque
 from collections.abc import Mapping, MutableMapping
 from contextlib import AbstractContextManager, nullcontext
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Tuple, Union, Literal, cast
 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.dataset import Dataset
 
 def get_best_device() -> str:
@@ -24,7 +26,74 @@ def get_best_device() -> str:
         return "mps"
     return "cpu"
 
+
+@dataclass(frozen=True)
+class DistributedContext:
+    is_initialized: bool
+    rank: int
+    world_size: int
+    local_rank: int
+    backend: Optional[str]
+
+    @property
+    def is_primary(self) -> bool:
+        return self.rank == 0
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def get_distributed_context() -> DistributedContext:
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = torch.distributed.get_rank()
+        world_size = torch.distributed.get_world_size()
+        local_rank = _env_int("LOCAL_RANK", rank)
+        backend = torch.distributed.get_backend()
+        return DistributedContext(
+            is_initialized=True,
+            rank=rank,
+            world_size=world_size,
+            local_rank=local_rank,
+            backend=backend,
+        )
+    rank = _env_int("RANK", 0)
+    world_size = _env_int("WORLD_SIZE", 1)
+    local_rank = _env_int("LOCAL_RANK", rank)
+    return DistributedContext(
+        is_initialized=False,
+        rank=rank,
+        world_size=world_size,
+        local_rank=local_rank,
+        backend=None,
+    )
+
+
+def init_distributed(
+    *,
+    backend: Optional[str] = None,
+    init_method: str = "env://",
+) -> DistributedContext:
+    if not torch.distributed.is_available():
+        return get_distributed_context()
+    if torch.distributed.is_initialized():
+        return get_distributed_context()
+    world_size = _env_int("WORLD_SIZE", 1)
+    if world_size <= 1:
+        return get_distributed_context()
+    if backend is None:
+        backend = "nccl" if torch.cuda.is_available() else "gloo"
+    torch.distributed.init_process_group(backend=backend, init_method=init_method)
+    return get_distributed_context()
+
 AmpSetting = Union[bool, Literal["auto"], None]
+
+
+def _device_type(device: str) -> str:
+    return device.split(":", 1)[0]
 
 
 def get_amp_policy(device: str, use_amp: AmpSetting = "auto") -> Tuple[bool, torch.dtype, bool]:
@@ -42,14 +111,15 @@ def get_amp_policy(device: str, use_amp: AmpSetting = "auto") -> Tuple[bool, tor
     if use_amp is None:
         use_amp = "auto"
 
-    if device == "cuda":
+    device_type = _device_type(device)
+    if device_type == "cuda":
         # Prefer bf16 on Ampere+ (TF32/bf16), else fp16
         major, minor = torch.cuda.get_device_capability(0)
         if major >= 8:
             return True, torch.bfloat16, True
         else:
             return True, torch.float16, True
-    elif device == "mps":
+    elif device_type == "mps":
         # MPS AMP is fp16; GradScaler is not used on MPS.
         return True, torch.float16, False
     else:
@@ -58,7 +128,7 @@ def get_amp_policy(device: str, use_amp: AmpSetting = "auto") -> Tuple[bool, tor
 def autocast_ctx(device: str, enabled: bool, amp_dtype: torch.dtype) -> AbstractContextManager[Any]:
     if not enabled:
         return nullcontext()
-    return torch.autocast(device_type=device, dtype=amp_dtype)
+    return torch.autocast(device_type=_device_type(device), dtype=amp_dtype)
 
 def to_device(obj: Any, device: str, non_blocking: bool = True) -> Any:
     """Recursively move tensors (and nested structures) to device."""
@@ -96,6 +166,9 @@ def dataloader_from_dataset(
     persistent: bool = True,
     pin_memory: Optional[bool] = None,
     shuffle: bool = True,
+    distributed: bool = False,
+    seed: int = 42,
+    drop_last: bool = False,
 ) -> DataLoader[Any]:
     """Create a DataLoader with sensible performance defaults."""
     workers = num_workers
@@ -109,12 +182,47 @@ def dataloader_from_dataset(
         else:
             workers = max(2, cpu_count // 2)
     if pin_memory is None:
-        pin_memory = (device == "cuda")
+        pin_memory = (_device_type(device) == "cuda")
+    sampler = None
+    if distributed:
+        ctx = get_distributed_context()
+        if ctx.world_size > 1:
+            sampler = DistributedSampler(
+                dataset,
+                num_replicas=ctx.world_size,
+                rank=ctx.rank,
+                shuffle=shuffle,
+                seed=seed,
+                drop_last=drop_last,
+            )
+            shuffle = False
     return DataLoader(
-        dataset, batch_size=batch_size, shuffle=shuffle,
-        num_workers=workers, prefetch_factor=prefetch_factor,
-        persistent_workers=persistent, pin_memory=pin_memory
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        sampler=sampler,
+        num_workers=workers,
+        prefetch_factor=prefetch_factor,
+        persistent_workers=persistent,
+        pin_memory=pin_memory,
+        drop_last=drop_last,
     )
+
+
+def distributed_sum(value: torch.Tensor) -> torch.Tensor:
+    if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
+        return value
+    tensor = value.clone()
+    torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.SUM)
+    return tensor
+
+
+def distributed_mean(value: torch.Tensor) -> torch.Tensor:
+    tensor = distributed_sum(value)
+    ctx = get_distributed_context()
+    if ctx.world_size > 1:
+        tensor = tensor / ctx.world_size
+    return tensor
 
 class _PSquareQuantile:
     __slots__ = ("quantile", "_initial", "_q", "_n", "_np", "_dn")

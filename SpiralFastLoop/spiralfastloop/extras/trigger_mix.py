@@ -19,8 +19,9 @@ retune:
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Deque, Dict, Optional, Sequence, Tuple
 
 import torch
 
@@ -33,11 +34,160 @@ FRACTION_NORMALIZATION_EPS = 1e-12
 COEFVAR_STABILIZER = 1e-8
 
 __all__ = [
+    "HardSampleBuffer",
+    "HardSampleProvider",
     "LossStdConfig",
     "LossStdTrigger",
     "FRACTION_NORMALIZATION_EPS",
     "COEFVAR_STABILIZER",
 ]
+
+
+def _detach_to_cpu(batch: Any) -> Any:
+    if isinstance(batch, torch.Tensor):
+        return batch.detach().cpu()
+    if isinstance(batch, dict):
+        return {k: _detach_to_cpu(v) for k, v in batch.items()}
+    if isinstance(batch, (list, tuple)):
+        converted = [_detach_to_cpu(v) for v in batch]
+        if isinstance(batch, tuple):
+            if hasattr(batch, "_fields"):
+                return type(batch)(*converted)
+            return tuple(converted)
+        return converted
+    return batch
+
+
+def _select_indices(batch: Any, indices: Sequence[int]) -> Any:
+    if isinstance(batch, torch.Tensor):
+        return batch.index_select(0, torch.tensor(indices, device=batch.device))
+    if isinstance(batch, dict):
+        return {k: _select_indices(v, indices) for k, v in batch.items()}
+    if isinstance(batch, (list, tuple)):
+        if len(batch) == 0:
+            return batch
+        if isinstance(batch[0], torch.Tensor):
+            selected = [_select_indices(v, indices) for v in batch]
+            if isinstance(batch, tuple):
+                if hasattr(batch, "_fields"):
+                    return type(batch)(*selected)
+                return tuple(selected)
+            return selected
+        selected = [batch[i] for i in indices]
+        if isinstance(batch, tuple):
+            if hasattr(batch, "_fields"):
+                return type(batch)(*selected)
+            return tuple(selected)
+        return selected
+    raise TypeError("Unsupported batch structure for hard-sample selection.")
+
+
+def _split_batch(batch: Any, batch_size: int) -> list[Any]:
+    if isinstance(batch, torch.Tensor):
+        return [batch[i] for i in range(batch_size)]
+    if isinstance(batch, dict):
+        per_key = {k: _split_batch(v, batch_size) for k, v in batch.items()}
+        return [{k: per_key[k][i] for k in per_key} for i in range(batch_size)]
+    if isinstance(batch, (list, tuple)):
+        if len(batch) == batch_size and not (batch and isinstance(batch[0], torch.Tensor)):
+            return list(batch)
+        per_item = [_split_batch(item, batch_size) for item in batch]
+        samples = []
+        for i in range(batch_size):
+            assembled = [per_item[j][i] for j in range(len(per_item))]
+            if isinstance(batch, tuple):
+                if hasattr(batch, "_fields"):
+                    samples.append(type(batch)(*assembled))
+                else:
+                    samples.append(tuple(assembled))
+            else:
+                samples.append(assembled)
+        return samples
+    return [batch for _ in range(batch_size)]
+
+
+class HardSampleBuffer:
+    """Ring buffer of hard samples to support trigger-based injections."""
+
+    def __init__(self, *, max_samples: int = 2048) -> None:
+        self.max_samples = max(0, int(max_samples))
+        self._inputs: Deque[Any] = deque(maxlen=self.max_samples)
+        self._targets: Deque[Any] = deque(maxlen=self.max_samples)
+
+    def __len__(self) -> int:
+        return len(self._inputs)
+
+    def add_batch(
+        self,
+        inputs: Any,
+        targets: Any,
+        loss_vec: torch.Tensor,
+        *,
+        top_k: Optional[int] = None,
+    ) -> None:
+        if self.max_samples <= 0:
+            return
+        if loss_vec.ndim != 1:
+            raise ValueError("loss_vec must be a 1D tensor for hard-sample selection.")
+        batch_size = loss_vec.shape[0]
+        if batch_size == 0:
+            return
+        k = batch_size if top_k is None else max(1, min(batch_size, int(top_k)))
+        _, indices = torch.topk(loss_vec, k=k, largest=True)
+        selected_inputs = _select_indices(inputs, indices.tolist())
+        selected_targets = _select_indices(targets, indices.tolist())
+        cpu_inputs = _detach_to_cpu(selected_inputs)
+        cpu_targets = _detach_to_cpu(selected_targets)
+        input_samples = _split_batch(cpu_inputs, k)
+        target_samples = _split_batch(cpu_targets, k)
+        for item_in, item_tgt in zip(input_samples, target_samples):
+            self._inputs.append(item_in)
+            self._targets.append(item_tgt)
+
+    def sample(self, num_samples: int) -> Tuple[Any, Any]:
+        if len(self._inputs) == 0:
+            raise ValueError("HardSampleBuffer is empty; cannot sample.")
+        requested = max(1, int(num_samples))
+        indices = torch.randint(0, len(self._inputs), (requested,))
+        samples_in = [self._inputs[i] for i in indices.tolist()]
+        samples_tgt = [self._targets[i] for i in indices.tolist()]
+        if isinstance(samples_in[0], torch.Tensor):
+            return torch.stack(samples_in, dim=0), torch.stack(samples_tgt, dim=0)
+        return samples_in, samples_tgt
+
+
+class HardSampleProvider:
+    """Provider that pulls from a HardSampleBuffer and optionally augments."""
+
+    def __init__(
+        self,
+        buffer: HardSampleBuffer,
+        *,
+        augmenter: Optional[Callable[[Any, Any], Tuple[Any, Any]]] = None,
+        fallback: Optional[Callable[[int, str, Dict[str, Any]], Tuple[Any, Any]]] = None,
+        select_top_k: Optional[int] = None,
+    ) -> None:
+        self.buffer = buffer
+        self.augmenter = augmenter
+        self.fallback = fallback
+        self.select_top_k = select_top_k
+
+    def observe(self, ctx: Dict[str, Any]) -> None:
+        loss_vec = ctx["loss_vec"]
+        if not isinstance(loss_vec, torch.Tensor):
+            return
+        self.buffer.add_batch(ctx["inputs"], ctx["targets"], loss_vec, top_k=self.select_top_k)
+
+    def __call__(self, requested: int, device: str, ctx: Dict[str, Any]) -> Tuple[Any, Any]:
+        try:
+            inputs, targets = self.buffer.sample(requested)
+        except ValueError:
+            if self.fallback is None:
+                raise
+            inputs, targets = self.fallback(requested, device, ctx)
+        if self.augmenter is not None:
+            inputs, targets = self.augmenter(inputs, targets)
+        return inputs, targets
 
 
 @dataclass
@@ -80,6 +230,11 @@ class LossStdTrigger:
         # whole extra samples instead of being lost to flooring.
         self._budget_buffer: float = 0.0
         self._norm_metrics = normalization_metrics or GLOBAL_NORMALIZATION_METRICS
+
+    def observe(self, ctx: Dict[str, Any]) -> None:
+        provider = self.provider
+        if hasattr(provider, "observe"):
+            provider.observe(ctx)
 
     def _drop_rounding_noise(self, value: float, *, context: str = "budget_buffer") -> float:
         """Elide microscopic float residue that should count as zero.
