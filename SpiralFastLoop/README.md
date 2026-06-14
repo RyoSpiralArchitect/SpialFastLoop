@@ -53,6 +53,20 @@ metrics = trainer.train_one_epoch(loader, criterion, steps=200)
 print(metrics["reported_samples_per_sec"])
 ```
 
+For the shortest dataset-first path, let the trainer build the loader and still
+pass training options directly:
+
+```python
+metrics = trainer.fit(
+    dataset,
+    criterion,
+    batch_size=256,
+    steps=200,
+    collect_profile=True,
+    warmup_steps=4,
+)
+```
+
 ## Profiling
 
 ```python

@@ -210,6 +210,33 @@ def test_predict_can_return_metrics_and_phase_profile() -> None:
         assert metrics[f"profile_{phase_name}_pct"] == pytest.approx(phases[phase_name]["pct"])
 
 
+def test_fit_accepts_train_profile_and_loader_options() -> None:
+    inputs = torch.randn(8, 4)
+    targets = torch.randint(0, 3, (8,))
+    dataset = TensorDataset(inputs, targets)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    metrics = trainer.fit(
+        dataset,
+        nn.CrossEntropyLoss(),
+        batch_size=4,
+        num_workers=0,
+        shuffle=False,
+        steps=2,
+        warmup_steps=1,
+        collect_profile=True,
+    )
+
+    phases = metrics["profile"]["phases"]
+    assert metrics["steps"] == 2
+    assert metrics["warmup_steps"] == 1
+    assert metrics["steady_steps"] == 1
+    assert "forward" in phases
+    assert "loss" in phases
+
+
 def test_train_one_epoch_collects_phase_and_model_profile() -> None:
     inputs = torch.randn(16, 4)
     targets = torch.randint(0, 3, (16,))

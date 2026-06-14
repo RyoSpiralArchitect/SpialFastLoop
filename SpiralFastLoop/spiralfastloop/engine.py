@@ -1037,6 +1037,15 @@ class FastTrainer:
         batch_size: int = 256,
         steps: Optional[int] = None,
         epoch: Optional[int] = None,
+        collect_profile: bool = False,
+        profile_sync: bool = False,
+        profile_distribution: bool = True,
+        profile_window: int = 512,
+        profile_model: bool = False,
+        profile_model_depth: int = 1,
+        profile_model_max_modules: int = 64,
+        profile_model_include: Optional[Union[str, Sequence[str]]] = None,
+        warmup_steps: int = 0,
         **loader_kwargs: Any,
     ) -> Dict[str, Any]:
         """Train on a dataset with a minimal-parameter entrypoint."""
@@ -1046,7 +1055,21 @@ class FastTrainer:
             device=self.device,
             **loader_kwargs,
         )
-        return self.train_one_epoch(loader, criterion, steps=steps, epoch=epoch)
+        return self.train_one_epoch(
+            loader,
+            criterion,
+            steps=steps,
+            epoch=epoch,
+            collect_profile=collect_profile,
+            profile_sync=profile_sync,
+            profile_distribution=profile_distribution,
+            profile_window=profile_window,
+            profile_model=profile_model,
+            profile_model_depth=profile_model_depth,
+            profile_model_max_modules=profile_model_max_modules,
+            profile_model_include=profile_model_include,
+            warmup_steps=warmup_steps,
+        )
 
     def evaluate(
         self,
