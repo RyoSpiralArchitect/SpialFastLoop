@@ -199,23 +199,30 @@ def get_amp_policy(device: str, use_amp: AmpSetting = "auto") -> Tuple[bool, tor
         return False, torch.float32, False
 
 def autocast_ctx(device: str, enabled: bool, amp_dtype: torch.dtype) -> AbstractContextManager[Any]:
-    if not enabled:
+    enabled_value = _bool_setting(enabled, "enabled")
+    if not enabled_value:
         return nullcontext()
     return cast(AbstractContextManager[Any], torch.autocast(device_type=_device_type(device), dtype=amp_dtype))
 
+
 def to_device(obj: Any, device: str, non_blocking: bool = True) -> Any:
     """Recursively move tensors (and nested structures) to device."""
+    non_blocking_value = _bool_setting(non_blocking, "non_blocking")
+    return _to_device(obj, device, non_blocking_value)
+
+
+def _to_device(obj: Any, device: str, non_blocking: bool) -> Any:
     if torch.is_tensor(obj):
         return obj.to(device, non_blocking=non_blocking)
     if isinstance(obj, list):
-        return type(obj)(to_device(x, device, non_blocking) for x in obj)
+        return type(obj)(_to_device(x, device, non_blocking) for x in obj)
     if isinstance(obj, tuple):
-        converted_tuple = tuple(to_device(x, device, non_blocking) for x in obj)
+        converted_tuple = tuple(_to_device(x, device, non_blocking) for x in obj)
         if hasattr(obj, "_fields"):
             return type(obj)(*converted_tuple)
         return type(obj)(converted_tuple)
     if isinstance(obj, MutableMapping):
-        converted_mapping = {k: to_device(v, device, non_blocking) for k, v in obj.items()}
+        converted_mapping = {k: _to_device(v, device, non_blocking) for k, v in obj.items()}
         mapping_type = cast(Any, type(obj))
         if hasattr(obj, "default_factory"):
             default_factory = getattr(obj, "default_factory")
@@ -225,7 +232,7 @@ def to_device(obj: Any, device: str, non_blocking: bool = True) -> Any:
         new_mapping.update(converted_mapping)
         return new_mapping
     if isinstance(obj, Mapping):
-        converted_mapping = {k: to_device(v, device, non_blocking) for k, v in obj.items()}
+        converted_mapping = {k: _to_device(v, device, non_blocking) for k, v in obj.items()}
         mapping_type = cast(Any, type(obj))
         return mapping_type(converted_mapping)
     return obj

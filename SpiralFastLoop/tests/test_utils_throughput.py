@@ -1,5 +1,6 @@
 import math
 import sys
+from collections import defaultdict, namedtuple
 from pathlib import Path
 
 import pytest
@@ -12,11 +13,13 @@ import spiralfastloop.utils as utils_mod
 from spiralfastloop.utils import (
     ThroughputMeter,
     _PSquareQuantile,
+    autocast_ctx,
     dataloader_from_dataset,
     get_amp_policy,
     maybe_channels_last,
     safe_compile,
     safe_compile_with_diagnostics,
+    to_device,
 )
 
 
@@ -318,6 +321,35 @@ def test_maybe_channels_last_rejects_invalid_boolean_setting() -> None:
 
     with pytest.raises(ValueError, match="channels_last"):
         maybe_channels_last(model, channels_last="true")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("enabled", [1, "false", None])
+def test_autocast_ctx_rejects_invalid_enabled_setting(enabled: object) -> None:
+    with pytest.raises(ValueError, match="enabled"):
+        autocast_ctx("cpu", enabled=enabled, amp_dtype=torch.float32)  # type: ignore[arg-type]
+
+
+def test_to_device_preserves_nested_structures() -> None:
+    Pair = namedtuple("Pair", ["left", "right"])
+    batch = {
+        "pair": Pair(torch.tensor([1.0]), (torch.tensor([2.0]),)),
+        "defaults": defaultdict(lambda: torch.tensor([-1.0]), {"x": torch.tensor([3.0])}),
+    }
+
+    moved = to_device(batch, "cpu", non_blocking=False)
+
+    assert isinstance(moved["pair"], Pair)
+    assert isinstance(moved["pair"].right, tuple)
+    assert isinstance(moved["defaults"], defaultdict)
+    assert torch.equal(moved["pair"].left, torch.tensor([1.0]))
+    assert torch.equal(moved["pair"].right[0], torch.tensor([2.0]))
+    assert torch.equal(moved["defaults"]["x"], torch.tensor([3.0]))
+
+
+@pytest.mark.parametrize("non_blocking", [1, "false", None])
+def test_to_device_rejects_invalid_non_blocking_setting(non_blocking: object) -> None:
+    with pytest.raises(ValueError, match="non_blocking"):
+        to_device(torch.tensor([1.0]), "cpu", non_blocking=non_blocking)  # type: ignore[arg-type]
 
 
 def test_dataloader_from_dataset_allows_zero_workers() -> None:
