@@ -67,7 +67,7 @@ def _format_exception_reason(exc: Exception, limit: int = 200) -> str:
 
 
 def _finite_profile_value(raw: Any) -> Optional[float]:
-    if isinstance(raw, bool):
+    if isinstance(raw, (bool, str)):
         return None
     try:
         value = float(raw)
@@ -93,10 +93,9 @@ def _set_profile_metric(
 
 
 def _record_profile_flat_metric_invalids(metrics: Dict[str, Any], invalid_fields: list[str]) -> None:
-    if not invalid_fields:
-        return
     metrics["profile_flat_metric_invalid_count"] = len(invalid_fields)
-    metrics["profile_flat_metric_invalid_fields"] = invalid_fields
+    if invalid_fields:
+        metrics["profile_flat_metric_invalid_fields"] = invalid_fields
 
 
 def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, Any]) -> None:
@@ -110,6 +109,8 @@ def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, An
 
     forward_backward_time_s = 0.0
     forward_backward_pct = 0.0
+    forward_backward_time_values = 0
+    forward_backward_pct_values = 0
     for phase_name in _PROFILE_PHASE_METRIC_NAMES:
         row = phases.get(phase_name)
         if not isinstance(row, Mapping):
@@ -135,10 +136,14 @@ def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, An
         if phase_name in {"forward", "backward"}:
             if time_s is not None:
                 forward_backward_time_s += time_s
+                forward_backward_time_values += 1
             if pct is not None:
                 forward_backward_pct += pct
-    metrics["profile_forward_backward_time_s"] = forward_backward_time_s
-    metrics["profile_forward_backward_pct"] = forward_backward_pct
+                forward_backward_pct_values += 1
+    if forward_backward_time_values > 0:
+        metrics["profile_forward_backward_time_s"] = forward_backward_time_s
+    if forward_backward_pct_values > 0:
+        metrics["profile_forward_backward_pct"] = forward_backward_pct
     _record_profile_flat_metric_invalids(metrics, invalid_fields)
 
 

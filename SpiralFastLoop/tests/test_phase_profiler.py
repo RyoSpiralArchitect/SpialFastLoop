@@ -640,6 +640,8 @@ def test_train_one_epoch_collects_phase_and_model_profile() -> None:
     assert metrics["profile_forward_backward_pct"] == pytest.approx(
         phases["forward"]["pct"] + phases["backward"]["pct"]
     )
+    assert metrics["profile_flat_metric_invalid_count"] == 0
+    assert "profile_flat_metric_invalid_fields" not in metrics
 
     forward_children = profile["phase_breakdowns"]["forward"]["top_children"]
     assert forward_children
@@ -677,11 +679,11 @@ def test_profile_flat_metrics_skip_invalid_values() -> None:
     assert metrics["profile_backward_pct"] == pytest.approx(30.0)
     assert "profile_backward_avg_ms" not in metrics
     assert "profile_optimizer_time_s" not in metrics
-    assert metrics["profile_optimizer_pct"] == pytest.approx(5.0)
+    assert "profile_optimizer_pct" not in metrics
     assert metrics["profile_optimizer_avg_ms"] == pytest.approx(1.5)
     assert metrics["profile_forward_backward_time_s"] == pytest.approx(0.1)
     assert metrics["profile_forward_backward_pct"] == pytest.approx(30.0)
-    assert metrics["profile_flat_metric_invalid_count"] == 6
+    assert metrics["profile_flat_metric_invalid_count"] == 7
     assert metrics["profile_flat_metric_invalid_fields"] == [
         "profile_total_s",
         "profile_forward_pct",
@@ -689,6 +691,33 @@ def test_profile_flat_metrics_skip_invalid_values() -> None:
         "profile_backward_time_s",
         "profile_backward_avg_ms",
         "profile_optimizer_time_s",
+        "profile_optimizer_pct",
+    ]
+
+
+def test_profile_flat_metrics_omit_combined_forward_backward_when_invalid() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "profile_total_s": 1.0,
+        "phases": {
+            "forward": {"total_s": float("nan"), "pct": "bad", "avg_ms": 1.0},
+            "backward": {"total_s": True, "pct": float("inf"), "avg_ms": 2.0},
+        },
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert metrics["profile_total_s"] == pytest.approx(1.0)
+    assert "profile_forward_backward_time_s" not in metrics
+    assert "profile_forward_backward_pct" not in metrics
+    assert metrics["profile_forward_avg_ms"] == pytest.approx(1.0)
+    assert metrics["profile_backward_avg_ms"] == pytest.approx(2.0)
+    assert metrics["profile_flat_metric_invalid_count"] == 4
+    assert metrics["profile_flat_metric_invalid_fields"] == [
+        "profile_forward_time_s",
+        "profile_forward_pct",
+        "profile_backward_time_s",
+        "profile_backward_pct",
     ]
 
 
