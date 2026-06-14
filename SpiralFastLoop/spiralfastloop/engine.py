@@ -8,8 +8,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, cast
 
 import fnmatch
-import math
-import operator
 import time
 import torch
 import torch.nn as nn
@@ -20,6 +18,10 @@ from .utils import (
     AmpSetting,
     PhaseProfiler,
     ThroughputMeter,
+    _non_negative_finite_float_setting,
+    _non_negative_int_setting,
+    _optional_positive_int_setting,
+    _positive_int_setting,
     autocast_ctx,
     dataloader_from_dataset,
     distributed_sum,
@@ -219,47 +221,6 @@ def _detach_to_cpu(obj: Any) -> Any:
         converted_mapping = {key: _detach_to_cpu(value) for key, value in obj.items()}
         return cast(Any, type(obj))(converted_mapping)
     return obj
-
-
-def _int_setting(value: Any, name: str) -> int:
-    if isinstance(value, bool):
-        raise ValueError(f"{name} must be an integer")
-    try:
-        return operator.index(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be an integer") from exc
-
-
-def _positive_int_setting(value: Any, name: str) -> int:
-    normalized = _int_setting(value, name)
-    if normalized <= 0:
-        raise ValueError(f"{name} must be a positive integer")
-    return normalized
-
-
-def _non_negative_int_setting(value: Any, name: str) -> int:
-    normalized = _int_setting(value, name)
-    if normalized < 0:
-        raise ValueError(f"{name} must be a non-negative integer")
-    return normalized
-
-
-def _optional_positive_int_setting(value: Any, name: str) -> Optional[int]:
-    if value is None:
-        return None
-    return _positive_int_setting(value, name)
-
-
-def _non_negative_finite_float_setting(value: Any, name: str) -> float:
-    if isinstance(value, bool):
-        raise ValueError(f"{name} must be a non-negative finite number")
-    try:
-        normalized = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a non-negative finite number") from exc
-    if not math.isfinite(normalized) or normalized < 0.0:
-        raise ValueError(f"{name} must be a non-negative finite number")
-    return normalized
 
 
 @dataclass

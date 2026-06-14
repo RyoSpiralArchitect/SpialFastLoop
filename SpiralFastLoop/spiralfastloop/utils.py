@@ -130,6 +130,24 @@ def _non_negative_int_setting(value: Any, name: str) -> int:
     return normalized
 
 
+def _optional_positive_int_setting(value: Any, name: str) -> Optional[int]:
+    if value is None:
+        return None
+    return _positive_int_setting(value, name)
+
+
+def _non_negative_finite_float_setting(value: Any, name: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a non-negative finite number")
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-negative finite number") from exc
+    if not math.isfinite(normalized) or normalized < 0.0:
+        raise ValueError(f"{name} must be a non-negative finite number")
+    return normalized
+
+
 def get_amp_policy(device: str, use_amp: AmpSetting = "auto") -> Tuple[bool, torch.dtype, bool]:
     """
     Decide AMP usage, dtype, and whether GradScaler should be used.
