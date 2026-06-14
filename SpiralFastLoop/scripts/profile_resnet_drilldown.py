@@ -21,6 +21,13 @@ from spiralfastloop.utils import (
     get_best_device,
 )
 from scripts.bench_parallel_transactions import (
+    _dict_value,
+    _format_count,
+    _format_metric_value,
+    _has_positive_display_value,
+    _list_value,
+    _profile_child_rows,
+    _profile_row_name,
     non_negative_int_arg,
     positive_float_arg,
     positive_int_arg,
@@ -65,66 +72,86 @@ def _build_resnet18(num_classes: int) -> nn.Module:
     return models.resnet18(num_classes=num_classes)
 
 
+def _profile_rows(rows: Any, limit: int) -> list[dict[str, Any]]:
+    return [row for row in _list_value(rows) if isinstance(row, dict)][:limit]
+
+
 def _top_rows(profile: dict[str, Any], group: str, key: str, limit: int) -> list[dict[str, Any]]:
     if key == "phase":
-        return list(profile.get("top_phases", []))[:limit]
+        return _profile_rows(profile.get("top_phases", []), limit)
     if key in {"forward", "breakdown"}:
-        return list(profile.get("phase_breakdowns", {}).get(group, {}).get("top_children", []))[:limit]
+        return _profile_rows(_profile_child_rows(profile, "phase_breakdowns", group), limit)
     if key == "backward":
-        return list(profile.get("phase_events", {}).get(group, {}).get("top_children", []))[:limit]
+        return _profile_rows(_profile_child_rows(profile, "phase_events", group), limit)
     return []
 
 
 def _print_summary(metrics: dict[str, Any], topk: int) -> None:
-    profile = metrics.get("profile", {})
+    profile = _dict_value(metrics.get("profile"))
     print(
-        f"samples_per_sec={metrics.get('reported_samples_per_sec', metrics.get('samples_per_sec', 0.0)):.1f} "
-        f"total={metrics.get('samples_per_sec', 0.0):.1f}"
+        f"samples_per_sec="
+        f"{_format_metric_value(metrics.get('reported_samples_per_sec', metrics.get('samples_per_sec')), precision=1)} "
+        f"total={_format_metric_value(metrics.get('samples_per_sec'), precision=1)}"
     )
-    if metrics.get("warmup_steps", 0) > 0:
+    if _has_positive_display_value(metrics.get("warmup_steps")):
         print(
-            f"cold_start_steps={metrics.get('cold_start_steps', 0)} "
-            f"cold_start_time_s={metrics.get('cold_start_time_s', 0.0):.2f} "
-            f"cold_start_samples_per_sec={metrics.get('cold_start_samples_per_sec', 0.0):.1f}"
+            f"cold_start_steps={_format_count(metrics.get('cold_start_steps'))} "
+            f"cold_start_time_s={_format_metric_value(metrics.get('cold_start_time_s'), precision=2)} "
+            f"cold_start_samples_per_sec="
+            f"{_format_metric_value(metrics.get('cold_start_samples_per_sec'), precision=1)}"
         )
-    if metrics.get("steady_steps", 0) > 0:
+    if _has_positive_display_value(metrics.get("steady_steps")):
         print(
-            f"steady_steps={metrics.get('steady_steps', 0)} "
-            f"steady_samples_per_sec={metrics.get('steady_samples_per_sec', 0.0):.1f} "
-            f"steady_p99_ms={metrics.get('steady_p99_s', 0.0) * 1e3:.2f}"
+            f"steady_steps={_format_count(metrics.get('steady_steps'))} "
+            f"steady_samples_per_sec={_format_metric_value(metrics.get('steady_samples_per_sec'), precision=1)} "
+            f"steady_p99_ms={_format_metric_value(metrics.get('steady_p99_s'), precision=2, scale=1e3)}"
         )
     print(
-        f"batch_latency_p99_ms={metrics.get('p99_s', 0.0) * 1e3:.2f} "
-        f"batch_latency_std_ms={metrics.get('std_batch_s', 0.0) * 1e3:.2f}"
+        f"batch_latency_p99_ms={_format_metric_value(metrics.get('p99_s'), precision=2, scale=1e3)} "
+        f"batch_latency_std_ms={_format_metric_value(metrics.get('std_batch_s'), precision=2, scale=1e3)}"
     )
-    print(f"steps={metrics.get('steps', 0)} samples={metrics.get('samples', 0)}")
+    print(f"steps={_format_count(metrics.get('steps'))} samples={_format_count(metrics.get('samples'))}")
 
     phases = _top_rows(profile, "", "phase", topk)
     if phases:
         print("top phases:")
         for row in phases:
-            print(f"  {row['name']}: {row.get('pct', 0.0):.1f}% avg={row.get('avg_ms', 0.0):.2f}ms")
+            print(
+                f"  {_profile_row_name(row)}: "
+                f"{_format_metric_value(row.get('pct'), precision=1, suffix='%')} "
+                f"avg={_format_metric_value(row.get('avg_ms'), precision=2, suffix='ms')}"
+            )
 
     forward = _top_rows(profile, "forward", "forward", topk)
     if forward:
         print("forward drilldown:")
         for row in forward:
             print(
-                f"  {row['name']}: {row.get('pct_of_parent', 0.0):.1f}% "
-                f"avg={row.get('avg_ms', 0.0):.2f}ms p95={row.get('p95_ms', 0.0):.2f}ms"
+                f"  {_profile_row_name(row)}: "
+                f"{_format_metric_value(row.get('pct_of_parent'), precision=1, suffix='%')} "
+                f"avg={_format_metric_value(row.get('avg_ms'), precision=2, suffix='ms')} "
+                f"p95={_format_metric_value(row.get('p95_ms'), precision=2, suffix='ms')}"
             )
 
     backward = _top_rows(profile, "backward_grad_ready", "backward", topk)
     if backward:
         print("backward grad-ready:")
         for row in backward:
-            print(f"  {row['name']}: avg={row.get('avg_ms', 0.0):.2f}ms p95={row.get('p95_ms', 0.0):.2f}ms")
+            print(
+                f"  {_profile_row_name(row)}: "
+                f"avg={_format_metric_value(row.get('avg_ms'), precision=2, suffix='ms')} "
+                f"p95={_format_metric_value(row.get('p95_ms'), precision=2, suffix='ms')}"
+            )
 
     optimizer = _top_rows(profile, "optimizer", "breakdown", topk)
     if optimizer:
         print("optimizer drilldown:")
         for row in optimizer:
-            print(f"  {row['name']}: {row.get('pct_of_parent', 0.0):.1f}% avg={row.get('avg_ms', 0.0):.2f}ms")
+            print(
+                f"  {_profile_row_name(row)}: "
+                f"{_format_metric_value(row.get('pct_of_parent'), precision=1, suffix='%')} "
+                f"avg={_format_metric_value(row.get('avg_ms'), precision=2, suffix='ms')}"
+            )
 
 
 def validate_resnet_profile_args(args: argparse.Namespace) -> None:

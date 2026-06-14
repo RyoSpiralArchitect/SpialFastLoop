@@ -16,6 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.bench_parallel_transactions import (
     SyntheticTransactionDataset,
     _best_finite_row,
+    _format_count,
+    _format_metric_value,
+    _has_positive_display_value,
     non_negative_int_arg,
     parse_args,
     positive_float_arg,
@@ -477,6 +480,23 @@ def test_benchmark_arg_types_reject_ambiguous_direct_values(
 ) -> None:
     with pytest.raises(argparse.ArgumentTypeError):
         parser(raw)
+
+
+def test_display_formatters_hide_malformed_values() -> None:
+    assert _format_metric_value(1.234, precision=1, suffix="/s") == "1.2/s"
+    assert _format_metric_value(0.00125, precision=2, scale=1e3, suffix="ms") == "1.25ms"
+
+    for raw in (None, "fast", True, float("nan"), float("inf")):
+        assert _format_metric_value(raw, precision=1, suffix="/s") == "n/a"
+
+    assert _format_count("2") == "2"
+    assert _format_count(0) == "0"
+    for raw in (True, 1.5, -1, "many"):
+        assert _format_count(raw) == "n/a"
+
+    assert _has_positive_display_value("2")
+    for raw in (0, None, True, float("nan"), float("inf")):
+        assert not _has_positive_display_value(raw)
 
 
 def test_validate_benchmark_args_rejects_warmup_larger_than_steps() -> None:

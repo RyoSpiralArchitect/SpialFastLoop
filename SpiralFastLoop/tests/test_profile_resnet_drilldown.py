@@ -73,6 +73,76 @@ def test_validate_resnet_profile_args_rejects_empty_fake_batches() -> None:
         drilldown.validate_resnet_profile_args(args)
 
 
+def test_print_summary_formats_malformed_metrics_as_na(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    metrics = {
+        "reported_samples_per_sec": "fast",
+        "samples_per_sec": float("inf"),
+        "warmup_steps": 1,
+        "cold_start_steps": True,
+        "cold_start_time_s": None,
+        "cold_start_samples_per_sec": float("nan"),
+        "steady_steps": "2",
+        "steady_samples_per_sec": None,
+        "steady_p99_s": "slow",
+        "p99_s": None,
+        "std_batch_s": float("-inf"),
+        "steps": True,
+        "samples": "many",
+        "profile": {
+            "top_phases": [
+                "skip-me",
+                {"name": "forward", "pct": float("nan"), "avg_ms": "slow"},
+                {"pct": 12.0, "avg_ms": 1.0},
+            ],
+            "phase_breakdowns": {
+                "forward": {
+                    "top_children": [
+                        {"name": "conv", "pct_of_parent": None, "avg_ms": float("inf"), "p95_ms": 1.0},
+                    ],
+                },
+                "optimizer": {
+                    "top_children": [
+                        {"name": "adamw", "pct_of_parent": True, "avg_ms": 0.5},
+                    ],
+                },
+            },
+            "phase_events": {
+                "backward_grad_ready": {
+                    "top_children": [
+                        {"name": "layer4", "avg_ms": "slow", "p95_ms": float("nan")},
+                    ],
+                },
+            },
+        },
+    }
+
+    drilldown._print_summary(metrics, topk=4)
+
+    output = capsys.readouterr().out
+    assert "samples_per_sec=n/a total=n/a" in output
+    assert "cold_start_steps=n/a cold_start_time_s=n/a cold_start_samples_per_sec=n/a" in output
+    assert "steady_steps=2 steady_samples_per_sec=n/a steady_p99_ms=n/a" in output
+    assert "batch_latency_p99_ms=n/a batch_latency_std_ms=n/a" in output
+    assert "steps=n/a samples=n/a" in output
+    assert "forward: n/a avg=n/a" in output
+    assert "<unnamed>: 12.0% avg=1.00ms" in output
+    assert "conv: n/a avg=n/a p95=1.00ms" in output
+    assert "layer4: avg=n/a p95=n/a" in output
+    assert "adamw: n/a avg=0.50ms" in output
+
+
+def test_print_summary_ignores_malformed_profile_container(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    drilldown._print_summary({"samples_per_sec": 1.0, "profile": "bad-profile"}, topk=2)
+
+    output = capsys.readouterr().out
+    assert "samples_per_sec=1.0 total=1.0" in output
+    assert "top phases:" not in output
+
+
 def test_resnet_drilldown_parse_args_accepts_valid_fake_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

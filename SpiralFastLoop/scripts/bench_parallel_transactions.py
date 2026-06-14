@@ -9,7 +9,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -291,6 +291,61 @@ def positive_float_arg(raw: object) -> float:
     return value
 
 
+def _finite_display_value(raw: object) -> Optional[float]:
+    if isinstance(raw, bool):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+    return value
+
+
+def _format_metric_value(
+    raw: object,
+    *,
+    precision: int,
+    scale: float = 1.0,
+    suffix: str = "",
+) -> str:
+    value = _finite_display_value(raw)
+    if value is None:
+        return "n/a"
+    return f"{value * scale:.{precision}f}{suffix}"
+
+
+def _format_count(raw: object) -> str:
+    try:
+        return str(non_negative_int_arg(raw))
+    except argparse.ArgumentTypeError:
+        return "n/a"
+
+
+def _has_positive_display_value(raw: object) -> bool:
+    value = _finite_display_value(raw)
+    return value is not None and value > 0.0
+
+
+def _profile_row_name(row: dict[str, Any]) -> str:
+    return str(row.get("name", "<unnamed>"))
+
+
+def _dict_value(raw: object) -> dict[str, Any]:
+    return raw if isinstance(raw, dict) else {}
+
+
+def _list_value(raw: object) -> list[object]:
+    return raw if isinstance(raw, list) else []
+
+
+def _profile_child_rows(profile: dict[str, Any], section: str, group: str) -> list[object]:
+    sections = _dict_value(profile.get(section))
+    group_profile = _dict_value(sections.get(group))
+    return _list_value(group_profile.get("top_children"))
+
+
 def validate_benchmark_args(args: argparse.Namespace) -> None:
     steps = _positive_int_setting(args.steps, "steps")
     warmup_steps = _non_negative_int_setting(args.warmup_steps, "warmup_steps")
@@ -523,53 +578,60 @@ def main() -> None:
         results.append(result)
         metrics = result.as_dict()
         print(
-            f"Run {run_index}: wall={metrics['wall_time_s']:.2f}s "
-            f"setup={metrics.get('setup_time_s', 0.0):.2f}s "
-            f"e2e={metrics.get('end_to_end_wall_time_s', metrics['wall_time_s']):.2f}s "
-            f"thr={metrics.get('reported_samples_per_sec', metrics.get('samples_per_sec', 0.0)):.1f}/s "
-            f"total_thr={metrics.get('samples_per_sec', 0.0):.1f}/s "
-            f"p99_batch={metrics.get('p99_s', 0.0) * 1e3:.2f}ms "
-            f"std_batch={metrics.get('std_batch_s', 0.0) * 1e3:.2f}ms "
-            f"avg_loss={metrics.get('avg_loss', 0.0):.4f}"
+            f"Run {run_index}: "
+            f"wall={_format_metric_value(metrics.get('wall_time_s'), precision=2, suffix='s')} "
+            f"setup={_format_metric_value(metrics.get('setup_time_s'), precision=2, suffix='s')} "
+            f"e2e={_format_metric_value(metrics.get('end_to_end_wall_time_s', metrics.get('wall_time_s')), precision=2, suffix='s')} "
+            f"thr={_format_metric_value(metrics.get('reported_samples_per_sec', metrics.get('samples_per_sec')), precision=1, suffix='/s')} "
+            f"total_thr={_format_metric_value(metrics.get('samples_per_sec'), precision=1, suffix='/s')} "
+            f"p99_batch={_format_metric_value(metrics.get('p99_s'), precision=2, scale=1e3, suffix='ms')} "
+            f"std_batch={_format_metric_value(metrics.get('std_batch_s'), precision=2, scale=1e3, suffix='ms')} "
+            f"avg_loss={_format_metric_value(metrics.get('avg_loss'), precision=4)}"
         )
-        if metrics.get("warmup_steps", 0) > 0:
+        if _has_positive_display_value(metrics.get("warmup_steps")):
             print(
-                f"  cold_start: steps={metrics.get('cold_start_steps', 0)} "
-                f"time={metrics.get('cold_start_time_s', 0.0):.2f}s "
-                f"thr={metrics.get('cold_start_samples_per_sec', 0.0):.1f}/s"
+                f"  cold_start: steps={_format_count(metrics.get('cold_start_steps'))} "
+                f"time={_format_metric_value(metrics.get('cold_start_time_s'), precision=2, suffix='s')} "
+                f"thr={_format_metric_value(metrics.get('cold_start_samples_per_sec'), precision=1, suffix='/s')}"
             )
-        if metrics.get("steady_steps", 0) > 0:
+        if _has_positive_display_value(metrics.get("steady_steps")):
             print(
-                f"  steady: steps={metrics.get('steady_steps', 0)} "
-                f"thr={metrics.get('steady_samples_per_sec', 0.0):.1f}/s "
-                f"p99_batch={metrics.get('steady_p99_s', 0.0) * 1e3:.2f}ms"
+                f"  steady: steps={_format_count(metrics.get('steady_steps'))} "
+                f"thr={_format_metric_value(metrics.get('steady_samples_per_sec'), precision=1, suffix='/s')} "
+                f"p99_batch={_format_metric_value(metrics.get('steady_p99_s'), precision=2, scale=1e3, suffix='ms')}"
             )
-        profile = metrics.get("profile")
+        profile = _dict_value(metrics.get("profile"))
         if profile:
             top_phases = ", ".join(
-                f"{row['name']}={row.get('pct', 0.0):.1f}%"
-                for row in profile.get("top_phases", [])[:4]
+                f"{_profile_row_name(row)}={_format_metric_value(row.get('pct'), precision=1, suffix='%')}"
+                for row in _list_value(profile.get("top_phases"))[:4]
+                if isinstance(row, dict)
             )
             print(f"  phases: {top_phases}")
-            forward = profile.get("phase_breakdowns", {}).get("forward", {}).get("top_children", [])
+            forward = _profile_child_rows(profile, "phase_breakdowns", "forward")
             if forward:
                 top_forward = ", ".join(
-                    f"{row['name']}={row.get('pct_of_parent', 0.0):.1f}%"
+                    f"{_profile_row_name(row)}="
+                    f"{_format_metric_value(row.get('pct_of_parent'), precision=1, suffix='%')}"
                     for row in forward[:4]
+                    if isinstance(row, dict)
                 )
                 print(f"  forward: {top_forward}")
-            backward = profile.get("phase_events", {}).get("backward_grad_ready", {}).get("top_children", [])
+            backward = _profile_child_rows(profile, "phase_events", "backward_grad_ready")
             if backward:
                 top_backward = ", ".join(
-                    f"{row['name']}={row.get('avg_ms', 0.0):.1f}ms"
+                    f"{_profile_row_name(row)}={_format_metric_value(row.get('avg_ms'), precision=1, suffix='ms')}"
                     for row in backward[:4]
+                    if isinstance(row, dict)
                 )
                 print(f"  backward_grad_ready: {top_backward}")
-            optimizer = profile.get("phase_breakdowns", {}).get("optimizer", {}).get("top_children", [])
+            optimizer = _profile_child_rows(profile, "phase_breakdowns", "optimizer")
             if optimizer:
                 top_optimizer = ", ".join(
-                    f"{row['name']}={row.get('pct_of_parent', 0.0):.1f}%"
+                    f"{_profile_row_name(row)}="
+                    f"{_format_metric_value(row.get('pct_of_parent'), precision=1, suffix='%')}"
                     for row in optimizer[:4]
+                    if isinstance(row, dict)
                 )
                 print(f"  optimizer: {top_optimizer}")
 
