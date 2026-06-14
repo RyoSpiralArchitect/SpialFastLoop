@@ -116,6 +116,34 @@ def test_fast_trainer_rejects_invalid_numeric_settings(
 
 
 @pytest.mark.parametrize(
+    ("trainer_kwargs", "match"),
+    [
+        ({"use_amp": "false"}, "use_amp"),
+        ({"use_compile": "false"}, "use_compile"),
+        ({"channels_last": 1}, "channels_last"),
+        ({"distributed": "true"}, "distributed"),
+        ({"log_on_rank0": 1}, "log_on_rank0"),
+        ({"enable_tf32": "true"}, "enable_tf32"),
+        ({"cudnn_benchmark": 1}, "cudnn_benchmark"),
+        ({"reduced_precision_reduction": "false"}, "reduced_precision_reduction"),
+        ({"enable_flash_sdp": "false"}, "enable_flash_sdp"),
+        ({"enable_mem_efficient_sdp": 0}, "enable_mem_efficient_sdp"),
+        ({"enable_math_sdp": "true"}, "enable_math_sdp"),
+        ({"meter_fast_mode": "true"}, "meter_fast_mode"),
+    ],
+)
+def test_fast_trainer_rejects_invalid_boolean_settings(
+    trainer_kwargs: dict[str, object],
+    match: str,
+) -> None:
+    _loader, model, optimizer = _make_supervised_components()
+    kwargs = {"device": "cpu", "use_amp": False, "use_compile": False, **trainer_kwargs}
+
+    with pytest.raises(ValueError, match=match):
+        FastTrainer(model, optimizer, **kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
     ("train_kwargs", "match"),
     [
         ({"steps": 0}, "steps"),
@@ -143,6 +171,26 @@ def test_train_one_epoch_rejects_invalid_numeric_settings(
         trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), **train_kwargs)
 
 
+@pytest.mark.parametrize(
+    ("train_kwargs", "match"),
+    [
+        ({"collect_profile": "true"}, "collect_profile"),
+        ({"profile_sync": 1}, "profile_sync"),
+        ({"profile_distribution": "false"}, "profile_distribution"),
+        ({"profile_model": 1}, "profile_model"),
+    ],
+)
+def test_train_one_epoch_rejects_invalid_boolean_settings(
+    train_kwargs: dict[str, object],
+    match: str,
+) -> None:
+    loader, model, optimizer = _make_supervised_components()
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    with pytest.raises(ValueError, match=match):
+        trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), **train_kwargs)  # type: ignore[arg-type]
+
+
 def test_eval_and_predict_reject_invalid_step_limits() -> None:
     loader, model, optimizer = _make_supervised_components()
     trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
@@ -159,6 +207,45 @@ def test_eval_and_predict_reject_invalid_step_limits() -> None:
         trainer.evaluate(loader, nn.CrossEntropyLoss(), profile_window=0)
     with pytest.raises(ValueError, match="profile_window"):
         trainer.predict(loader, profile_window=0, return_metrics=True)
+
+
+@pytest.mark.parametrize(
+    ("eval_kwargs", "match"),
+    [
+        ({"collect_profile": "true"}, "collect_profile"),
+        ({"profile_sync": 1}, "profile_sync"),
+        ({"profile_distribution": "false"}, "profile_distribution"),
+    ],
+)
+def test_evaluate_rejects_invalid_boolean_settings(
+    eval_kwargs: dict[str, object],
+    match: str,
+) -> None:
+    loader, model, optimizer = _make_supervised_components()
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    with pytest.raises(ValueError, match=match):
+        trainer.evaluate(loader, nn.CrossEntropyLoss(), **eval_kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("predict_kwargs", "match"),
+    [
+        ({"collect_profile": "true"}, "collect_profile"),
+        ({"profile_sync": 1}, "profile_sync"),
+        ({"profile_distribution": "false"}, "profile_distribution"),
+        ({"return_metrics": "true"}, "return_metrics"),
+    ],
+)
+def test_predict_rejects_invalid_boolean_settings(
+    predict_kwargs: dict[str, object],
+    match: str,
+) -> None:
+    loader, model, optimizer = _make_supervised_components()
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    with pytest.raises(ValueError, match=match):
+        trainer.predict(loader, **predict_kwargs)  # type: ignore[arg-type]
 
 
 def test_predict_detaches_nested_outputs_to_cpu() -> None:
@@ -329,6 +416,24 @@ def test_fit_accepts_train_profile_and_loader_options() -> None:
     assert metrics["steady_steps"] == 1
     assert "forward" in phases
     assert "loss" in phases
+
+
+def test_fit_rejects_invalid_profile_boolean_before_loader_build() -> None:
+    inputs = torch.randn(8, 4)
+    targets = torch.randint(0, 3, (8,))
+    dataset = TensorDataset(inputs, targets)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    with pytest.raises(ValueError, match="collect_profile"):
+        trainer.fit(  # type: ignore[arg-type]
+            dataset,
+            nn.CrossEntropyLoss(),
+            batch_size=4,
+            num_workers=0,
+            collect_profile="true",
+        )
 
 
 def test_train_one_epoch_collects_phase_and_model_profile() -> None:

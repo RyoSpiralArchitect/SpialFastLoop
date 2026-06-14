@@ -18,8 +18,10 @@ from .utils import (
     AmpSetting,
     PhaseProfiler,
     ThroughputMeter,
+    _bool_setting,
     _non_negative_finite_float_setting,
     _non_negative_int_setting,
+    _optional_bool_setting,
     _optional_positive_int_setting,
     _positive_int_setting,
     autocast_ctx,
@@ -106,32 +108,44 @@ def _configure_cuda_backends(
     torch_mod: Any = torch,
 ) -> None:
     """Toggle CUDA backend knobs with a safe, testable helper."""
+    enable_tf32_value = _bool_setting(enable_tf32, "enable_tf32")
+    cudnn_benchmark_value = _bool_setting(cudnn_benchmark, "cudnn_benchmark")
+    reduced_precision_reduction_value = _bool_setting(
+        reduced_precision_reduction,
+        "reduced_precision_reduction",
+    )
+    enable_flash_sdp_value = _optional_bool_setting(enable_flash_sdp, "enable_flash_sdp")
+    enable_mem_efficient_sdp_value = _optional_bool_setting(
+        enable_mem_efficient_sdp,
+        "enable_mem_efficient_sdp",
+    )
+    enable_math_sdp_value = _optional_bool_setting(enable_math_sdp, "enable_math_sdp")
     try:
         cuda_backends = getattr(getattr(torch_mod, "backends", None), "cuda", None)
         cuda_module = cuda_backends
         matmul_backend = getattr(cuda_backends, "matmul", None)
         if matmul_backend is not None and hasattr(matmul_backend, "allow_tf32"):
-            matmul_backend.allow_tf32 = bool(enable_tf32)
+            matmul_backend.allow_tf32 = enable_tf32_value
         for attr in ("allow_fp16_reduced_precision_reduction", "allow_bf16_reduced_precision_reduction"):
             if matmul_backend is not None and hasattr(matmul_backend, attr):
-                setattr(matmul_backend, attr, bool(reduced_precision_reduction))
+                setattr(matmul_backend, attr, reduced_precision_reduction_value)
         sdp_toggles = (
-            ("enable_flash_sdp", enable_flash_sdp),
-            ("enable_mem_efficient_sdp", enable_mem_efficient_sdp),
-            ("enable_math_sdp", enable_math_sdp),
+            ("enable_flash_sdp", enable_flash_sdp_value),
+            ("enable_mem_efficient_sdp", enable_mem_efficient_sdp_value),
+            ("enable_math_sdp", enable_math_sdp_value),
         )
         for fn_name, value in sdp_toggles:
             if value is None:
                 continue
             fn = getattr(cuda_module, fn_name, None)
             if callable(fn):
-                fn(bool(value))
+                fn(value)
     except Exception:
         pass
     try:
         cudnn_backend = getattr(getattr(torch_mod, "backends", None), "cudnn", None)
         if cudnn_backend is not None and hasattr(cudnn_backend, "benchmark"):
-            cudnn_backend.benchmark = bool(cudnn_benchmark)
+            cudnn_backend.benchmark = cudnn_benchmark_value
     except Exception:
         pass
 
@@ -316,7 +330,25 @@ class FastTrainer:
         enable_math_sdp: Optional[bool] = False,
         meter_fast_mode: bool = False,
     ) -> None:
-        if distributed is True:
+        distributed_value = _optional_bool_setting(distributed, "distributed")
+        channels_last_value = _bool_setting(channels_last, "channels_last")
+        use_compile_value = _bool_setting(use_compile, "use_compile")
+        log_on_rank0_value = _bool_setting(log_on_rank0, "log_on_rank0")
+        enable_tf32_value = _bool_setting(enable_tf32, "enable_tf32")
+        cudnn_benchmark_value = _bool_setting(cudnn_benchmark, "cudnn_benchmark")
+        reduced_precision_reduction_value = _bool_setting(
+            reduced_precision_reduction,
+            "reduced_precision_reduction",
+        )
+        enable_flash_sdp_value = _optional_bool_setting(enable_flash_sdp, "enable_flash_sdp")
+        enable_mem_efficient_sdp_value = _optional_bool_setting(
+            enable_mem_efficient_sdp,
+            "enable_mem_efficient_sdp",
+        )
+        enable_math_sdp_value = _optional_bool_setting(enable_math_sdp, "enable_math_sdp")
+        meter_fast_mode_value = _bool_setting(meter_fast_mode, "meter_fast_mode")
+
+        if distributed_value is True:
             self.dist_ctx = init_distributed(backend=distributed_backend)
         else:
             self.dist_ctx = get_distributed_context()
@@ -326,8 +358,9 @@ class FastTrainer:
             self.device = f"cuda:{self.dist_ctx.local_rank}"
         else:
             self.device = base_device
+        amp_enabled, amp_dtype, use_scaler = get_amp_policy(self.device, use_amp)
         self.model = model.to(self.device)
-        self.model = maybe_channels_last(self.model, channels_last=channels_last)
+        self.model = maybe_channels_last(self.model, channels_last=channels_last_value)
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.grad_accum = _positive_int_setting(grad_accum, "grad_accum")
@@ -337,12 +370,13 @@ class FastTrainer:
         self.log_interval = _non_negative_int_setting(log_interval, "log_interval")
         self.trigger_hook = trigger_hook
         self.logger = logger
-        self.log_on_rank0 = log_on_rank0
-        self.meter_fast_mode = bool(meter_fast_mode)
-        self.compile_requested = bool(use_compile)
+        self.log_on_rank0 = log_on_rank0_value
+        self.meter_fast_mode = meter_fast_mode_value
+        self.compile_requested = use_compile_value
 
         # AMP policy
-        self.amp_enabled, self.amp_dtype, use_scaler = get_amp_policy(self.device, use_amp)
+        self.amp_enabled = amp_enabled
+        self.amp_dtype = amp_dtype
         try:
             self.scaler = torch.amp.GradScaler("cuda", enabled=(use_scaler and self.amp_enabled))
         except Exception:
@@ -382,12 +416,12 @@ class FastTrainer:
         # CUDA fast matmul precision
         if self.device.startswith("cuda"):
             _configure_cuda_backends(
-                enable_tf32,
-                cudnn_benchmark,
-                reduced_precision_reduction,
-                enable_flash_sdp,
-                enable_mem_efficient_sdp,
-                enable_math_sdp,
+                enable_tf32_value,
+                cudnn_benchmark_value,
+                reduced_precision_reduction_value,
+                enable_flash_sdp_value,
+                enable_mem_efficient_sdp_value,
+                enable_math_sdp_value,
             )
             try:
                 torch.set_float32_matmul_precision("high")
@@ -545,6 +579,10 @@ class FastTrainer:
         """
         step_limit = _optional_positive_int_setting(steps, "steps")
         warmup_step_limit = _non_negative_int_setting(warmup_steps, "warmup_steps")
+        collect_profile_value = _bool_setting(collect_profile, "collect_profile")
+        profile_sync_value = _bool_setting(profile_sync, "profile_sync")
+        profile_distribution_value = _bool_setting(profile_distribution, "profile_distribution")
+        profile_model_value = _bool_setting(profile_model, "profile_model")
         if step_limit is not None and warmup_step_limit > step_limit:
             raise ValueError("warmup_steps must be less than or equal to steps")
         profile_window_size = _positive_int_setting(profile_window, "profile_window")
@@ -561,13 +599,13 @@ class FastTrainer:
         warmup_meter = ThroughputMeter(fast_mode=self.meter_fast_mode)
         steady_meter = ThroughputMeter(fast_mode=self.meter_fast_mode)
         profiler = PhaseProfiler(
-            enabled=collect_profile,
+            enabled=collect_profile_value,
             device=self.device,
-            sync=profile_sync,
-            track_distribution=profile_distribution,
+            sync=profile_sync_value,
+            track_distribution=profile_distribution_value,
             window=profile_window_size,
         )
-        profile_model_enabled = bool(collect_profile and profile_model)
+        profile_model_enabled = collect_profile_value and profile_model_value
         if profile_model_enabled:
             profile_hook_result = self._install_profile_model_hooks(
                 profiler,
@@ -577,9 +615,9 @@ class FastTrainer:
             )
         else:
             profile_hook_result = _ProfileHookInstallResult(handles=[])
-        if not profile_model:
+        if not profile_model_value:
             profile_model_status = "not_requested"
-        elif not collect_profile:
+        elif not collect_profile_value:
             profile_model_status = "collect_profile_disabled"
         elif profile_hook_result.modules_selected == 0:
             profile_model_status = "no_matching_modules"
@@ -1012,7 +1050,7 @@ class FastTrainer:
         metrics["compiled"] = self.compiled
         metrics["compile_init_time_s"] = self.compile_init_time_s
         metrics["compile_fallback_reason"] = self.compile_fallback_reason
-        metrics["profile_model_requested"] = bool(profile_model)
+        metrics["profile_model_requested"] = profile_model_value
         metrics["profile_model_enabled"] = profile_model_enabled
         metrics["profile_model_status"] = profile_model_status
         metrics["profile_model_modules_selected"] = profile_hook_result.modules_selected
@@ -1022,7 +1060,7 @@ class FastTrainer:
         metrics["device"] = self.device
         metrics["world_size"] = self.dist_ctx.world_size
         metrics["rank"] = self.dist_ctx.rank
-        if collect_profile:
+        if collect_profile_value:
             profile_summary = profiler.summary()
             metrics["profile"] = profile_summary
             _add_profile_phase_metrics(metrics, profile_summary)
@@ -1049,6 +1087,10 @@ class FastTrainer:
         **loader_kwargs: Any,
     ) -> Dict[str, Any]:
         """Train on a dataset with a minimal-parameter entrypoint."""
+        collect_profile_value = _bool_setting(collect_profile, "collect_profile")
+        profile_sync_value = _bool_setting(profile_sync, "profile_sync")
+        profile_distribution_value = _bool_setting(profile_distribution, "profile_distribution")
+        profile_model_value = _bool_setting(profile_model, "profile_model")
         loader = dataloader_from_dataset(
             dataset,
             batch_size=batch_size,
@@ -1060,11 +1102,11 @@ class FastTrainer:
             criterion,
             steps=steps,
             epoch=epoch,
-            collect_profile=collect_profile,
-            profile_sync=profile_sync,
-            profile_distribution=profile_distribution,
+            collect_profile=collect_profile_value,
+            profile_sync=profile_sync_value,
+            profile_distribution=profile_distribution_value,
             profile_window=profile_window,
-            profile_model=profile_model,
+            profile_model=profile_model_value,
             profile_model_depth=profile_model_depth,
             profile_model_max_modules=profile_model_max_modules,
             profile_model_include=profile_model_include,
@@ -1087,16 +1129,19 @@ class FastTrainer:
         """Run a validation/evaluation loop without gradient updates."""
         step_limit = _optional_positive_int_setting(steps, "steps")
         profile_window_size = _positive_int_setting(profile_window, "profile_window")
+        collect_profile_value = _bool_setting(collect_profile, "collect_profile")
+        profile_sync_value = _bool_setting(profile_sync, "profile_sync")
+        profile_distribution_value = _bool_setting(profile_distribution, "profile_distribution")
         self.model.eval()
         sampler = getattr(loader, "sampler", None)
         if isinstance(sampler, DistributedSampler) and epoch is not None:
             sampler.set_epoch(epoch)
         meter = ThroughputMeter(fast_mode=self.meter_fast_mode)
         profiler = PhaseProfiler(
-            enabled=collect_profile,
+            enabled=collect_profile_value,
             device=self.device,
-            sync=profile_sync,
-            track_distribution=profile_distribution,
+            sync=profile_sync_value,
+            track_distribution=profile_distribution_value,
             window=profile_window_size,
         )
         metric_dtype = torch.float32 if self.device.startswith("mps") else torch.float64
@@ -1220,7 +1265,7 @@ class FastTrainer:
         for key, total in metric_sums.items():
             denom = metric_weights.get(key, 0.0)
             metrics[key] = total / denom if denom else 0.0
-        if collect_profile:
+        if collect_profile_value:
             profile_summary = profiler.summary()
             metrics["profile"] = profile_summary
             _add_profile_phase_metrics(metrics, profile_summary)
@@ -1247,15 +1292,19 @@ class FastTrainer:
         """
         step_limit = _optional_positive_int_setting(steps, "steps")
         profile_window_size = _positive_int_setting(profile_window, "profile_window")
-        metrics_requested = bool(return_metrics or collect_profile)
+        collect_profile_value = _bool_setting(collect_profile, "collect_profile")
+        profile_sync_value = _bool_setting(profile_sync, "profile_sync")
+        profile_distribution_value = _bool_setting(profile_distribution, "profile_distribution")
+        return_metrics_value = _bool_setting(return_metrics, "return_metrics")
+        metrics_requested = return_metrics_value or collect_profile_value
         self.model.eval()
         outputs_list: list[Any] = []
         meter = ThroughputMeter(fast_mode=self.meter_fast_mode)
         profiler = PhaseProfiler(
-            enabled=collect_profile,
+            enabled=collect_profile_value,
             device=self.device,
-            sync=profile_sync,
-            track_distribution=profile_distribution,
+            sync=profile_sync_value,
+            track_distribution=profile_distribution_value,
             window=profile_window_size,
         )
         total_items = 0
@@ -1327,7 +1376,7 @@ class FastTrainer:
         metrics["device"] = self.device
         metrics["world_size"] = self.dist_ctx.world_size
         metrics["rank"] = self.dist_ctx.rank
-        if collect_profile:
+        if collect_profile_value:
             profile_summary = profiler.summary()
             metrics["profile"] = profile_summary
             _add_profile_phase_metrics(metrics, profile_summary)

@@ -113,6 +113,12 @@ def _bool_setting(value: Any, name: str) -> bool:
     raise ValueError(f"{name} must be a boolean")
 
 
+def _optional_bool_setting(value: Any, name: str) -> Optional[bool]:
+    if value is None:
+        return None
+    return _bool_setting(value, name)
+
+
 def _int_setting(value: Any, name: str) -> int:
     if isinstance(value, bool):
         raise ValueError(f"{name} must be an integer")
@@ -170,11 +176,13 @@ def get_amp_policy(device: str, use_amp: AmpSetting = "auto") -> Tuple[bool, tor
         amp_dtype: torch.dtype
         use_scaler: bool  # GradScaler only for CUDA
     """
-    if use_amp is False:
-        return False, torch.float32, False
-
     if use_amp is None:
         use_amp = "auto"
+    elif isinstance(use_amp, bool):
+        if not use_amp:
+            return False, torch.float32, False
+    elif use_amp != "auto":
+        raise ValueError("use_amp must be a boolean, 'auto', or None")
 
     device_type = _device_type(device)
     if device_type == "cuda":
@@ -257,6 +265,11 @@ def dataloader_from_dataset(
     batch_size = _positive_int_setting(batch_size, "batch_size")
     prefetch_factor = _positive_int_setting(prefetch_factor, "prefetch_factor")
     seed = _int_setting(seed, "seed")
+    persistent_value = _bool_setting(persistent, "persistent")
+    pin_memory_value = _optional_bool_setting(pin_memory, "pin_memory")
+    shuffle_value = _bool_setting(shuffle, "shuffle")
+    distributed_value = _bool_setting(distributed, "distributed")
+    drop_last_value = _bool_setting(drop_last, "drop_last")
     resolved_device = get_best_device() if device == "auto" else device
     workers = num_workers
     if workers is None:
@@ -270,34 +283,34 @@ def dataloader_from_dataset(
             workers = max(2, cpu_count // 2)
     else:
         workers = _non_negative_int_setting(workers, "num_workers")
-    if pin_memory is None:
-        pin_memory = (_device_type(resolved_device) == "cuda")
+    if pin_memory_value is None:
+        pin_memory_value = (_device_type(resolved_device) == "cuda")
     sampler: Optional[DistributedSampler[Any]] = None
-    if distributed:
+    if distributed_value:
         ctx = get_distributed_context()
         if ctx.world_size > 1:
             sampler = DistributedSampler(
                 dataset,
                 num_replicas=ctx.world_size,
                 rank=ctx.rank,
-                shuffle=shuffle,
+                shuffle=shuffle_value,
                 seed=seed,
-                drop_last=drop_last,
+                drop_last=drop_last_value,
             )
-            shuffle = False
+            shuffle_value = False
     generator = _seeded_dataloader_generator(seed)
     loader_kwargs: Dict[str, Any] = {
         "batch_size": batch_size,
         "generator": generator,
-        "shuffle": shuffle,
+        "shuffle": shuffle_value,
         "sampler": sampler,
         "num_workers": workers,
-        "pin_memory": pin_memory,
-        "drop_last": drop_last,
+        "pin_memory": pin_memory_value,
+        "drop_last": drop_last_value,
     }
     if workers > 0:
         loader_kwargs["prefetch_factor"] = prefetch_factor
-        loader_kwargs["persistent_workers"] = persistent
+        loader_kwargs["persistent_workers"] = persistent_value
     return DataLoader(dataset, **loader_kwargs)
 
 
@@ -1032,7 +1045,8 @@ class PhaseProfiler:
 
 
 def maybe_channels_last(model: nn.Module, channels_last: bool = False) -> nn.Module:
-    if not channels_last:
+    channels_last_value = _bool_setting(channels_last, "channels_last")
+    if not channels_last_value:
         return model
     try:
         to_method = cast(Callable[..., nn.Module], getattr(model, "to"))

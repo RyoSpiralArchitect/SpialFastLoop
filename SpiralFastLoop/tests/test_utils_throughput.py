@@ -13,6 +13,8 @@ from spiralfastloop.utils import (
     ThroughputMeter,
     _PSquareQuantile,
     dataloader_from_dataset,
+    get_amp_policy,
+    maybe_channels_last,
     safe_compile,
     safe_compile_with_diagnostics,
 )
@@ -305,6 +307,19 @@ def test_safe_compile_with_diagnostics_reports_non_module_result(monkeypatch: py
     assert result.fallback_reason == "non_module_result:object"
 
 
+@pytest.mark.parametrize("use_amp", ["false", "auto ", 1, object()])
+def test_get_amp_policy_rejects_invalid_amp_settings(use_amp: object) -> None:
+    with pytest.raises(ValueError, match="use_amp"):
+        get_amp_policy("cpu", use_amp=use_amp)  # type: ignore[arg-type]
+
+
+def test_maybe_channels_last_rejects_invalid_boolean_setting() -> None:
+    model = torch.nn.Linear(2, 2)
+
+    with pytest.raises(ValueError, match="channels_last"):
+        maybe_channels_last(model, channels_last="true")  # type: ignore[arg-type]
+
+
 def test_dataloader_from_dataset_allows_zero_workers() -> None:
     dataset = TensorDataset(torch.randn(8, 2), torch.randint(0, 2, (8,)))
     loader = dataloader_from_dataset(
@@ -356,6 +371,38 @@ def test_dataloader_from_dataset_resolves_auto_device_for_pin_memory(
     ],
 )
 def test_dataloader_from_dataset_rejects_invalid_numeric_settings(
+    loader_kwargs: dict[str, object],
+    match: str,
+) -> None:
+    dataset = TensorDataset(torch.randn(8, 2), torch.randint(0, 2, (8,)))
+    kwargs = {
+        "batch_size": 4,
+        "device": "cpu",
+        "num_workers": 0,
+        "shuffle": False,
+        **loader_kwargs,
+    }
+
+    with pytest.raises(ValueError, match=match):
+        dataloader_from_dataset(dataset, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("loader_kwargs", "match"),
+    [
+        ({"persistent": 1}, "persistent"),
+        ({"persistent": "true"}, "persistent"),
+        ({"pin_memory": 0}, "pin_memory"),
+        ({"pin_memory": "false"}, "pin_memory"),
+        ({"shuffle": 1}, "shuffle"),
+        ({"shuffle": "false"}, "shuffle"),
+        ({"distributed": 1}, "distributed"),
+        ({"distributed": "true"}, "distributed"),
+        ({"drop_last": 0}, "drop_last"),
+        ({"drop_last": "false"}, "drop_last"),
+    ],
+)
+def test_dataloader_from_dataset_rejects_invalid_boolean_settings(
     loader_kwargs: dict[str, object],
     match: str,
 ) -> None:

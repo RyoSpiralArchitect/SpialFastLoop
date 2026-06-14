@@ -232,6 +232,25 @@ def test_configure_cuda_backends_updates_flags():
     assert called["math"] is True
 
 
+@pytest.mark.parametrize(
+    ("args", "match"),
+    [
+        ((1, True, True, True, True, False), "enable_tf32"),
+        ((True, "true", True, True, True, False), "cudnn_benchmark"),
+        ((True, True, 1, True, True, False), "reduced_precision_reduction"),
+        ((True, True, True, "false", True, False), "enable_flash_sdp"),
+        ((True, True, True, True, 0, False), "enable_mem_efficient_sdp"),
+        ((True, True, True, True, True, "true"), "enable_math_sdp"),
+    ],
+)
+def test_configure_cuda_backends_rejects_invalid_boolean_settings(
+    args: tuple[object, object, object, object, object, object],
+    match: str,
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        _configure_cuda_backends(*args)
+
+
 if HAVE_HYPOTHESIS:
     @st.composite
     def loss_tensors(draw):
