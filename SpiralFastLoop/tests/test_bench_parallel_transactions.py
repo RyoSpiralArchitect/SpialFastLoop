@@ -73,12 +73,28 @@ def test_transaction_dataset_ignores_global_default_device() -> None:
 
 def test_transaction_dataset_rejects_invalid_shapes() -> None:
     for kwargs in (
+        {"size": 0, "features": 4, "classes": 3},
         {"size": -1, "features": 4, "classes": 3},
+        {"size": True, "features": 4, "classes": 3},
         {"size": 8, "features": 0, "classes": 3},
+        {"size": 8, "features": True, "classes": 3},
         {"size": 8, "features": 4, "classes": 0},
+        {"size": 8, "features": 4, "classes": True},
     ):
         with pytest.raises(ValueError):
             SyntheticTransactionDataset(**kwargs)
+
+
+def test_transaction_dataset_rejects_invalid_seed_and_materialized() -> None:
+    for kwargs in (
+        {"seed": True},
+        {"seed": 1.5},
+        {"seed": "1"},
+        {"materialized": 1},
+        {"materialized": "true"},
+    ):
+        with pytest.raises(ValueError):
+            SyntheticTransactionDataset(8, 4, 3, **kwargs)  # type: ignore[arg-type]
 
 
 def test_transaction_dataset_bounds_indices_consistently() -> None:
@@ -475,6 +491,15 @@ def test_parse_args_rejects_zero_profile_model_depth(monkeypatch: pytest.MonkeyP
     assert exc_info.value.code == 2
 
 
+def test_parse_args_rejects_fractional_seed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["bench_parallel_transactions.py", "--seed", "1.5"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        parse_args()
+
+    assert exc_info.value.code == 2
+
+
 def test_transaction_benchmark_records_run_seed() -> None:
     class Args:
         transactions = 64
@@ -506,3 +531,33 @@ def test_transaction_benchmark_records_run_seed() -> None:
     assert result["seed"] == 103
     assert result["dataset_mode"] == "materialized"
     assert result["dataset_materialized_bytes"] == (64 * 8 * 4) + (64 * 8)
+
+
+def test_transaction_benchmark_rejects_invalid_direct_seed() -> None:
+    class Args:
+        transactions = 64
+        feature_dim = 8
+        num_classes = 3
+        seed = "100"
+        dataset_mode = "materialized"
+        batch_size = 16
+        device = "cpu"
+        workers = 0
+        prefetch_factor = 2
+        learning_rate = 3e-4
+        compile = False
+        grad_accum = 2
+        log_interval = 0
+        steps = 2
+        collect_profile = False
+        profile_sync = False
+        profile_distribution = True
+        profile_window = 16
+        profile_model = False
+        profile_model_depth = 1
+        profile_model_max_modules = 8
+        profile_model_include = None
+        warmup_steps = 0
+
+    with pytest.raises(ValueError, match="seed"):
+        run_once(Args, 0)

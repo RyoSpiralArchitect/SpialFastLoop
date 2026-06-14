@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bench_parallel_transactions import (
     BASE_SUMMARY_FIELDS,
     _best_finite_row,
+    _int_arg,
     count_profiled_rows,
     non_negative_int_arg,
     positive_float_arg,
@@ -189,7 +190,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup-steps", type=non_negative_int_arg, default=2)
     parser.add_argument("--runs", type=positive_int_arg, default=1)
     parser.add_argument("--learning-rate", type=positive_float_arg, default=3e-4)
-    parser.add_argument("--seed", type=int, default=1234)
+    parser.add_argument("--seed", type=_int_arg, default=1234)
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--prefetch-factor", type=positive_int_arg, default=4)
     parser.add_argument("--log-interval", type=non_negative_int_arg, default=0)

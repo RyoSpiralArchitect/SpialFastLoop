@@ -58,6 +58,15 @@ def test_parse_args_rejects_zero_profile_model_depth(monkeypatch: pytest.MonkeyP
     assert exc_info.value.code == 2
 
 
+def test_parse_args_rejects_fractional_seed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["bench_matrix.py", "--seed", "1.5"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        parse_args()
+
+    assert exc_info.value.code == 2
+
+
 def test_format_summary_row_includes_profile_suffix_when_available() -> None:
     row = {
         "dataset_mode": "generated",

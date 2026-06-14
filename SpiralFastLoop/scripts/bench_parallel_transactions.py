@@ -19,6 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer
 from spiralfastloop.utils import (
+    _bool_setting,
+    _int_setting,
     _non_negative_int_setting,
     _positive_int_setting,
     dataloader_from_dataset,
@@ -301,24 +303,18 @@ class SyntheticTransactionDataset(Dataset):
         seed: int = 17,
         materialized: bool = False,
     ) -> None:
-        if size < 0:
-            raise ValueError("size must be non-negative")
-        if features <= 0:
-            raise ValueError("features must be positive")
-        if classes <= 0:
-            raise ValueError("classes must be positive")
-        self.size = size
-        self.features = features
-        self.classes = classes
-        self.seed = seed
-        self.materialized = bool(materialized)
+        self.size = _positive_int_setting(size, "size")
+        self.features = _positive_int_setting(features, "features")
+        self.classes = _positive_int_setting(classes, "classes")
+        self.seed = _int_setting(seed, "seed")
+        self.materialized = _bool_setting(materialized, "materialized")
         self._features: Optional[torch.Tensor] = None
         self._targets: Optional[torch.Tensor] = None
         if self.materialized:
             generator = torch.Generator()
-            generator.manual_seed(seed)
-            self._features = torch.randn(size, features, generator=generator, device="cpu")
-            self._targets = torch.randint(0, classes, (size,), generator=generator, device="cpu")
+            generator.manual_seed(self.seed)
+            self._features = torch.randn(self.size, self.features, generator=generator, device="cpu")
+            self._targets = torch.randint(0, self.classes, (self.size,), generator=generator, device="cpu")
 
     def __len__(self) -> int:
         return self.size
@@ -361,7 +357,7 @@ def build_model(features: int, classes: int) -> nn.Module:
 
 
 def run_once(args, run_index: int) -> BenchmarkResult:
-    run_seed = int(args.seed) + int(run_index)
+    run_seed = _int_setting(args.seed, "seed") + _non_negative_int_setting(run_index, "run_index")
     torch.manual_seed(run_seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(run_seed)
@@ -471,7 +467,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--runs", type=positive_int_arg, default=3, help="How many repeated runs to execute.")
     parser.add_argument("--learning-rate", type=positive_float_arg, default=3e-4, help="Learning rate for the synthetic model.")
-    parser.add_argument("--seed", type=int, default=1234, help="Base random seed for synthetic data.")
+    parser.add_argument("--seed", type=_int_arg, default=1234, help="Base random seed for synthetic data.")
     parser.add_argument("--collect-profile", action="store_true", help="Collect train-loop phase timings.")
     parser.add_argument("--profile-sync", action="store_true", help="Synchronize accelerator around profiled phases.")
     parser.add_argument(
