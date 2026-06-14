@@ -115,6 +115,12 @@ def _compile_mode_setting(mode: Any) -> str:
     return mode.strip()
 
 
+def _module_setting(model: Any, name: str = "model") -> nn.Module:
+    if not isinstance(model, nn.Module):
+        raise ValueError(f"{name} must be a torch.nn.Module")
+    return model
+
+
 def _device_type(device: Any) -> str:
     return _device_setting(device).split(":", 1)[0]
 
@@ -1113,14 +1119,15 @@ class PhaseProfiler:
 
 
 def maybe_channels_last(model: nn.Module, channels_last: bool = False) -> nn.Module:
+    model_value = _module_setting(model)
     channels_last_value = _bool_setting(channels_last, "channels_last")
     if not channels_last_value:
-        return model
+        return model_value
     try:
-        to_method = cast(Callable[..., nn.Module], getattr(model, "to"))
+        to_method = cast(Callable[..., nn.Module], getattr(model_value, "to"))
         return to_method(memory_format=torch.channels_last)
     except Exception:
-        return model
+        return model_value
 
 def safe_compile(model: nn.Module, mode: str = "reduce-overhead") -> Tuple[nn.Module, bool]:
     """Compile model if torch.compile exists and succeeds."""
@@ -1139,22 +1146,23 @@ def _format_compile_exception(exc: Exception) -> str:
 
 def safe_compile_with_diagnostics(model: nn.Module, mode: str = "reduce-overhead") -> CompileResult:
     """Compile model if possible and keep a compact fallback reason."""
+    model_value = _module_setting(model)
     mode_value = _compile_mode_setting(mode)
     compile_fn = getattr(torch, "compile", None)
     if compile_fn is None:
-        return CompileResult(model=model, compiled=False, fallback_reason="torch_compile_unavailable")
+        return CompileResult(model=model_value, compiled=False, fallback_reason="torch_compile_unavailable")
     try:
-        m = compile_fn(model, mode=mode_value)
+        m = compile_fn(model_value, mode=mode_value)
         if isinstance(m, nn.Module):
             return CompileResult(model=m, compiled=True)
         return CompileResult(
-            model=model,
+            model=model_value,
             compiled=False,
             fallback_reason=f"non_module_result:{type(m).__name__}",
         )
     except Exception as exc:
         return CompileResult(
-            model=model,
+            model=model_value,
             compiled=False,
             fallback_reason=_format_compile_exception(exc),
         )

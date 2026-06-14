@@ -417,6 +417,22 @@ def test_safe_compile_with_diagnostics_passes_normalized_compile_mode(
     assert seen_modes == ["reduce-overhead"]
 
 
+@pytest.mark.parametrize("model", [None, True, 1, object()])
+def test_safe_compile_rejects_invalid_models(
+    monkeypatch: pytest.MonkeyPatch,
+    model: object,
+) -> None:
+    def fake_compile(_: torch.nn.Module, mode: str) -> object:
+        raise AssertionError("torch.compile should not be called for invalid model")
+
+    monkeypatch.setattr(torch, "compile", fake_compile, raising=False)
+
+    with pytest.raises(ValueError, match="model"):
+        safe_compile(model)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="model"):
+        safe_compile_with_diagnostics(model)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize("use_amp", ["false", "auto ", 1, object()])
 def test_get_amp_policy_rejects_invalid_amp_settings(use_amp: object) -> None:
     with pytest.raises(ValueError, match="use_amp"):
@@ -434,6 +450,12 @@ def test_maybe_channels_last_rejects_invalid_boolean_setting() -> None:
 
     with pytest.raises(ValueError, match="channels_last"):
         maybe_channels_last(model, channels_last="true")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("model", [None, True, 1, object()])
+def test_maybe_channels_last_rejects_invalid_models(model: object) -> None:
+    with pytest.raises(ValueError, match="model"):
+        maybe_channels_last(model, channels_last=False)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("enabled", [1, "false", None])
