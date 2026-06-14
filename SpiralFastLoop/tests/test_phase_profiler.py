@@ -351,6 +351,7 @@ def test_evaluate_collects_phase_profile_and_user_metrics() -> None:
     assert metrics["unmeasured_steps"] == 0
     assert metrics["batch_size_inference_failures"] == 0
     assert metrics["samples"] == 8
+    assert metrics["reported_samples_per_sec"] == metrics["samples_per_sec"]
     assert 0.0 <= metrics["accuracy"] <= 1.0
     assert metrics["user_metric_valid_count"] == 2
     assert metrics["user_metric_invalid_count"] == 0
@@ -474,6 +475,7 @@ def test_evaluate_reports_scalar_tensor_inputs_as_unmeasured() -> None:
     assert metrics["batch_size_inference_failures"] == 2
     assert metrics["samples"] == 0
     assert metrics["samples_per_sec"] == 0.0
+    assert metrics["reported_samples_per_sec"] == 0.0
     assert metrics["avg_loss"] == 0.0
     assert "score" not in metrics
     assert metrics["user_metric_valid_count"] == 0
@@ -507,6 +509,7 @@ def test_predict_can_return_metrics_and_phase_profile() -> None:
     assert metrics["unmeasured_steps"] == 0
     assert metrics["batch_size_inference_failures"] == 0
     assert metrics["samples"] == 6
+    assert metrics["reported_samples_per_sec"] == metrics["samples_per_sec"]
     for phase_name in ("data_wait", "transfer", "forward", "postprocess", "collect_output", "metrics"):
         assert phase_name in phases
         assert metrics[f"profile_{phase_name}_time_s"] == pytest.approx(phases[phase_name]["total_s"])
@@ -543,6 +546,7 @@ def test_predict_reports_unmeasured_steps_when_batch_size_is_unknown() -> None:
     assert metrics["batch_size_inference_failures"] == 2
     assert metrics["samples"] == 0
     assert metrics["samples_per_sec"] == 0.0
+    assert metrics["reported_samples_per_sec"] == 0.0
 
 
 def test_predict_reports_scalar_tensor_inputs_as_unmeasured() -> None:
@@ -574,6 +578,7 @@ def test_predict_reports_scalar_tensor_inputs_as_unmeasured() -> None:
     assert metrics["unmeasured_steps"] == 2
     assert metrics["batch_size_inference_failures"] == 2
     assert metrics["samples"] == 0
+    assert metrics["reported_samples_per_sec"] == 0.0
 
 
 def test_fit_accepts_train_profile_and_loader_options() -> None:

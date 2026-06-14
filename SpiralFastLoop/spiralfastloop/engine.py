@@ -1388,6 +1388,7 @@ class FastTrainer:
         metrics["unmeasured_steps"] = step_idx - measured_steps
         metrics["batch_size_inference_failures"] = batch_size_inference_failures
         metrics["samples"] = total_items
+        metrics["reported_samples_per_sec"] = metrics["samples_per_sec"]
         metrics["device"] = self.device
         metrics["world_size"] = self.dist_ctx.world_size
         metrics["rank"] = self.dist_ctx.rank
@@ -1515,6 +1516,7 @@ class FastTrainer:
         metrics["unmeasured_steps"] = step_idx - measured_steps
         metrics["batch_size_inference_failures"] = batch_size_inference_failures
         metrics["samples"] = total_items
+        metrics["reported_samples_per_sec"] = metrics["samples_per_sec"]
         metrics["device"] = self.device
         metrics["world_size"] = self.dist_ctx.world_size
         metrics["rank"] = self.dist_ctx.rank

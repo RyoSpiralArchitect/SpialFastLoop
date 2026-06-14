@@ -112,6 +112,9 @@ print(pred_metrics["profile"]["top_phases"][:3])
 If prediction inputs do not expose an inferable batch dimension, the returned
 metrics report `unmeasured_steps` and `batch_size_inference_failures` instead of
 silently presenting those steps as measured throughput.
+Train, evaluation, and prediction metrics all expose `reported_samples_per_sec`;
+CUDA/MPS runs also include device memory fields such as `cuda_max_mem_bytes` or
+`mps_current_mem_bytes` when the backend exposes them.
 
 Benchmark scripts default to `--log-interval 0` to avoid extra synchronization
 in timing runs. Use `--no-compile` when short MPS or CPU smoke tests are
