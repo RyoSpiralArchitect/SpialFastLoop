@@ -642,6 +642,7 @@ def test_evaluate_collects_phase_profile_and_user_metrics() -> None:
     assert metrics["metrics_fn_last_error"] == ""
     assert metrics["eval_failed"] is False
     assert metrics["eval_failure_stage"] == ""
+    assert metrics["eval_failure_last_error"] == ""
     for phase_name in ("data_wait", "transfer", "forward", "loss", "user_metrics", "metrics"):
         assert phase_name in phases
         assert metrics[f"profile_{phase_name}_time_s"] == pytest.approx(phases[phase_name]["total_s"])
@@ -868,8 +869,69 @@ def test_evaluate_logs_metrics_fn_failures_before_reraising() -> None:
     assert metrics["metrics_fn_last_error"] == "RuntimeError: metrics boom"
     assert metrics["eval_failed"] is True
     assert metrics["eval_failure_stage"] == "user_metrics"
+    assert metrics["eval_failure_last_error"] == "RuntimeError: metrics boom"
     assert metrics["user_metric_valid_count"] == 0
     assert metrics["user_metric_skipped_count"] == 0
+
+
+def test_evaluate_logs_forward_failures_before_reraising() -> None:
+    class CapturingLogger:
+        def __init__(self) -> None:
+            self.rows: list[tuple[str, dict[str, object], str]] = []
+
+        def log_metrics(
+            self,
+            stage: str,
+            metrics: dict[str, object],
+            *,
+            mode: str = "step",
+            **_: object,
+        ) -> None:
+            self.rows.append((stage, metrics, mode))
+
+    class FailingModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.proj = nn.Linear(4, 3)
+
+        def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+            raise RuntimeError("eval forward boom")
+
+    inputs = torch.randn(2, 4)
+    targets = torch.randint(0, 3, (2,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
+    model = FailingModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    logger = CapturingLogger()
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        logger=logger,
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
+
+    with pytest.raises(RuntimeError, match="eval forward boom"):
+        trainer.evaluate(loader, nn.CrossEntropyLoss(), steps=1, collect_profile=True)
+
+    assert len(logger.rows) == 1
+    stage, metrics, mode = logger.rows[0]
+    assert stage == "eval"
+    assert mode == "error"
+    assert metrics["steps"] == 1
+    assert metrics["measured_steps"] == 0
+    assert metrics["samples"] == 0
+    assert metrics["eval_failed"] is True
+    assert metrics["eval_failure_stage"] == "forward"
+    assert metrics["eval_failure_last_error"] == "RuntimeError: eval forward boom"
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "data_wait" in phases
+    assert "transfer" in phases
+    assert "forward" in phases
 
 
 def test_evaluate_cleans_profile_phase_when_loader_fails(

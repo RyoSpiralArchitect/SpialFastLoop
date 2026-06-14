@@ -1626,8 +1626,14 @@ class FastTrainer:
         metrics_fn_calls = 0
         metrics_fn_failures = 0
         metrics_fn_last_error = ""
+        eval_failure_logged = False
 
-        def build_eval_metrics(*, failed: bool = False, failure_stage: str = "") -> Dict[str, Any]:
+        def build_eval_metrics(
+            *,
+            failed: bool = False,
+            failure_stage: str = "",
+            failure_last_error: str = "",
+        ) -> Dict[str, Any]:
             metrics: Dict[str, Any] = dict(meter.summary())
             metrics.update(_collect_device_memory_metrics(self.device))
             weight_value = total_weight.item()
@@ -1652,6 +1658,7 @@ class FastTrainer:
             metrics["metrics_fn_last_error"] = metrics_fn_last_error
             metrics["eval_failed"] = failed
             metrics["eval_failure_stage"] = failure_stage
+            metrics["eval_failure_last_error"] = failure_last_error
             metrics["user_metric_valid_count"] = user_metric_valid_count
             metrics["user_metric_invalid_count"] = user_metric_invalid_count
             metrics["user_metric_non_finite_count"] = user_metric_non_finite_count
@@ -1671,6 +1678,25 @@ class FastTrainer:
                 _add_profile_phase_metrics(metrics, profile_summary)
             return metrics
 
+        def log_eval_failure(stage: str, exc: Exception) -> None:
+            nonlocal eval_failure_logged
+            if eval_failure_logged:
+                return
+            eval_failure_logged = True
+            try:
+                self._log_metrics(
+                    "eval",
+                    build_eval_metrics(
+                        failed=True,
+                        failure_stage=stage,
+                        failure_last_error=_format_exception_reason(exc),
+                    ),
+                    epoch=epoch,
+                    mode="error",
+                )
+            except Exception:
+                pass
+
         with torch.no_grad():
             data_iter = iter(loader)
             while step_limit is None or step_idx < step_limit:
@@ -1681,17 +1707,24 @@ class FastTrainer:
                 except StopIteration:
                     profiler.cancel("data_wait")
                     break
-                except Exception:
+                except Exception as exc:
                     profiler.cancel("data_wait")
+                    log_eval_failure("data_wait", exc)
                     raise
                 else:
                     profiler.stop("data_wait")
                 step_idx += 1
                 profiler.start("transfer")
+                transfer_error: Optional[Exception] = None
                 try:
                     batch = to_device(batch, self.device, non_blocking=True)
+                except Exception as exc:
+                    transfer_error = exc
+                    raise
                 finally:
                     profiler.stop("transfer")
+                    if transfer_error is not None:
+                        log_eval_failure("transfer", transfer_error)
                 if isinstance(batch, (list, tuple)) and len(batch) == 2:
                     inputs, targets = batch
                 elif isinstance(batch, dict) and "inputs" in batch and "targets" in batch:
@@ -1701,18 +1734,30 @@ class FastTrainer:
 
                 with autocast_ctx(self.device, self.amp_enabled, self.amp_dtype):
                     profiler.start("forward")
+                    forward_error: Optional[Exception] = None
                     try:
                         outputs = self.model(inputs)
+                    except Exception as exc:
+                        forward_error = exc
+                        raise
                     finally:
                         profiler.stop("forward")
+                        if forward_error is not None:
+                            log_eval_failure("forward", forward_error)
                     if criterion is not None and targets is not None:
                         profiler.start("loss")
+                        loss_error: Optional[Exception] = None
                         try:
                             loss = criterion(outputs, targets)
                             if isinstance(loss, torch.Tensor) and loss.ndim > 0:
                                 loss = loss.mean()
+                        except Exception as exc:
+                            loss_error = exc
+                            raise
                         finally:
                             profiler.stop("loss")
+                            if loss_error is not None:
+                                log_eval_failure("loss", loss_error)
                     else:
                         loss = None
                 reference = targets if targets is not None else inputs
@@ -1728,23 +1773,13 @@ class FastTrainer:
                     except Exception as exc:
                         metrics_fn_failures += 1
                         metrics_fn_last_error = _format_exception_reason(exc)
-                        try:
-                            self._log_metrics(
-                                "eval",
-                                build_eval_metrics(
-                                    failed=True,
-                                    failure_stage="user_metrics",
-                                ),
-                                epoch=epoch,
-                                mode="error",
-                            )
-                        except Exception:
-                            pass
+                        log_eval_failure("user_metrics", exc)
                         raise
                     finally:
                         profiler.stop("user_metrics")
 
                 profiler.start("metrics")
+                metrics_error: Optional[Exception] = None
                 try:
                     batch_duration_s = max(0.0, time.perf_counter() - step_started_at)
                     if batch_size_int is not None:
@@ -1783,8 +1818,13 @@ class FastTrainer:
                                 metric_sums[key] = metric_sums.get(key, 0.0) + metric_value * batch_size_int
                                 metric_weights[key] = metric_weights.get(key, 0.0) + batch_size_int
                                 user_metric_valid_count += 1
+                except Exception as exc:
+                    metrics_error = exc
+                    raise
                 finally:
                     profiler.stop("metrics")
+                    if metrics_error is not None:
+                        log_eval_failure("metrics", metrics_error)
 
                 if self.log_interval > 0 and (step_idx % self.log_interval) == 0:
                     m = meter.summary()
