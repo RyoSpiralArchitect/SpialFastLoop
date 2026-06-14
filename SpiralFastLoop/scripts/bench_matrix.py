@@ -147,6 +147,18 @@ def _measured_summary_value(row: dict, mean_field: str) -> Optional[float]:
 
 
 def _format_summary_row(row: dict) -> str:
+    reported_samples_per_sec = _measured_summary_value(row, "mean_reported_samples_per_sec")
+    reported_text = (
+        f"{reported_samples_per_sec:.1f}/s"
+        if reported_samples_per_sec is not None
+        else "n/a"
+    )
+    end_to_end_wall_time_s = _measured_summary_value(row, "mean_end_to_end_wall_time_s")
+    end_to_end_text = (
+        f"{end_to_end_wall_time_s:.2f}s"
+        if end_to_end_wall_time_s is not None
+        else "n/a"
+    )
     profile_parts = []
     forward_backward_pct = _measured_summary_value(row, "mean_profile_forward_backward_pct")
     if forward_backward_pct is not None:
@@ -160,8 +172,8 @@ def _format_summary_row(row: dict) -> str:
     profile_suffix = f" {' '.join(profile_parts)}" if profile_parts else ""
     return (
         f"{row['dataset_mode']} {row['compile_mode']} workers={row['workers']} "
-        f"reported={row['mean_reported_samples_per_sec']:.1f}/s "
-        f"e2e={row['mean_end_to_end_wall_time_s']:.2f}s"
+        f"reported={reported_text} "
+        f"e2e={end_to_end_text}"
         f"{profile_suffix}"
     )
 

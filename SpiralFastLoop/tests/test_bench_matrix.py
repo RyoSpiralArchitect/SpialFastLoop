@@ -93,6 +93,44 @@ def test_format_summary_row_omits_profile_suffix_when_absent() -> None:
     assert "opt=" not in formatted
 
 
+def test_format_summary_row_marks_unmeasured_base_fields() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 0.0,
+        "sample_count_reported_samples_per_sec": 0.0,
+        "non_finite_count_reported_samples_per_sec": 1.0,
+        "mean_end_to_end_wall_time_s": 0.0,
+        "sample_count_end_to_end_wall_time_s": 0.0,
+        "non_finite_count_end_to_end_wall_time_s": 1.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "reported=n/a" in formatted
+    assert "e2e=n/a" in formatted
+    assert "reported=0.0/s" not in formatted
+    assert "e2e=0.00s" not in formatted
+
+
+def test_format_summary_row_keeps_zero_when_it_was_measured() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 0.0,
+        "sample_count_reported_samples_per_sec": 1.0,
+        "mean_end_to_end_wall_time_s": 0.0,
+        "sample_count_end_to_end_wall_time_s": 1.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "reported=0.0/s" in formatted
+    assert "e2e=0.00s" in formatted
+
+
 def test_format_summary_row_omits_unmeasured_profile_suffix() -> None:
     row = {
         "dataset_mode": "generated",
