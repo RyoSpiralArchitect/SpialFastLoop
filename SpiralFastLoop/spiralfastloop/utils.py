@@ -749,7 +749,7 @@ class PhaseProfiler:
         self.device = device
         self.sync = bool(sync)
         self.track_distribution = bool(track_distribution)
-        self.window = max(8, int(window))
+        self.window = _positive_int_setting(window, "window")
         self.totals: Dict[str, float] = {}
         self.calls: Dict[str, int] = {}
         self.samples: Dict[str, deque[float]] = {}
@@ -779,7 +779,7 @@ class PhaseProfiler:
         return math.sqrt(math.fsum((value - mean) ** 2 for value in values) / (len(values) - 1))
 
     def _record(self, name: str, seconds: float) -> None:
-        duration = float(seconds)
+        duration = _non_negative_finite_float_setting(seconds, "seconds")
         self.totals[name] = self.totals.get(name, 0.0) + duration
         self.calls[name] = self.calls.get(name, 0) + 1
         if self.track_distribution:
@@ -790,7 +790,7 @@ class PhaseProfiler:
             bucket.append(duration)
 
     def _record_detail(self, parent: str, name: str, seconds: float) -> None:
-        duration = float(seconds)
+        duration = _non_negative_finite_float_setting(seconds, "seconds")
         totals = self.detail_totals.setdefault(parent, {})
         calls = self.detail_calls.setdefault(parent, {})
         totals[name] = totals.get(name, 0.0) + duration

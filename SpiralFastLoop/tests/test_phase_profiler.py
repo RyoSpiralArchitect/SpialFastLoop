@@ -25,6 +25,46 @@ def _make_supervised_components() -> tuple[
     return loader, model, optimizer
 
 
+@pytest.mark.parametrize("window", [0, -1, 1.5, "8", True])
+def test_phase_profiler_rejects_invalid_window_values(window: object) -> None:
+    with pytest.raises(ValueError, match="window"):
+        PhaseProfiler(enabled=True, window=window)  # type: ignore[arg-type]
+
+
+def test_phase_profiler_respects_exact_distribution_window() -> None:
+    profiler = PhaseProfiler(enabled=True, window=1)
+
+    profiler._record("forward", 0.001)
+    profiler._record("forward", 0.003)
+    profile = profiler.summary()
+
+    forward = profile["phases"]["forward"]
+    assert forward["calls"] == 2
+    assert forward["sample_count"] == 1
+    assert forward["p50_ms"] == pytest.approx(3.0)
+
+
+@pytest.mark.parametrize("seconds", [-0.1, float("nan"), float("inf"), True, object()])
+def test_phase_profiler_rejects_invalid_phase_durations(seconds: object) -> None:
+    profiler = PhaseProfiler(enabled=True)
+
+    with pytest.raises(ValueError, match="seconds"):
+        profiler._record("forward", seconds)  # type: ignore[arg-type]
+
+    assert profiler.summary()["phases"] == {}
+
+
+@pytest.mark.parametrize("seconds", [-0.1, float("nan"), float("-inf"), True, object()])
+def test_phase_profiler_rejects_invalid_detail_durations(seconds: object) -> None:
+    profiler = PhaseProfiler(enabled=True)
+
+    with pytest.raises(ValueError, match="seconds"):
+        profiler._record_detail("optimizer", "step", seconds)  # type: ignore[arg-type]
+
+    profile = profiler.summary()
+    assert profile["phase_breakdowns"] == {}
+
+
 @pytest.mark.parametrize(
     ("trainer_kwargs", "match"),
     [
