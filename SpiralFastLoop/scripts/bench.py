@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from spiralfastloop import FastTrainer, recommended_dataloader
 from spiralfastloop.utils import _finite_float_setting, _positive_int_setting
 from scripts.bench_parallel_transactions import (
+    device_arg,
     non_negative_int_arg,
     positive_float_arg,
     positive_int_arg,
@@ -56,6 +57,10 @@ class MLP(nn.Module):
 
 
 def best_device(requested: str = "auto") -> torch.device:
+    try:
+        requested = device_arg(requested)
+    except argparse.ArgumentTypeError as exc:
+        raise ValueError(f"device {exc}") from exc
     if requested != "auto":
         return torch.device(requested)
     if torch.cuda.is_available():
@@ -124,7 +129,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup-steps", type=non_negative_int_arg, default=0)
     parser.add_argument("--workers", type=non_negative_int_arg, default=2)
     parser.add_argument("--learning-rate", type=positive_float_arg, default=3e-4)
-    parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda", "mps"])
+    parser.add_argument("--device", type=device_arg, default="auto")
     parser.add_argument("--log-interval", type=non_negative_int_arg, default=0)
     parser.add_argument("--no-compile", dest="compile", action="store_false")
     parser.add_argument("--collect-profile", action="store_true")

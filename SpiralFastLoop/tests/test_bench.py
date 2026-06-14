@@ -42,6 +42,16 @@ def test_mlp_rejects_invalid_shape_values(kwargs: dict[str, object]) -> None:
         bench.MLP(**kwargs)  # type: ignore[arg-type]
 
 
+def test_best_device_accepts_supported_direct_device() -> None:
+    assert bench.best_device("cpu") == torch.device("cpu")
+
+
+@pytest.mark.parametrize("device", ["gpu", "cuda:0", "", True])
+def test_best_device_rejects_invalid_direct_device(device: object) -> None:
+    with pytest.raises(ValueError, match="device"):
+        bench.best_device(device)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize("learning_rate", [0.0, -0.1, float("nan"), float("inf"), True, "0.001"])
 def test_adamw_rejects_invalid_direct_learning_rates(learning_rate: object) -> None:
     model = nn.Linear(2, 2)
@@ -115,6 +125,7 @@ def test_bench_parse_args_accepts_valid_minimal_run(monkeypatch: pytest.MonkeyPa
         ["bench.py", "--warmup-steps", "-1"],
         ["bench.py", "--workers", "-1"],
         ["bench.py", "--learning-rate", "nan"],
+        ["bench.py", "--device", "gpu"],
         ["bench.py", "--log-interval", "-1"],
     ],
 )

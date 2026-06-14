@@ -207,6 +207,7 @@ def test_resnet_drilldown_parse_args_accepts_valid_fake_run(
         ["profile_resnet_drilldown.py", "--steps", "0"],
         ["profile_resnet_drilldown.py", "--warmup-steps", "-1"],
         ["profile_resnet_drilldown.py", "--learning-rate", "nan"],
+        ["profile_resnet_drilldown.py", "--device", "gpu"],
         ["profile_resnet_drilldown.py", "--profile-window", "0"],
         ["profile_resnet_drilldown.py", "--profile-model-depth", "0"],
         ["profile_resnet_drilldown.py", "--profile-model-max-modules", "0"],

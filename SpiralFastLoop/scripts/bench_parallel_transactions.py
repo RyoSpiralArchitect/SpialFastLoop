@@ -95,6 +95,8 @@ BEST_RUN_FIELDS = (
     "profile_metrics_pct",
 )
 
+DEVICE_CHOICES = ("auto", "cpu", "cuda", "mps")
+
 
 @dataclass
 class BenchmarkResult:
@@ -291,6 +293,14 @@ def positive_float_arg(raw: object) -> float:
     return value
 
 
+def device_arg(raw: object) -> str:
+    if not isinstance(raw, str):
+        raise argparse.ArgumentTypeError("must be one of auto, cpu, cuda, mps")
+    if raw not in DEVICE_CHOICES:
+        raise argparse.ArgumentTypeError("must be one of auto, cpu, cuda, mps")
+    return raw
+
+
 def _finite_display_value(raw: object) -> Optional[float]:
     if isinstance(raw, bool):
         return None
@@ -351,6 +361,11 @@ def validate_benchmark_args(args: argparse.Namespace) -> None:
     warmup_steps = _non_negative_int_setting(args.warmup_steps, "warmup_steps")
     if warmup_steps > steps:
         raise ValueError("warmup-steps must be less than or equal to steps")
+    if hasattr(args, "device"):
+        try:
+            device_arg(args.device)
+        except argparse.ArgumentTypeError as exc:
+            raise ValueError(f"device {exc}") from exc
 
 
 class SyntheticTransactionDataset(Dataset):
@@ -512,7 +527,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--grad-accum", type=positive_int_arg, default=2, help="Gradient accumulation factor.")
     parser.add_argument("--workers", type=non_negative_int_arg, default=4, help="Number of dataloader worker processes.")
     parser.add_argument("--prefetch-factor", type=positive_int_arg, default=4, help="Prefetch factor passed to the dataloader.")
-    parser.add_argument("--device", type=str, default="auto", help="Device override (auto/cuda/mps/cpu).")
+    parser.add_argument("--device", type=device_arg, default="auto", help="Device override (auto/cuda/mps/cpu).")
     parser.add_argument("--steps", type=positive_int_arg, default=200, help="Number of training steps per run.")
     parser.add_argument("--log-interval", type=non_negative_int_arg, default=0, help="Step log interval; 0 disables step logs.")
     parser.add_argument(

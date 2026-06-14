@@ -28,6 +28,7 @@ from scripts.bench_parallel_transactions import (
     _list_value,
     _profile_child_rows,
     _profile_row_name,
+    device_arg,
     non_negative_int_arg,
     positive_float_arg,
     positive_int_arg,
@@ -170,7 +171,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset-size", type=positive_int_arg, default=4096)
     parser.add_argument("--image-size", type=positive_int_arg, default=32)
     parser.add_argument("--num-classes", type=positive_int_arg, default=10)
-    parser.add_argument("--device", default="auto", choices=["auto", "cuda", "mps", "cpu"])
+    parser.add_argument("--device", type=device_arg, default="auto")
     parser.add_argument("--batch-size", type=positive_int_arg, default=256)
     parser.add_argument("--grad-accum", type=positive_int_arg, default=2)
     parser.add_argument("--workers", type=non_negative_int_arg, default=2)

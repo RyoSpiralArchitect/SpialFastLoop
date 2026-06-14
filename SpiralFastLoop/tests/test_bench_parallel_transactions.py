@@ -19,6 +19,7 @@ from scripts.bench_parallel_transactions import (
     _format_count,
     _format_metric_value,
     _has_positive_display_value,
+    device_arg,
     non_negative_int_arg,
     parse_args,
     positive_float_arg,
@@ -461,6 +462,8 @@ def test_benchmark_arg_types_accept_strict_direct_values() -> None:
     assert positive_int_arg(1) == 1
     assert non_negative_int_arg(0) == 0
     assert positive_float_arg(0.25) == pytest.approx(0.25)
+    assert device_arg("auto") == "auto"
+    assert device_arg("cpu") == "cpu"
 
 
 @pytest.mark.parametrize(
@@ -480,6 +483,12 @@ def test_benchmark_arg_types_reject_ambiguous_direct_values(
 ) -> None:
     with pytest.raises(argparse.ArgumentTypeError):
         parser(raw)
+
+
+@pytest.mark.parametrize("raw", ["gpu", "cuda:0", "", True, None])
+def test_device_arg_rejects_unsupported_values(raw: object) -> None:
+    with pytest.raises(argparse.ArgumentTypeError):
+        device_arg(raw)
 
 
 def test_display_formatters_hide_malformed_values() -> None:
@@ -517,6 +526,7 @@ def test_validate_benchmark_args_rejects_warmup_larger_than_steps() -> None:
         (2, 0.5, "warmup_steps"),
         (2, "1", "warmup_steps"),
         (2, True, "warmup_steps"),
+        (2, 0, "device"),
     ],
 )
 def test_validate_benchmark_args_rejects_invalid_direct_values(
@@ -524,8 +534,9 @@ def test_validate_benchmark_args_rejects_invalid_direct_values(
     warmup_steps: object,
     match: str,
 ) -> None:
+    device = "gpu" if match == "device" else "cpu"
     with pytest.raises(ValueError, match=match):
-        validate_benchmark_args(Namespace(warmup_steps=warmup_steps, steps=steps))
+        validate_benchmark_args(Namespace(warmup_steps=warmup_steps, steps=steps, device=device))
 
 
 def test_parse_args_rejects_zero_profile_model_depth(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -539,6 +550,15 @@ def test_parse_args_rejects_zero_profile_model_depth(monkeypatch: pytest.MonkeyP
 
 def test_parse_args_rejects_fractional_seed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "argv", ["bench_parallel_transactions.py", "--seed", "1.5"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        parse_args()
+
+    assert exc_info.value.code == 2
+
+
+def test_parse_args_rejects_invalid_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["bench_parallel_transactions.py", "--device", "gpu"])
 
     with pytest.raises(SystemExit) as exc_info:
         parse_args()
