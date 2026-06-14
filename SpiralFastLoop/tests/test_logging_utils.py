@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import logging
 from pathlib import Path
@@ -96,3 +97,29 @@ def test_metrics_logger_keeps_non_negative_step_and_epoch_in_jsonl(tmp_path) -> 
     payload = json.loads(jsonl_path.read_text(encoding="utf-8"))
     assert payload["step"] == 0
     assert payload["epoch"] == 0
+
+
+def test_metrics_logger_writes_nested_csv_values_as_json_strings(tmp_path) -> None:
+    logger = logging.getLogger("spiralfastloop.test.csv_nested")
+    logger.handlers.clear()
+    logger.addHandler(logging.NullHandler())
+    logger.propagate = False
+    csv_path = tmp_path / "metrics.csv"
+    metrics_logger = MetricsLogger(logger=logger, csv_path=str(csv_path))
+
+    metrics_logger.log_metrics(
+        "train",
+        {
+            "vector": torch.tensor([1.0, float("inf")]),
+            "nested": {"tags": {"beta", "alpha"}},
+            "path": Path("artifacts") / "metrics.csv",
+        },
+        step=0,
+    )
+
+    with csv_path.open(newline="", encoding="utf-8") as handle:
+        row = next(csv.DictReader(handle))
+
+    assert json.loads(row["vector"]) == [1.0, None]
+    assert json.loads(row["nested"]) == {"tags": ["alpha", "beta"]}
+    assert row["path"] == "artifacts/metrics.csv"

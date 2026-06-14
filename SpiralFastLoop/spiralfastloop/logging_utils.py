@@ -58,6 +58,12 @@ def _normalize_metric_value(value: Any) -> Any:
     return _json_safe_metric_value(value)
 
 
+def _csv_safe_metric_value(value: Any) -> Any:
+    if isinstance(value, (Mapping, list)):
+        return json.dumps(value, ensure_ascii=False, allow_nan=False)
+    return value
+
+
 def default_logger(name: str = "spiralfastloop") -> logging.Logger:
     logger = logging.getLogger(name)
     if not logger.handlers:
@@ -109,7 +115,7 @@ class MetricsLogger:
             writer = csv.DictWriter(handle, fieldnames=self._csv_fields, extrasaction="ignore")
             if handle.tell() == 0:
                 writer.writeheader()
-            writer.writerow(payload)
+            writer.writerow({key: _csv_safe_metric_value(value) for key, value in payload.items()})
 
     def log_metrics(
         self,
