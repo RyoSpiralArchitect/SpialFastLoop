@@ -22,9 +22,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install .[dev]
+      - name: Compile Python files
+        working-directory: SpiralFastLoop
+        run: python -m compileall spiralfastloop scripts examples tests
       - name: Run flake8
         working-directory: SpiralFastLoop
-        run: flake8 spiralfastloop tests
+        run: flake8 spiralfastloop scripts examples tests
       - name: Run mypy
         working-directory: SpiralFastLoop
         run: mypy spiralfastloop

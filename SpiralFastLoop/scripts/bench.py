@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
+
+from __future__ import annotations
+
 import argparse
 import json
 import sys
@@ -8,44 +11,87 @@ from pathlib import Path
 
 import torch
 from torch import nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer, recommended_dataloader
 
+
 class Synth(Dataset):
-    def __init__(self, n=50_000, d=128, C=10):
+    def __init__(self, n: int = 50_000, d: int = 128, classes: int = 10) -> None:
         self.x = torch.randn(n, d)
-        self.y = torch.randint(0, C, (n,))
-    def __len__(self): return len(self.y)
-    def __getitem__(self, i): return self.x[i], self.y[i]
+        self.y = torch.randint(0, classes, (n,))
+
+    def __len__(self) -> int:
+        return int(self.y.shape[0])
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        return self.x[index], self.y[index]
+
 
 class MLP(nn.Module):
-    def __init__(self, d=128, C=10):
+    def __init__(self, d: int = 128, classes: int = 10) -> None:
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(d, 512), nn.ReLU(),
-            nn.Linear(512, C)
+            nn.Linear(d, 512),
+            nn.ReLU(),
+            nn.Linear(512, classes),
         )
-    def forward(self, x): return self.net(x)
 
-def plain_loop(loader, model, opt, crit, device, epochs=1):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+def best_device(requested: str = "auto") -> torch.device:
+    if requested != "auto":
+        return torch.device(requested)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+def adamw(parameters, learning_rate: float) -> torch.optim.AdamW:
+    return torch.optim.AdamW(parameters, lr=learning_rate, fused=torch.cuda.is_available())
+
+
+def plain_loop(
+    loader: DataLoader,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    criterion: nn.Module,
+    device: torch.device,
+    *,
+    epochs: int = 1,
+) -> dict[str, float]:
     model.to(device).train()
-    t0 = time.perf_counter()
-    steps=0; samples=0; loss_acc=0.0
+    start = time.perf_counter()
+    steps = 0
+    samples = 0
+    loss_acc = 0.0
     for _ in range(epochs):
-        for xb, yb in loader:
-            xb, yb = xb.to(device), yb.to(device)
-            logits = model(xb)
-            loss = crit(logits, yb)
+        for inputs, targets in loader:
+            inputs = inputs.to(device, non_blocking=True)
+            targets = targets.to(device, non_blocking=True)
+            logits = model(inputs)
+            loss = criterion(logits, targets)
             loss.backward()
-            opt.step(); opt.zero_grad()
-            steps+=1; samples+=xb.shape[0]; loss_acc+=float(loss.detach().cpu())
-    dt = time.perf_counter()-t0
-    return {"samples_per_sec": samples/max(1e-9,dt), "avg_loss_per_step": loss_acc/max(1,steps), "elapsed_sec": dt}
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+            steps += 1
+            samples += int(inputs.shape[0])
+            loss_acc += float(loss.detach().cpu())
+    elapsed = time.perf_counter() - start
+    return {
+        "samples_per_sec": samples / max(1e-9, elapsed),
+        "avg_loss_per_step": loss_acc / max(1, steps),
+        "elapsed_sec": elapsed,
+    }
 
-def parse_args():
+
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Compare a plain PyTorch loop with SpiralFastLoop.")
     parser.add_argument("--samples", type=int, default=50_000)
     parser.add_argument("--feature-dim", type=int, default=128)
@@ -54,36 +100,37 @@ def parse_args():
     parser.add_argument("--steps", type=int, default=200)
     parser.add_argument("--warmup-steps", type=int, default=0)
     parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda", "mps"])
     parser.add_argument("--log-interval", type=int, default=0)
     parser.add_argument("--no-compile", dest="compile", action="store_false")
     parser.add_argument("--collect-profile", action="store_true")
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     args = parse_args()
-    ds = Synth(n=args.samples, d=args.feature_dim, C=args.classes)
-    device = torch.device("cuda" if torch.cuda.is_available()
-                          else "mps" if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
-                          else "cpu")
-    # baseline
-    loader0 = DataLoader(ds, batch_size=args.batch_size, shuffle=True)
-    m0 = MLP(d=args.feature_dim, C=args.classes); o0 = torch.optim.AdamW(m0.parameters(), lr=3e-4)
-    crit = nn.CrossEntropyLoss()
-    base = plain_loop(loader0, m0, o0, crit, device, epochs=1)
+    dataset = Synth(n=args.samples, d=args.feature_dim, classes=args.classes)
+    device = best_device(args.device)
 
-    # SpiralFastLoop
-    loader1 = recommended_dataloader(
-        ds,
+    baseline_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+    baseline_model = MLP(d=args.feature_dim, classes=args.classes)
+    baseline_optimizer = adamw(baseline_model.parameters(), args.learning_rate)
+    criterion = nn.CrossEntropyLoss()
+    baseline = plain_loop(baseline_loader, baseline_model, baseline_optimizer, criterion, device, epochs=1)
+
+    loader = recommended_dataloader(
+        dataset,
         batch_size=args.batch_size,
         device=str(device),
         num_workers=args.workers,
         persistent=args.workers > 0,
     )
-    m1 = MLP(d=args.feature_dim, C=args.classes); o1 = torch.optim.AdamW(m1.parameters(), lr=3e-4, fused=torch.cuda.is_available())
+    model = MLP(d=args.feature_dim, classes=args.classes)
+    optimizer = adamw(model.parameters(), args.learning_rate)
     trainer = FastTrainer(
-        m1,
-        o1,
+        model,
+        optimizer,
         device=str(device),
         use_compile=args.compile,
         grad_accum=2,
@@ -91,15 +138,15 @@ def main():
         log_interval=args.log_interval,
     )
     fast = trainer.train_one_epoch(
-        loader1,
-        crit,
+        loader,
+        criterion,
         steps=args.steps,
         collect_profile=args.collect_profile,
         warmup_steps=args.warmup_steps,
     )
 
-    out = {"device": str(device), "baseline": base, "spiralfastloop": fast}
-    print(json.dumps(out, indent=2))
+    print(json.dumps({"device": str(device), "baseline": baseline, "spiralfastloop": fast}, indent=2))
+
 
 if __name__ == "__main__":
     main()
