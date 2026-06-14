@@ -133,6 +133,34 @@ def test_metrics_logger_rejects_invalid_payload_settings(
         )
 
 
+@pytest.mark.parametrize("reserved_key", ["timestamp", "stage", "mode", "step", "epoch"])
+def test_metrics_logger_rejects_reserved_metric_keys_without_writing(
+    tmp_path,
+    reserved_key: str,
+) -> None:
+    jsonl_path = tmp_path / "metrics.jsonl"
+    csv_path = tmp_path / "metrics.csv"
+    metrics_logger = MetricsLogger(logger=None, jsonl_path=jsonl_path, csv_path=csv_path)
+
+    with pytest.raises(ValueError, match="reserved payload keys"):
+        metrics_logger.log_metrics("train", {reserved_key: 1.0})
+
+    assert not jsonl_path.exists()
+    assert not csv_path.exists()
+
+
+def test_metrics_logger_rejects_normalized_key_collisions_without_writing(tmp_path) -> None:
+    jsonl_path = tmp_path / "metrics.jsonl"
+    csv_path = tmp_path / "metrics.csv"
+    metrics_logger = MetricsLogger(logger=None, jsonl_path=jsonl_path, csv_path=csv_path)
+
+    with pytest.raises(ValueError, match="unique after normalization"):
+        metrics_logger.log_metrics("train", {1: 1.0, "1": 2.0})
+
+    assert not jsonl_path.exists()
+    assert not csv_path.exists()
+
+
 @pytest.mark.parametrize("step", [-1, 1.5, "2", True])
 def test_metrics_logger_rejects_invalid_step_values(step: object) -> None:
     logger = logging.getLogger("spiralfastloop.test.invalid_step")

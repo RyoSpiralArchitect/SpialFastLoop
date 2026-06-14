@@ -24,6 +24,9 @@ from .utils import (
 __all__ = ["MetricsLogger", "default_logger"]
 
 
+_RESERVED_PAYLOAD_KEYS = frozenset({"timestamp", "stage", "mode", "step", "epoch"})
+
+
 def _json_safe_metric_value(value: Any) -> Any:
     if isinstance(value, torch.Tensor):
         if value.numel() == 1:
@@ -60,6 +63,28 @@ def _json_safe_metric_key(key: Any) -> str:
 
 def _normalize_metric_value(value: Any) -> Any:
     return _json_safe_metric_value(value)
+
+
+def _normalize_metric_payload(metrics: Mapping[Any, Any]) -> Dict[str, Any]:
+    normalized: Dict[str, Any] = {}
+    reserved_keys: list[str] = []
+    duplicate_keys: list[str] = []
+    for key, value in metrics.items():
+        normalized_key = _json_safe_metric_key(key)
+        if normalized_key in _RESERVED_PAYLOAD_KEYS:
+            reserved_keys.append(normalized_key)
+            continue
+        if normalized_key in normalized:
+            duplicate_keys.append(normalized_key)
+            continue
+        normalized[normalized_key] = _normalize_metric_value(value)
+    if reserved_keys:
+        names = ", ".join(sorted(set(reserved_keys)))
+        raise ValueError(f"metrics must not contain reserved payload keys: {names}")
+    if duplicate_keys:
+        names = ", ".join(sorted(set(duplicate_keys)))
+        raise ValueError(f"metrics keys must be unique after normalization: {names}")
+    return normalized
 
 
 def _csv_safe_metric_value(value: Any) -> Any:
@@ -190,7 +215,7 @@ class MetricsLogger:
         mode_value = _non_empty_string_setting(mode, "mode")
         if not isinstance(metrics, Mapping):
             raise ValueError("metrics must be a mapping")
-        normalized = {_json_safe_metric_key(k): _normalize_metric_value(v) for k, v in metrics.items()}
+        normalized = _normalize_metric_payload(metrics)
         payload: Dict[str, Any] = {
             "timestamp": time.time(),
             "stage": stage_value,
