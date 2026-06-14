@@ -864,7 +864,7 @@ class PhaseProfiler:
         window: int = 512,
     ) -> None:
         self.enabled = _bool_setting(enabled, "enabled")
-        self.device = device
+        self.device = _device_setting(device)
         self.sync = _bool_setting(sync, "sync")
         self.track_distribution = _bool_setting(track_distribution, "track_distribution")
         self.window = _positive_int_setting(window, "window")
@@ -918,6 +918,22 @@ class PhaseProfiler:
         calls[name] = calls.get(name, 0) + 1
         if self.track_distribution:
             samples = self.detail_samples.setdefault(parent, {})
+            bucket = samples.get(name)
+            if bucket is None:
+                bucket = deque(maxlen=self.window)
+                samples[name] = bucket
+            bucket.append(duration)
+
+    def _record_event(self, group: str, name: str, seconds: float) -> None:
+        group = _profile_name_setting(group, "group")
+        name = _profile_name_setting(name, "name")
+        duration = _non_negative_finite_float_setting(seconds, "seconds")
+        totals = self.event_totals.setdefault(group, {})
+        calls = self.event_calls.setdefault(group, {})
+        totals[name] = totals.get(name, 0.0) + duration
+        calls[name] = calls.get(name, 0) + 1
+        if self.track_distribution:
+            samples = self.event_samples.setdefault(group, {})
             bucket = samples.get(name)
             if bucket is None:
                 bucket = deque(maxlen=self.window)
@@ -987,10 +1003,11 @@ class PhaseProfiler:
         key = _profile_name_setting(name, "name")
         if self.sync:
             synchronize_device(self.device)
-        start = self._starts.pop(key, None)
+        start = self._starts.get(key)
         if start is None:
             return
         self._record(key, time.perf_counter() - start)
+        self._starts.pop(key, None)
 
     def cancel(self, name: str) -> None:
         if self.enabled:
@@ -1017,10 +1034,11 @@ class PhaseProfiler:
         starts = self._detail_starts.get(key)
         if not starts:
             return
-        start = starts.pop()
+        start = starts[-1]
+        self._record_detail(parent_key, name_key, time.perf_counter() - start)
+        starts.pop()
         if not starts:
             self._detail_starts.pop(key, None)
-        self._record_detail(str(parent), str(name), time.perf_counter() - start)
 
     def record_event_since_start(self, parent: str, group: str, name: str) -> None:
         if not self.enabled:
@@ -1033,18 +1051,7 @@ class PhaseProfiler:
         start = self._starts.get(parent_key)
         if start is None:
             return
-        duration = time.perf_counter() - start
-        totals = self.event_totals.setdefault(group_key, {})
-        calls = self.event_calls.setdefault(group_key, {})
-        totals[name_key] = totals.get(name_key, 0.0) + duration
-        calls[name_key] = calls.get(name_key, 0) + 1
-        if self.track_distribution:
-            samples = self.event_samples.setdefault(group_key, {})
-            bucket = samples.get(name_key)
-            if bucket is None:
-                bucket = deque(maxlen=self.window)
-                samples[name_key] = bucket
-            bucket.append(duration)
+        self._record_event(group_key, name_key, time.perf_counter() - start)
 
     def summary(self) -> Dict[str, Any]:
         if not self.enabled:

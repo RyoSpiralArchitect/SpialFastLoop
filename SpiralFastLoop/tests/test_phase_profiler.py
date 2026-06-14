@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer
 import spiralfastloop.engine as engine
+import spiralfastloop.utils as utils_mod
 from spiralfastloop.engine import (
     TriggerResult,
     _add_profile_phase_metrics,
@@ -220,6 +221,18 @@ def test_phase_profiler_rejects_invalid_boolean_settings(
         PhaseProfiler(**kwargs)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize("device", [None, True, 1, "", "   ", object()])
+def test_phase_profiler_rejects_invalid_device_settings(device: object) -> None:
+    with pytest.raises(ValueError, match="device"):
+        PhaseProfiler(device=device)  # type: ignore[arg-type]
+
+
+def test_phase_profiler_normalizes_device_setting() -> None:
+    profiler = PhaseProfiler(device=" cpu ")
+
+    assert profiler.device == "cpu"
+
+
 def test_phase_profiler_respects_exact_distribution_window() -> None:
     profiler = PhaseProfiler(enabled=True, window=1)
 
@@ -252,6 +265,68 @@ def test_phase_profiler_rejects_invalid_detail_durations(seconds: object) -> Non
 
     profile = profiler.summary()
     assert profile["phase_breakdowns"] == {}
+
+
+@pytest.mark.parametrize("seconds", [-0.1, float("nan"), float("inf"), True, object()])
+def test_phase_profiler_rejects_invalid_event_durations(seconds: object) -> None:
+    profiler = PhaseProfiler(enabled=True)
+
+    with pytest.raises(ValueError, match="seconds"):
+        profiler._record_event("backward_grad_ready", "model.0", seconds)  # type: ignore[arg-type]
+
+    profile = profiler.summary()
+    assert profile["phase_events"] == {}
+
+
+def test_phase_profiler_stop_rejects_invalid_elapsed_without_mutating_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamps = iter([2.0, 1.0])
+    monkeypatch.setattr(utils_mod.time, "perf_counter", lambda: next(timestamps))
+    profiler = PhaseProfiler(enabled=True)
+
+    profiler.start("forward")
+    profile_before = profiler.summary()
+
+    with pytest.raises(ValueError, match="seconds"):
+        profiler.stop("forward")
+
+    assert profiler._starts == {"forward": 2.0}
+    assert profiler.summary() == profile_before
+
+
+def test_phase_profiler_stop_detail_rejects_invalid_elapsed_without_mutating_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamps = iter([2.0, 1.0])
+    monkeypatch.setattr(utils_mod.time, "perf_counter", lambda: next(timestamps))
+    profiler = PhaseProfiler(enabled=True)
+
+    profiler.start_detail("forward", "model.0")
+    profile_before = profiler.summary()
+
+    with pytest.raises(ValueError, match="seconds"):
+        profiler.stop_detail("forward", "model.0")
+
+    assert profiler._detail_starts == {("forward", "model.0"): [2.0]}
+    assert profiler.summary() == profile_before
+
+
+def test_phase_profiler_event_rejects_invalid_elapsed_without_mutating_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamps = iter([2.0, 1.0])
+    monkeypatch.setattr(utils_mod.time, "perf_counter", lambda: next(timestamps))
+    profiler = PhaseProfiler(enabled=True)
+
+    profiler.start("backward")
+    profile_before = profiler.summary()
+
+    with pytest.raises(ValueError, match="seconds"):
+        profiler.record_event_since_start("backward", "backward_grad_ready", "model.0")
+
+    assert profiler._starts == {"backward": 2.0}
+    assert profiler.summary() == profile_before
 
 
 @pytest.mark.parametrize("name", [None, True, "", "   ", object()])
