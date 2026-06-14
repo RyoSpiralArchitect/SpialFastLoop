@@ -18,7 +18,7 @@ def _path_setting(path: Any, name: str) -> str:
     if not isinstance(path, (str, os.PathLike)):
         raise ValueError(f"{name} must be a path string")
     normalized = os.fspath(path)
-    if not isinstance(normalized, str) or normalized == "":
+    if not isinstance(normalized, str) or normalized.strip() == "":
         raise ValueError(f"{name} must be a non-empty path string")
     return normalized
 

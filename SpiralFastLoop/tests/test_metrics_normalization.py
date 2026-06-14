@@ -55,7 +55,7 @@ def test_collector_export_csv_creates_parent_dirs_and_accepts_pathlike(tmp_path)
     assert rows[0]["context"] == "正規化"
 
 
-@pytest.mark.parametrize("path", [None, True, 1, "", b"events.csv"])
+@pytest.mark.parametrize("path", [None, True, 1, "", "   ", b"events.csv"])
 def test_collector_export_csv_rejects_invalid_paths(tmp_path, path: object):
     collector = NormalizationMetricsCollector(history_limit=2)
     collector.record(1.0, 0.0, context="buffer", timestamp=1.0)
