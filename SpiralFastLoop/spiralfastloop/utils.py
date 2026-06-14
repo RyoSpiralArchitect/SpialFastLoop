@@ -167,6 +167,18 @@ def _non_negative_finite_float_setting(value: Any, name: str) -> float:
     return normalized
 
 
+def _strict_finite_float_setting(value: Any, name: str) -> float:
+    if isinstance(value, (bool, str, bytes, bytearray)):
+        raise ValueError(f"{name} must be a finite number")
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite number") from exc
+    if not math.isfinite(normalized):
+        raise ValueError(f"{name} must be a finite number")
+    return normalized
+
+
 def _profile_name_setting(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-empty string")
@@ -360,9 +372,10 @@ class _PSquareQuantile:
     """Streaming percentile estimator using the P² algorithm."""
 
     def __init__(self, quantile: float) -> None:
-        if not (0.0 < quantile < 1.0):
+        quantile_value = _strict_finite_float_setting(quantile, "quantile")
+        if not (0.0 < quantile_value < 1.0):
             raise ValueError("quantile must be in (0, 1)")
-        self.quantile = float(quantile)
+        self.quantile = quantile_value
         self._initial: list[float] = []
         self._q: Optional[list[float]] = None
         self._n: Optional[list[int]] = None
@@ -387,13 +400,12 @@ class _PSquareQuantile:
         return state
 
     def add(self, value: float) -> None:
-        if not math.isfinite(value):
-            return
+        value = _strict_finite_float_setting(value, "value")
 
         state = self._state()
         if state is None:
             initial = self._initial
-            initial.append(float(value))
+            initial.append(value)
             if len(initial) == 5:
                 initial.sort()
                 q_values = initial.copy()
@@ -412,10 +424,10 @@ class _PSquareQuantile:
         q_values, positions, desired, increments = state
 
         if value < q_values[0]:
-            q_values[0] = float(value)
+            q_values[0] = value
             k = 0
         elif value >= q_values[4]:
-            q_values[4] = float(value)
+            q_values[4] = value
             k = 3
         else:
             k = 0

@@ -314,6 +314,28 @@ def test_p_square_quantile_update_requires_initialized_state() -> None:
         quantile._linear_update(2, 1)
 
 
+@pytest.mark.parametrize(
+    "quantile",
+    [0.0, 1.0, -0.1, 1.1, float("nan"), float("inf"), True, "0.5", b"0.5", object()],
+)
+def test_p_square_quantile_rejects_invalid_quantiles(quantile: object) -> None:
+    with pytest.raises(ValueError, match="quantile"):
+        _PSquareQuantile(quantile)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("-inf"), True, "0.1", b"0.1", object()])
+def test_p_square_quantile_rejects_invalid_values_without_mutating_state(value: object) -> None:
+    quantile = _PSquareQuantile(0.5)
+    quantile.add(0.1)
+    initial_before = list(quantile._initial)
+
+    with pytest.raises(ValueError, match="value"):
+        quantile.add(value)  # type: ignore[arg-type]
+
+    assert quantile._initial == initial_before
+    assert quantile._q is None
+
+
 def test_safe_compile_rejects_non_module_compile_result(monkeypatch: pytest.MonkeyPatch) -> None:
     model = torch.nn.Linear(1, 1)
 
