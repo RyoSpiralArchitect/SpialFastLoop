@@ -62,11 +62,18 @@ def _compile_requested(mode: str) -> bool:
     raise ValueError(f"unsupported compile mode: {mode}")
 
 
+def _non_negative_summary_int(raw: object, name: str) -> int:
+    try:
+        return non_negative_int_arg(raw)
+    except argparse.ArgumentTypeError as exc:
+        raise ValueError(f"{name} {exc}") from exc
+
+
 def _group_key(row: dict) -> tuple[str, str, int]:
     return (
         str(row["matrix_dataset_mode"]),
         str(row["matrix_compile_mode"]),
-        int(row["matrix_workers"]),
+        _non_negative_summary_int(row["matrix_workers"], "matrix_workers"),
     )
 
 
@@ -83,7 +90,10 @@ def summarize_rows(rows: list[dict]) -> dict:
             "workers": workers,
             "runs": len(group_rows),
             "dataset_materialized_bytes": max(
-                int(row.get("dataset_materialized_bytes", 0))
+                _non_negative_summary_int(
+                    row.get("dataset_materialized_bytes", 0),
+                    "dataset_materialized_bytes",
+                )
                 for row in group_rows
             ),
         }
