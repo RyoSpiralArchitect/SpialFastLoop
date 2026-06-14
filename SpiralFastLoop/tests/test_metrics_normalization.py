@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop.metrics import (
     GLOBAL_NORMALIZATION_METRICS,
+    NormalizationEvent,
     NormalizationMetricsCollector,
 )
 
@@ -106,6 +107,42 @@ def test_collector_can_merge_events():
     right.merge(left.events())
     assert right.summary()["total_events"] == 2.0
     assert right.events()[0].context == "left"
+
+
+@pytest.mark.parametrize(
+    "events",
+    [
+        object(),
+        "not events",
+        [
+            NormalizationEvent(timestamp=5.0, before=0.2, after=0.0, context="valid"),
+            object(),
+        ],
+        [
+            NormalizationEvent(timestamp=5.0, before=0.2, after=0.0, context="valid"),
+            NormalizationEvent(timestamp=float("nan"), before=0.1, after=0.0, context="bad"),
+        ],
+        [
+            NormalizationEvent(timestamp=5.0, before=0.2, after=0.0, context="valid"),
+            NormalizationEvent(timestamp=6.0, before=True, after=0.0, context="bad"),
+        ],
+        [
+            NormalizationEvent(timestamp=5.0, before=0.2, after=0.0, context="valid"),
+            NormalizationEvent(timestamp=6.0, before=0.1, after=0.0, context=True),
+        ],
+    ],
+)
+def test_collector_merge_rejects_invalid_events_without_mutating_state(events: object):
+    collector = NormalizationMetricsCollector(history_limit=4)
+    collector.record(1.0, 0.5, context="baseline", timestamp=1.0)
+    before_summary = collector.summary()
+    before_events = collector.events()
+
+    with pytest.raises(ValueError, match="events"):
+        collector.merge(events)  # type: ignore[arg-type]
+
+    assert collector.summary() == before_summary
+    assert collector.events() == before_events
 
 
 def test_global_collector_is_shared_singleton():

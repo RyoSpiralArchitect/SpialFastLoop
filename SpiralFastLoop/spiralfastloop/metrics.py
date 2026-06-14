@@ -173,7 +173,32 @@ class NormalizationMetricsCollector:
                 writer.writerow(row)
 
     def merge(self, events: Iterable[NormalizationEvent]) -> None:
-        for event in events:
+        try:
+            iterator = iter(events)
+        except TypeError as exc:
+            raise ValueError("events must be an iterable of NormalizationEvent items") from exc
+
+        validated_events: List[NormalizationEvent] = []
+        for index, event in enumerate(iterator):
+            if not isinstance(event, NormalizationEvent):
+                raise ValueError("events must contain NormalizationEvent items")
+            try:
+                timestamp_value = _finite_float_setting(event.timestamp, f"events[{index}].timestamp")
+                before_value = _finite_float_setting(event.before, f"events[{index}].before")
+                after_value = _finite_float_setting(event.after, f"events[{index}].after")
+                context_value = _optional_context_setting(event.context)
+            except ValueError as exc:
+                raise ValueError(f"events[{index}] is invalid: {exc}") from exc
+            validated_events.append(
+                NormalizationEvent(
+                    timestamp=timestamp_value,
+                    before=before_value,
+                    after=after_value,
+                    context=context_value,
+                )
+            )
+
+        for event in validated_events:
             self.record(event.before, event.after, context=event.context, timestamp=event.timestamp)
 
 
