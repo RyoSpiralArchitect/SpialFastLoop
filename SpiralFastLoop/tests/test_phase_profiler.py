@@ -12,6 +12,79 @@ from spiralfastloop import FastTrainer
 from spiralfastloop.utils import PhaseProfiler
 
 
+def _make_supervised_components() -> tuple[
+    DataLoader[tuple[torch.Tensor, torch.Tensor]],
+    nn.Module,
+    torch.optim.Optimizer,
+]:
+    inputs = torch.randn(4, 4)
+    targets = torch.randint(0, 3, (4,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    return loader, model, optimizer
+
+
+@pytest.mark.parametrize(
+    ("trainer_kwargs", "match"),
+    [
+        ({"grad_accum": 0}, "grad_accum"),
+        ({"grad_accum": -1}, "grad_accum"),
+        ({"log_interval": -1}, "log_interval"),
+        ({"clip_grad_norm": -0.1}, "clip_grad_norm"),
+        ({"clip_grad_norm": float("nan")}, "clip_grad_norm"),
+    ],
+)
+def test_fast_trainer_rejects_invalid_numeric_settings(
+    trainer_kwargs: dict[str, object],
+    match: str,
+) -> None:
+    _loader, model, optimizer = _make_supervised_components()
+
+    with pytest.raises(ValueError, match=match):
+        FastTrainer(
+            model,
+            optimizer,
+            device="cpu",
+            use_amp=False,
+            use_compile=False,
+            **trainer_kwargs,
+        )
+
+
+@pytest.mark.parametrize(
+    ("train_kwargs", "match"),
+    [
+        ({"steps": 0}, "steps"),
+        ({"steps": -1}, "steps"),
+        ({"warmup_steps": -1}, "warmup_steps"),
+        ({"steps": 1, "warmup_steps": 2}, "warmup_steps"),
+        ({"profile_window": 0}, "profile_window"),
+        ({"profile_model_depth": 0}, "profile_model_depth"),
+        ({"profile_model_max_modules": 0}, "profile_model_max_modules"),
+    ],
+)
+def test_train_one_epoch_rejects_invalid_numeric_settings(
+    train_kwargs: dict[str, object],
+    match: str,
+) -> None:
+    loader, model, optimizer = _make_supervised_components()
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    with pytest.raises(ValueError, match=match):
+        trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), **train_kwargs)
+
+
+def test_eval_and_predict_reject_invalid_step_limits() -> None:
+    loader, model, optimizer = _make_supervised_components()
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    with pytest.raises(ValueError, match="steps"):
+        trainer.evaluate(loader, nn.CrossEntropyLoss(), steps=0)
+    with pytest.raises(ValueError, match="steps"):
+        trainer.predict(loader, steps=-1)
+
+
 def test_train_one_epoch_collects_phase_and_model_profile() -> None:
     inputs = torch.randn(16, 4)
     targets = torch.randint(0, 3, (16,))

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, cast
 
 import fnmatch
+import math
 import time
 import torch
 import torch.nn as nn
@@ -193,6 +194,48 @@ def _metric_to_float(value: Any) -> float:
     except (TypeError, ValueError):
         return 0.0
 
+
+def _int_setting(value: Any, name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+
+
+def _positive_int_setting(value: Any, name: str) -> int:
+    normalized = _int_setting(value, name)
+    if normalized <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return normalized
+
+
+def _non_negative_int_setting(value: Any, name: str) -> int:
+    normalized = _int_setting(value, name)
+    if normalized < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return normalized
+
+
+def _optional_positive_int_setting(value: Any, name: str) -> Optional[int]:
+    if value is None:
+        return None
+    return _positive_int_setting(value, name)
+
+
+def _non_negative_finite_float_setting(value: Any, name: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a non-negative finite number")
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-negative finite number") from exc
+    if not math.isfinite(normalized) or normalized < 0.0:
+        raise ValueError(f"{name} must be a non-negative finite number")
+    return normalized
+
+
 @dataclass
 class TriggerResult:
     extra_inputs: Any = None
@@ -252,9 +295,11 @@ class FastTrainer:
         self.model = maybe_channels_last(self.model, channels_last=channels_last)
         self.optimizer = optimizer
         self.scheduler = scheduler
-        self.grad_accum = max(1, int(grad_accum))
-        self.clip_grad_norm = clip_grad_norm
-        self.log_interval = max(0, int(log_interval))
+        self.grad_accum = _positive_int_setting(grad_accum, "grad_accum")
+        self.clip_grad_norm = (
+            None if clip_grad_norm is None else _non_negative_finite_float_setting(clip_grad_norm, "clip_grad_norm")
+        )
+        self.log_interval = _non_negative_int_setting(log_interval, "log_interval")
         self.trigger_hook = trigger_hook
         self.logger = logger
         self.log_on_rank0 = log_on_rank0
@@ -463,11 +508,20 @@ class FastTrainer:
         Expects criterion to support reduction='mean'. If trigger_hook is set and
         you want per-sample logic, pass a criterion that supports reduction='none'.
         """
+        step_limit = _optional_positive_int_setting(steps, "steps")
+        warmup_step_limit = _non_negative_int_setting(warmup_steps, "warmup_steps")
+        if step_limit is not None and warmup_step_limit > step_limit:
+            raise ValueError("warmup_steps must be less than or equal to steps")
+        profile_window_size = _positive_int_setting(profile_window, "profile_window")
+        profile_model_depth_value = _positive_int_setting(profile_model_depth, "profile_model_depth")
+        profile_model_max_modules_value = _positive_int_setting(
+            profile_model_max_modules,
+            "profile_model_max_modules",
+        )
         self.model.train()
         sampler = getattr(loader, "sampler", None)
         if isinstance(sampler, DistributedSampler) and epoch is not None:
             sampler.set_epoch(epoch)
-        warmup_step_limit = max(0, int(warmup_steps))
         meter = ThroughputMeter(fast_mode=self.meter_fast_mode)
         warmup_meter = ThroughputMeter(fast_mode=self.meter_fast_mode)
         steady_meter = ThroughputMeter(fast_mode=self.meter_fast_mode)
@@ -476,14 +530,14 @@ class FastTrainer:
             device=self.device,
             sync=profile_sync,
             track_distribution=profile_distribution,
-            window=profile_window,
+            window=profile_window_size,
         )
         profile_model_enabled = bool(collect_profile and profile_model)
         if profile_model_enabled:
             profile_hook_result = self._install_profile_model_hooks(
                 profiler,
-                depth=profile_model_depth,
-                max_modules=profile_model_max_modules,
+                depth=profile_model_depth_value,
+                max_modules=profile_model_max_modules_value,
                 include=profile_model_include,
             )
         else:
@@ -631,7 +685,7 @@ class FastTrainer:
             nonlocal step_idx
             data_iter = iter(loader)
             try:
-                while steps is None or step_idx < steps:
+                while step_limit is None or step_idx < step_limit:
                     step_started_at = time.perf_counter()
                     profiler.start("data_wait")
                     try:
@@ -782,7 +836,7 @@ class FastTrainer:
             # Step if accumulation boundary
             pending_accum_steps += 1
             reached_accum_boundary = pending_accum_steps >= self.grad_accum
-            reached_requested_steps = steps is not None and step_idx >= steps
+            reached_requested_steps = step_limit is not None and step_idx >= step_limit
             if reached_accum_boundary or reached_requested_steps:
                 run_optimizer_step(pending_accum_steps)
                 pending_accum_steps = 0
@@ -967,6 +1021,7 @@ class FastTrainer:
         epoch: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Run a validation/evaluation loop without gradient updates."""
+        step_limit = _optional_positive_int_setting(steps, "steps")
         self.model.eval()
         sampler = getattr(loader, "sampler", None)
         if isinstance(sampler, DistributedSampler) and epoch is not None:
@@ -982,7 +1037,7 @@ class FastTrainer:
 
         with torch.no_grad():
             for batch in loader:
-                if steps is not None and step_idx >= steps:
+                if step_limit is not None and step_idx >= step_limit:
                     break
                 step_idx += 1
                 batch = to_device(batch, self.device, non_blocking=True)
@@ -1071,14 +1126,15 @@ class FastTrainer:
         postprocess: Optional[Callable[[Any], Any]] = None,
     ) -> list[Any]:
         """Run inference and collect outputs on CPU."""
+        step_limit = _optional_positive_int_setting(steps, "steps")
         self.model.eval()
         outputs_list: list[Any] = []
         step_idx = 0
         with torch.no_grad():
             for batch in loader:
-                step_idx += 1
-                if steps is not None and step_idx > steps:
+                if step_limit is not None and step_idx >= step_limit:
                     break
+                step_idx += 1
                 batch = to_device(batch, self.device, non_blocking=True)
                 if isinstance(batch, (list, tuple)) and len(batch) == 2:
                     inputs = batch[0]
