@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.bench_matrix import (
     _compile_requested,
+    _format_run_row,
     _format_summary_row,
     _parse_csv_choices,
     _parse_worker_counts,
@@ -181,6 +182,60 @@ def test_format_summary_row_includes_only_measured_profile_parts() -> None:
     assert "fwd+bwd=62.5%" in formatted
     assert "loss=" not in formatted
     assert "opt=12.0%" in formatted
+
+
+def test_format_run_row_uses_reported_and_e2e_metrics() -> None:
+    row = _format_run_row(
+        "generated",
+        "no-compile",
+        2,
+        3,
+        {
+            "reported_samples_per_sec": 123.45,
+            "samples_per_sec": 99.0,
+            "end_to_end_wall_time_s": 1.234,
+            "wall_time_s": 0.5,
+        },
+    )
+
+    assert "generated no-compile workers=2" in row
+    assert "run=3" in row
+    assert "steady=123.5/s" in row
+    assert "e2e=1.23s" in row
+
+
+def test_format_run_row_falls_back_to_total_metrics() -> None:
+    row = _format_run_row(
+        "materialized",
+        "compile",
+        0,
+        0,
+        {
+            "samples_per_sec": 80.0,
+            "wall_time_s": 2.0,
+        },
+    )
+
+    assert "steady=80.0/s" in row
+    assert "e2e=2.00s" in row
+
+
+def test_format_run_row_marks_malformed_metrics_as_na() -> None:
+    row = _format_run_row(
+        "generated",
+        "no-compile",
+        0,
+        0,
+        {
+            "reported_samples_per_sec": float("nan"),
+            "samples_per_sec": True,
+            "end_to_end_wall_time_s": None,
+            "wall_time_s": "slow",
+        },
+    )
+
+    assert "steady=n/a" in row
+    assert "e2e=n/a" in row
 
 
 def test_summarize_rows_groups_configs_and_ranks_best() -> None:

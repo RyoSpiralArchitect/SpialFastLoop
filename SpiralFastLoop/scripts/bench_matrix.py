@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bench_parallel_transactions import (
     BASE_SUMMARY_FIELDS,
     _best_finite_row,
+    _format_metric_value,
     _int_arg,
     count_profiled_rows,
     non_negative_int_arg,
@@ -189,6 +190,25 @@ def _format_summary_row(row: dict) -> str:
     )
 
 
+def _format_run_row(dataset_mode: str, compile_mode: str, workers: int, run_index: int, result: dict) -> str:
+    steady_text = _format_metric_value(
+        result.get("reported_samples_per_sec", result.get("samples_per_sec")),
+        precision=1,
+        suffix="/s",
+    )
+    e2e_text = _format_metric_value(
+        result.get("end_to_end_wall_time_s", result.get("wall_time_s")),
+        precision=2,
+        suffix="s",
+    )
+    return (
+        f"{dataset_mode:>12} {compile_mode:>10} workers={workers:<2} "
+        f"run={run_index:<2} "
+        f"steady={steady_text} "
+        f"e2e={e2e_text}"
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--transactions", type=positive_int_arg, default=4096)
@@ -281,12 +301,7 @@ def main() -> None:
                         "matrix_workers": workers,
                     })
                     rows.append(result)
-                    print(
-                        f"{dataset_mode:>12} {compile_mode:>10} workers={workers:<2} "
-                        f"run={run_index:<2} "
-                        f"steady={result.get('reported_samples_per_sec', 0.0):.1f}/s "
-                        f"e2e={result.get('end_to_end_wall_time_s', result['wall_time_s']):.2f}s"
-                    )
+                    print(_format_run_row(dataset_mode, compile_mode, workers, run_index, result))
 
     summary = summarize_rows(rows)
     if summary["best_reported"]:
