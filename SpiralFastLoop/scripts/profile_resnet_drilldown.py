@@ -36,6 +36,8 @@ from scripts.bench_parallel_transactions import (
 )
 from scripts.json_utils import dumps_json
 
+DATASET_CHOICES = ("fake", "cifar10")
+
 
 def _build_fake_dataset(size: int, image_size: int, classes: int) -> TensorDataset:
     size = _positive_int_setting(size, "size")
@@ -46,8 +48,15 @@ def _build_fake_dataset(size: int, image_size: int, classes: int) -> TensorDatas
     return TensorDataset(inputs, targets)
 
 
+def _dataset_arg(raw: object) -> str:
+    if not isinstance(raw, str) or raw not in DATASET_CHOICES:
+        raise ValueError("dataset must be one of fake, cifar10")
+    return raw
+
+
 def _build_dataset(args: argparse.Namespace):
-    if args.dataset == "fake":
+    dataset_name = _dataset_arg(args.dataset)
+    if dataset_name == "fake":
         return _build_fake_dataset(args.dataset_size, args.image_size, args.num_classes), args.num_classes
 
     try:
@@ -66,6 +75,7 @@ def _build_dataset(args: argparse.Namespace):
 
 
 def _build_resnet18(num_classes: int) -> nn.Module:
+    num_classes = _positive_int_setting(num_classes, "num_classes")
     try:
         from torchvision import models
     except Exception as exc:  # pragma: no cover - depends on optional torchvision
@@ -157,15 +167,16 @@ def _print_summary(metrics: dict[str, Any], topk: int) -> None:
 
 def validate_resnet_profile_args(args: argparse.Namespace) -> None:
     validate_benchmark_args(args)
+    dataset_name = _dataset_arg(args.dataset)
     dataset_size = _positive_int_setting(args.dataset_size, "dataset_size")
     batch_size = _positive_int_setting(args.batch_size, "batch_size")
-    if args.dataset == "fake" and dataset_size < batch_size:
+    if dataset_name == "fake" and dataset_size < batch_size:
         raise ValueError("dataset-size must be at least batch-size when using --dataset fake.")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset", choices=["fake", "cifar10"], default="fake")
+    parser.add_argument("--dataset", choices=DATASET_CHOICES, default="fake")
     parser.add_argument("--data-root", default="./data")
     parser.add_argument("--download", action="store_true")
     parser.add_argument("--dataset-size", type=positive_int_arg, default=4096)

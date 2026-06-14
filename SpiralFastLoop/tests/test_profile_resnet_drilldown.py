@@ -30,6 +30,24 @@ def test_build_fake_dataset_rejects_invalid_shape_values(
         drilldown._build_fake_dataset(size, image_size, classes)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize("num_classes", [0, -1, 1.5, True, "2"])
+def test_build_resnet18_rejects_invalid_num_classes_before_import(num_classes: object) -> None:
+    with pytest.raises(ValueError, match="num_classes"):
+        drilldown._build_resnet18(num_classes)  # type: ignore[arg-type]
+
+
+def test_build_dataset_rejects_unknown_direct_dataset() -> None:
+    args = Namespace(
+        dataset="imagenet",
+        dataset_size=8,
+        image_size=32,
+        num_classes=2,
+    )
+
+    with pytest.raises(ValueError, match="dataset"):
+        drilldown._build_dataset(args)
+
+
 @pytest.mark.parametrize(
     ("dataset_size", "batch_size", "match"),
     [
@@ -70,6 +88,19 @@ def test_validate_resnet_profile_args_rejects_empty_fake_batches() -> None:
     )
 
     with pytest.raises(ValueError, match="dataset-size"):
+        drilldown.validate_resnet_profile_args(args)
+
+
+def test_validate_resnet_profile_args_rejects_unknown_direct_dataset() -> None:
+    args = Namespace(
+        dataset="imagenet",
+        dataset_size=8,
+        batch_size=4,
+        steps=1,
+        warmup_steps=0,
+    )
+
+    with pytest.raises(ValueError, match="dataset"):
         drilldown.validate_resnet_profile_args(args)
 
 
