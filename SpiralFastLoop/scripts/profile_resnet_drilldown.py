@@ -15,7 +15,11 @@ from torch.utils.data import TensorDataset
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer
-from spiralfastloop.utils import dataloader_from_dataset, get_best_device
+from spiralfastloop.utils import (
+    _positive_int_setting,
+    dataloader_from_dataset,
+    get_best_device,
+)
 from scripts.bench_parallel_transactions import (
     non_negative_int_arg,
     positive_float_arg,
@@ -26,6 +30,9 @@ from scripts.json_utils import dumps_json
 
 
 def _build_fake_dataset(size: int, image_size: int, classes: int) -> TensorDataset:
+    size = _positive_int_setting(size, "size")
+    image_size = _positive_int_setting(image_size, "image_size")
+    classes = _positive_int_setting(classes, "classes")
     inputs = torch.randn(size, 3, image_size, image_size)
     targets = torch.randint(0, classes, (size,))
     return TensorDataset(inputs, targets)

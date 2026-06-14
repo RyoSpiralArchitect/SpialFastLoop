@@ -10,6 +10,35 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts import bench
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"n": 0},
+        {"d": 0},
+        {"classes": 0},
+        {"n": True},
+        {"d": 1.5},
+    ],
+)
+def test_synth_rejects_invalid_shape_values(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        bench.Synth(**kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"d": 0},
+        {"classes": 0},
+        {"d": True},
+        {"classes": 1.5},
+    ],
+)
+def test_mlp_rejects_invalid_shape_values(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        bench.MLP(**kwargs)  # type: ignore[arg-type]
+
+
 def test_bench_parse_args_accepts_valid_minimal_run(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         sys,

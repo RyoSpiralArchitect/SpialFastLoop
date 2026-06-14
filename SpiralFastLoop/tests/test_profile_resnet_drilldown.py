@@ -10,6 +10,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts import profile_resnet_drilldown as drilldown
 
 
+@pytest.mark.parametrize(
+    ("size", "image_size", "classes"),
+    [
+        (0, 32, 2),
+        (4, 0, 2),
+        (4, 32, 0),
+        (True, 32, 2),
+        (4, 1.5, 2),
+    ],
+)
+def test_build_fake_dataset_rejects_invalid_shape_values(
+    size: object,
+    image_size: object,
+    classes: object,
+) -> None:
+    with pytest.raises(ValueError):
+        drilldown._build_fake_dataset(size, image_size, classes)  # type: ignore[arg-type]
+
+
 def test_resnet_drilldown_parse_args_accepts_valid_fake_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

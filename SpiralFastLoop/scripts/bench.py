@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader, Dataset
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer, recommended_dataloader
+from spiralfastloop.utils import _positive_int_setting
 from scripts.bench_parallel_transactions import (
     non_negative_int_arg,
     positive_float_arg,
@@ -26,6 +27,9 @@ from scripts.json_utils import dumps_json
 
 class Synth(Dataset):
     def __init__(self, n: int = 50_000, d: int = 128, classes: int = 10) -> None:
+        n = _positive_int_setting(n, "n")
+        d = _positive_int_setting(d, "d")
+        classes = _positive_int_setting(classes, "classes")
         self.x = torch.randn(n, d)
         self.y = torch.randint(0, classes, (n,))
 
@@ -39,6 +43,8 @@ class Synth(Dataset):
 class MLP(nn.Module):
     def __init__(self, d: int = 128, classes: int = 10) -> None:
         super().__init__()
+        d = _positive_int_setting(d, "d")
+        classes = _positive_int_setting(classes, "classes")
         self.net = nn.Sequential(
             nn.Linear(d, 512),
             nn.ReLU(),
