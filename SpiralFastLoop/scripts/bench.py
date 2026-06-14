@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, Dataset
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer, recommended_dataloader
-from spiralfastloop.utils import _positive_int_setting
+from spiralfastloop.utils import _finite_float_setting, _positive_int_setting
 from scripts.bench_parallel_transactions import (
     non_negative_int_arg,
     positive_float_arg,
@@ -65,7 +65,17 @@ def best_device(requested: str = "auto") -> torch.device:
     return torch.device("cpu")
 
 
+def _positive_float_setting(value: object, name: str) -> float:
+    if isinstance(value, str):
+        raise ValueError(f"{name} must be a positive finite number")
+    normalized = _finite_float_setting(value, name)
+    if normalized <= 0.0:
+        raise ValueError(f"{name} must be a positive finite number")
+    return normalized
+
+
 def adamw(parameters, learning_rate: float) -> torch.optim.AdamW:
+    learning_rate = _positive_float_setting(learning_rate, "learning_rate")
     return torch.optim.AdamW(parameters, lr=learning_rate, fused=torch.cuda.is_available())
 
 
@@ -78,6 +88,7 @@ def plain_loop(
     *,
     epochs: int = 1,
 ) -> dict[str, float]:
+    epochs = _positive_int_setting(epochs, "epochs")
     model.to(device).train()
     start = time.perf_counter()
     steps = 0

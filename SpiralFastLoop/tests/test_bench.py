@@ -4,6 +4,9 @@ import sys
 from pathlib import Path
 
 import pytest
+import torch
+from torch import nn
+from torch.utils.data import DataLoader, TensorDataset
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -37,6 +40,32 @@ def test_synth_rejects_invalid_shape_values(kwargs: dict[str, object]) -> None:
 def test_mlp_rejects_invalid_shape_values(kwargs: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         bench.MLP(**kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("learning_rate", [0.0, -0.1, float("nan"), float("inf"), True, "0.001"])
+def test_adamw_rejects_invalid_direct_learning_rates(learning_rate: object) -> None:
+    model = nn.Linear(2, 2)
+
+    with pytest.raises(ValueError):
+        bench.adamw(model.parameters(), learning_rate)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("epochs", [0, -1, 1.5, True, "1"])
+def test_plain_loop_rejects_invalid_direct_epochs(epochs: object) -> None:
+    dataset = TensorDataset(torch.randn(2, 2), torch.tensor([0, 1]))
+    loader = DataLoader(dataset, batch_size=1)
+    model = nn.Linear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+    with pytest.raises(ValueError):
+        bench.plain_loop(
+            loader,
+            model,
+            optimizer,
+            nn.CrossEntropyLoss(),
+            torch.device("cpu"),
+            epochs=epochs,  # type: ignore[arg-type]
+        )
 
 
 def test_bench_parse_args_accepts_valid_minimal_run(monkeypatch: pytest.MonkeyPatch) -> None:
