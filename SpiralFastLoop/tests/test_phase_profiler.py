@@ -1246,6 +1246,20 @@ def test_train_one_epoch_cleans_profile_phase_when_loader_fails(
 def test_train_one_epoch_cleans_profile_phase_when_forward_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    class CapturingLogger:
+        def __init__(self) -> None:
+            self.rows: list[tuple[str, dict[str, object], str]] = []
+
+        def log_metrics(
+            self,
+            stage: str,
+            metrics: dict[str, object],
+            *,
+            mode: str = "step",
+            **_: object,
+        ) -> None:
+            self.rows.append((stage, metrics, mode))
+
     class FailingModel(nn.Module):
         def __init__(self) -> None:
             super().__init__()
@@ -1260,13 +1274,38 @@ def test_train_one_epoch_cleans_profile_phase_when_forward_fails(
     loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
     model = FailingModel()
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
-    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+    logger = CapturingLogger()
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        logger=logger,
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
 
     with pytest.raises(RuntimeError, match="forward boom"):
         trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), steps=1, collect_profile=True)
 
     assert len(profilers) == 1
     assert profilers[0]._starts == {}
+    assert len(logger.rows) == 1
+    stage, metrics, mode = logger.rows[0]
+    assert stage == "train"
+    assert mode == "error"
+    assert metrics["steps"] == 1
+    assert metrics["optimizer_steps"] == 0
+    assert metrics["samples"] == 0
+    assert metrics["train_failed"] is True
+    assert metrics["train_failure_stage"] == "forward"
+    assert metrics["train_failure_last_error"] == "RuntimeError: forward boom"
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "data_wait" in phases
+    assert "transfer" in phases
+    assert "forward" in phases
 
 
 def test_train_one_epoch_cleans_model_profile_detail_when_module_forward_fails(

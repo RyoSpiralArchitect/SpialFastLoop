@@ -971,6 +971,80 @@ class FastTrainer:
         steady_recorded_steps = 0
         warmup_optimizer_steps = 0
         steady_optimizer_steps = 0
+        train_failure_logged = False
+
+        def build_train_failure_metrics(stage: str, exc: Exception) -> Dict[str, Any]:
+            metrics: Dict[str, Any] = dict(meter.summary())
+            metrics.update(_collect_device_memory_metrics(self.device))
+            weight_value = total_weight.item()
+            if weight_value > 0:
+                metrics["avg_loss"] = (total_loss / total_weight).item()
+            else:
+                metrics["avg_loss"] = 0.0
+            warmup_summary = warmup_meter.summary()
+            steady_summary = steady_meter.summary()
+            for key, value in warmup_summary.items():
+                metrics[f"warmup_{key}"] = value
+            for key, value in steady_summary.items():
+                metrics[f"steady_{key}"] = value
+            metrics["steps"] = step_idx
+            metrics["optimizer_steps"] = optimizer_steps
+            metrics["grad_accum"] = self.grad_accum
+            metrics["partial_optimizer_steps"] = partial_optimizer_steps
+            metrics["grad_accum_tail_steps"] = grad_accum_tail_steps
+            metrics["scheduler_step_failures"] = scheduler_step_failures
+            metrics["scheduler_last_error"] = scheduler_last_error
+            metrics["samples"] = total_items
+            metrics["warmup_steps"] = warmup_recorded_steps
+            metrics["steady_steps"] = steady_recorded_steps
+            metrics["warmup_samples"] = warmup_items
+            metrics["steady_samples"] = steady_items
+            metrics["warmup_optimizer_steps"] = warmup_optimizer_steps
+            metrics["steady_optimizer_steps"] = steady_optimizer_steps
+            metrics["cold_start_steps"] = warmup_recorded_steps
+            metrics["cold_start_time_s"] = warmup_summary["total_time_s"]
+            metrics["cold_start_samples_per_sec"] = warmup_summary["samples_per_sec"]
+            metrics["reported_samples_per_sec"] = (
+                steady_summary["samples_per_sec"] if steady_recorded_steps > 0 else metrics["samples_per_sec"]
+            )
+            metrics["amp"] = self.amp_enabled
+            metrics["compile_requested"] = self.compile_requested
+            metrics["compiled"] = self.compiled
+            metrics["compile_init_time_s"] = self.compile_init_time_s
+            metrics["compile_fallback_reason"] = self.compile_fallback_reason
+            metrics["profile_model_requested"] = profile_model_value
+            metrics["profile_model_enabled"] = profile_model_enabled
+            metrics["profile_model_status"] = profile_model_status
+            metrics["profile_model_modules_selected"] = profile_hook_result.modules_selected
+            metrics["profile_model_hook_count"] = len(profile_hook_result.handles)
+            metrics["profile_model_hook_failures"] = profile_hook_result.hook_failures
+            metrics["profile_model_hook_last_error"] = profile_hook_result.last_error
+            metrics["device"] = self.device
+            metrics["world_size"] = self.dist_ctx.world_size
+            metrics["rank"] = self.dist_ctx.rank
+            metrics["train_failed"] = True
+            metrics["train_failure_stage"] = stage
+            metrics["train_failure_last_error"] = _format_exception_reason(exc)
+            if collect_profile_value:
+                profile_summary = profiler.summary()
+                metrics["profile"] = profile_summary
+                _add_profile_phase_metrics(metrics, profile_summary)
+            return metrics
+
+        def log_train_failure(stage: str, exc: Exception) -> None:
+            nonlocal train_failure_logged
+            if train_failure_logged:
+                return
+            train_failure_logged = True
+            try:
+                self._log_metrics(
+                    "train",
+                    build_train_failure_metrics(stage, exc),
+                    epoch=epoch,
+                    mode="error",
+                )
+            except Exception:
+                pass
 
         def rescale_accumulated_gradients(factor: float) -> None:
             if factor == 1.0:
@@ -988,6 +1062,7 @@ class FastTrainer:
             nonlocal warmup_optimizer_steps
             nonlocal steady_optimizer_steps
             profiler.start("optimizer")
+            optimizer_error: Optional[Exception] = None
             try:
                 if accumulated_steps < self.grad_accum:
                     partial_optimizer_steps += 1
@@ -1045,8 +1120,13 @@ class FastTrainer:
                     warmup_optimizer_steps += 1
                 else:
                     steady_optimizer_steps += 1
+            except Exception as exc:
+                optimizer_error = exc
+                raise
             finally:
                 profiler.stop("optimizer")
+                if optimizer_error is not None:
+                    log_train_failure("optimizer", optimizer_error)
 
         def profiled_batches() -> Iterable[tuple[Any, float]]:
             nonlocal step_idx
@@ -1060,8 +1140,9 @@ class FastTrainer:
                     except StopIteration:
                         profiler.cancel("data_wait")
                         break
-                    except Exception:
+                    except Exception as exc:
                         profiler.cancel("data_wait")
+                        log_train_failure("data_wait", exc)
                         raise
                     else:
                         profiler.stop("data_wait")
@@ -1077,10 +1158,16 @@ class FastTrainer:
         for batch, step_started_at in profiled_batches():
 
             profiler.start("transfer")
+            transfer_error: Optional[Exception] = None
             try:
                 batch = to_device(batch, self.device, non_blocking=True)
+            except Exception as exc:
+                transfer_error = exc
+                raise
             finally:
                 profiler.stop("transfer")
+                if transfer_error is not None:
+                    log_train_failure("transfer", transfer_error)
             # Support (inputs, targets) or dict with 'inputs','targets'
             if isinstance(batch, (list, tuple)) and len(batch) == 2:
                 inputs, targets = batch
@@ -1095,10 +1182,16 @@ class FastTrainer:
 
             with autocast_ctx(self.device, self.amp_enabled, self.amp_dtype):
                 profiler.start("forward")
+                forward_error: Optional[Exception] = None
                 try:
                     outputs = self.model(inputs)
+                except Exception as exc:
+                    forward_error = exc
+                    raise
                 finally:
                     profiler.stop("forward")
+                    if forward_error is not None:
+                        log_train_failure("forward", forward_error)
 
                 if targets is not None and criterion is not None:
                     if supports_per_sample and self.trigger_hook is not None:
@@ -1109,10 +1202,16 @@ class FastTrainer:
                         try:
                             # per-sample loss for trigger decisions
                             profiler.start("loss")
+                            loss_error: Optional[Exception] = None
                             try:
                                 loss_vec = _ensure_loss_vector(criterion(outputs, targets))
+                            except Exception as exc:
+                                loss_error = exc
+                                raise
                             finally:
                                 profiler.stop("loss")
+                                if loss_error is not None:
+                                    log_train_failure("loss", loss_error)
                         finally:
                             if reduction_to_restore is not None:
                                 criterion.reduction = reduction_to_restore
@@ -1127,18 +1226,29 @@ class FastTrainer:
                         }
                         observe = _optional_trigger_observe_setting(self.trigger_hook)
                         if observe is not None:
-                            observe(trigger_ctx)
+                            try:
+                                observe(trigger_ctx)
+                            except Exception as exc:
+                                log_train_failure("trigger_observe", exc)
+                                raise
                         # Trigger may inject extra samples (e.g., hard examples)
                         profiler.start("trigger")
+                        trigger_error: Optional[Exception] = None
                         try:
                             trig_result = _optional_trigger_result_setting(self.trigger_hook(trigger_ctx))
+                        except Exception as exc:
+                            trigger_error = exc
+                            raise
                         finally:
                             profiler.stop("trigger")
+                            if trigger_error is not None:
+                                log_train_failure("trigger", trigger_error)
                         weights: Optional[torch.Tensor] = None
                         if trig_result is not None:
                             if trig_result.extra_inputs is not None:
                                 # Concatenate and recompute outputs & loss_vec
                                 profiler.start("inject_transfer")
+                                inject_transfer_error: Optional[Exception] = None
                                 try:
                                     extra_x = to_device(trig_result.extra_inputs, self.device, non_blocking=True)
                                     extra_y = (
@@ -1148,23 +1258,40 @@ class FastTrainer:
                                     )
                                     inputs = _concatenate_batches(inputs, extra_x)
                                     targets = _concatenate_batches(targets, extra_y)
+                                except Exception as exc:
+                                    inject_transfer_error = exc
+                                    raise
                                 finally:
                                     profiler.stop("inject_transfer")
+                                    if inject_transfer_error is not None:
+                                        log_train_failure("inject_transfer", inject_transfer_error)
                                 profiler.start("forward")
+                                forward_error = None
                                 try:
                                     outputs = self.model(inputs)
+                                except Exception as exc:
+                                    forward_error = exc
+                                    raise
                                 finally:
                                     profiler.stop("forward")
+                                    if forward_error is not None:
+                                        log_train_failure("forward", forward_error)
                                 reduction_to_restore = None
                                 if hasattr(criterion, "reduction") and getattr(criterion, "reduction") != "none":
                                     reduction_to_restore = getattr(criterion, "reduction")
                                     criterion.reduction = "none"
                                 try:
                                     profiler.start("loss")
+                                    loss_error = None
                                     try:
                                         loss_vec = _ensure_loss_vector(criterion(outputs, targets))
+                                    except Exception as exc:
+                                        loss_error = exc
+                                        raise
                                     finally:
                                         profiler.stop("loss")
+                                        if loss_error is not None:
+                                            log_train_failure("loss", loss_error)
                                 finally:
                                     if reduction_to_restore is not None:
                                         criterion.reduction = reduction_to_restore
@@ -1173,6 +1300,7 @@ class FastTrainer:
 
                         if weights is not None:
                             profiler.start("loss_reduce")
+                            loss_reduce_error: Optional[Exception] = None
                             try:
                                 w = weights.to(loss_vec.device, dtype=loss_vec.dtype)
                                 if w.ndim != 1 or w.shape[0] != loss_vec.shape[0]:
@@ -1190,23 +1318,40 @@ class FastTrainer:
                                     device=total_loss.device,
                                     dtype=total_loss.dtype,
                                 )
+                            except Exception as exc:
+                                loss_reduce_error = exc
+                                raise
                             finally:
                                 profiler.stop("loss_reduce")
+                                if loss_reduce_error is not None:
+                                    log_train_failure("loss_reduce", loss_reduce_error)
                         else:
                             profiler.start("loss_reduce")
+                            loss_reduce_error = None
                             try:
                                 loss = loss_vec.mean()
                                 loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
+                            except Exception as exc:
+                                loss_reduce_error = exc
+                                raise
                             finally:
                                 profiler.stop("loss_reduce")
+                                if loss_reduce_error is not None:
+                                    log_train_failure("loss_reduce", loss_reduce_error)
                     else:
                         profiler.start("loss")
+                        loss_error = None
                         try:
                             loss = criterion(outputs, targets)
                             if isinstance(loss, torch.Tensor) and loss.ndim > 0:
                                 loss = loss.mean()
+                        except Exception as exc:
+                            loss_error = exc
+                            raise
                         finally:
                             profiler.stop("loss")
+                            if loss_error is not None:
+                                log_train_failure("loss", loss_error)
                         reference = targets if targets is not None else inputs
                         batch_size = _infer_batch_size(reference)
                         loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
@@ -1216,19 +1361,27 @@ class FastTrainer:
                         if loss_weight_tensor is None:
                             loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
                 else:
-                    raise ValueError("No criterion provided for supervised step; supply a loss function.")
+                    loss_error = ValueError("No criterion provided for supervised step; supply a loss function.")
+                    log_train_failure("loss", loss_error)
+                    raise loss_error
                 raw_loss = loss
                 loss = loss / self.grad_accum
 
             # Backward
             profiler.start("backward")
+            backward_error: Optional[Exception] = None
             try:
                 if self.scaler.is_enabled():
                     self.scaler.scale(loss).backward()
                 else:
                     loss.backward()
+            except Exception as exc:
+                backward_error = exc
+                raise
             finally:
                 profiler.stop("backward")
+                if backward_error is not None:
+                    log_train_failure("backward", backward_error)
 
             # Step if accumulation boundary
             pending_accum_steps += 1
@@ -1240,6 +1393,7 @@ class FastTrainer:
 
             # Metrics
             profiler.start("metrics")
+            metrics_error: Optional[Exception] = None
             try:
                 if batch_size is None:
                     reference = targets if targets is not None else inputs
@@ -1266,8 +1420,13 @@ class FastTrainer:
                     steady_loss += loss_detached * loss_weight_tensor
                     steady_weight += loss_weight_tensor
                     steady_recorded_steps += 1
+            except Exception as exc:
+                metrics_error = exc
+                raise
             finally:
                 profiler.stop("metrics")
+                if metrics_error is not None:
+                    log_train_failure("metrics", metrics_error)
 
             if self.log_interval > 0 and (step_idx % self.log_interval) == 0:
                 m = meter.summary()
@@ -1360,6 +1519,9 @@ class FastTrainer:
         metrics["device"] = self.device
         metrics["world_size"] = self.dist_ctx.world_size
         metrics["rank"] = self.dist_ctx.rank
+        metrics["train_failed"] = False
+        metrics["train_failure_stage"] = ""
+        metrics["train_failure_last_error"] = ""
         if collect_profile_value:
             profile_summary = profiler.summary()
             metrics["profile"] = profile_summary
