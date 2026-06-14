@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from argparse import Namespace
 from pathlib import Path
@@ -14,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bench_parallel_transactions import (
     BASE_SUMMARY_FIELDS,
     count_profiled_rows,
+    dump_json,
     non_negative_int_arg,
     positive_float_arg,
     positive_int_arg,
@@ -236,13 +236,13 @@ def main() -> None:
         out_path = Path(args.json_out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("w") as handle:
-            json.dump(rows, handle, indent=2)
+            dump_json(rows, handle)
         print(f"Wrote matrix results to {out_path}")
     if args.summary_out:
         out_path = Path(args.summary_out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("w") as handle:
-            json.dump(summary, handle, indent=2)
+            dump_json(summary, handle)
         print(f"Wrote matrix summary to {out_path}")
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import sys
 from argparse import Namespace
@@ -13,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.bench_parallel_transactions import (
     SyntheticTransactionDataset,
+    dump_json,
     non_negative_int_arg,
     parse_args,
     positive_float_arg,
@@ -120,6 +122,31 @@ def test_summarize_metric_skips_non_finite_values() -> None:
     assert stats["max"] == pytest.approx(100.0)
     assert stats["sample_count"] == pytest.approx(1.0)
     assert stats["non_finite_count"] == pytest.approx(2.0)
+
+
+def test_dump_json_converts_non_finite_values_to_null() -> None:
+    buffer = io.StringIO()
+
+    dump_json(
+        [
+            {
+                "loss": float("nan"),
+                "profile": {"pct": float("inf")},
+                "history": (1.0, float("-inf")),
+            },
+        ],
+        buffer,
+    )
+
+    payload = json.loads(buffer.getvalue())
+
+    assert payload == [
+        {
+            "loss": None,
+            "profile": {"pct": None},
+            "history": [1.0, None],
+        },
+    ]
 
 
 def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
