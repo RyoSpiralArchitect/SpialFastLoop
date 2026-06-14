@@ -34,11 +34,25 @@ PROFILE_SUMMARY_FIELDS = (
     "profile_total_s",
     "profile_data_wait_time_s",
     "profile_data_wait_pct",
+    "profile_data_wait_avg_ms",
     "profile_transfer_time_s",
     "profile_transfer_pct",
+    "profile_transfer_avg_ms",
     "profile_forward_time_s",
     "profile_forward_pct",
     "profile_forward_avg_ms",
+    "profile_loss_time_s",
+    "profile_loss_pct",
+    "profile_loss_avg_ms",
+    "profile_loss_reduce_time_s",
+    "profile_loss_reduce_pct",
+    "profile_loss_reduce_avg_ms",
+    "profile_trigger_time_s",
+    "profile_trigger_pct",
+    "profile_trigger_avg_ms",
+    "profile_inject_transfer_time_s",
+    "profile_inject_transfer_pct",
+    "profile_inject_transfer_avg_ms",
     "profile_backward_time_s",
     "profile_backward_pct",
     "profile_backward_avg_ms",
@@ -47,6 +61,9 @@ PROFILE_SUMMARY_FIELDS = (
     "profile_optimizer_time_s",
     "profile_optimizer_pct",
     "profile_optimizer_avg_ms",
+    "profile_metrics_time_s",
+    "profile_metrics_pct",
+    "profile_metrics_avg_ms",
 )
 
 SUMMARY_FIELDS = BASE_SUMMARY_FIELDS + PROFILE_SUMMARY_FIELDS
@@ -64,8 +81,11 @@ BEST_RUN_FIELDS = (
     "profile_forward_backward_pct",
     "profile_forward_backward_time_s",
     "profile_forward_pct",
+    "profile_loss_pct",
+    "profile_loss_reduce_pct",
     "profile_backward_pct",
     "profile_optimizer_pct",
+    "profile_metrics_pct",
 )
 
 

@@ -117,6 +117,7 @@ def _format_summary_row(row: dict) -> str:
         forward_backward_pct = float(row["mean_profile_forward_backward_pct"])
         profile_suffix = (
             f" fwd+bwd={forward_backward_pct:.1f}% "
+            f"loss={float(row.get('mean_profile_loss_pct', 0.0)):.1f}% "
             f"opt={float(row.get('mean_profile_optimizer_pct', 0.0)):.1f}%"
         )
     return (

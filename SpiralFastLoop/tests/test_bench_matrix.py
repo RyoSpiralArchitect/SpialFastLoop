@@ -66,12 +66,14 @@ def test_format_summary_row_includes_profile_suffix_when_available() -> None:
         "mean_reported_samples_per_sec": 200.0,
         "mean_end_to_end_wall_time_s": 1.25,
         "mean_profile_forward_backward_pct": 62.5,
+        "mean_profile_loss_pct": 8.5,
         "mean_profile_optimizer_pct": 12.0,
     }
 
     formatted = _format_summary_row(row)
 
     assert "fwd+bwd=62.5%" in formatted
+    assert "loss=8.5%" in formatted
     assert "opt=12.0%" in formatted
 
 
@@ -87,6 +89,7 @@ def test_format_summary_row_omits_profile_suffix_when_absent() -> None:
     formatted = _format_summary_row(row)
 
     assert "fwd+bwd" not in formatted
+    assert "loss=" not in formatted
     assert "opt=" not in formatted
 
 
@@ -106,7 +109,10 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "dataset_materialized_bytes": 0,
             "profile_forward_backward_pct": 40.0,
             "profile_forward_pct": 15.0,
+            "profile_loss_pct": 4.0,
+            "profile_loss_reduce_pct": 1.0,
             "profile_backward_pct": 25.0,
+            "profile_metrics_pct": 0.5,
         },
         {
             "matrix_dataset_mode": "generated",
@@ -122,7 +128,10 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "dataset_materialized_bytes": 0,
             "profile_forward_backward_pct": 60.0,
             "profile_forward_pct": 20.0,
+            "profile_loss_pct": 8.0,
+            "profile_loss_reduce_pct": 3.0,
             "profile_backward_pct": 40.0,
+            "profile_metrics_pct": 1.5,
         },
         {
             "matrix_dataset_mode": "materialized",
@@ -138,7 +147,10 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "dataset_materialized_bytes": 1024,
             "profile_forward_backward_pct": 55.0,
             "profile_forward_pct": 25.0,
+            "profile_loss_pct": 6.0,
+            "profile_loss_reduce_pct": 2.0,
             "profile_backward_pct": 30.0,
+            "profile_metrics_pct": 1.0,
         },
     ]
 
@@ -158,9 +170,13 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["mean_end_to_end_wall_time_s"] == pytest.approx(2.0)
     assert generated["stddev_end_to_end_wall_time_s"] == pytest.approx(1.0)
     assert generated["mean_profile_forward_backward_pct"] == pytest.approx(50.0)
+    assert generated["mean_profile_loss_pct"] == pytest.approx(6.0)
+    assert generated["mean_profile_loss_reduce_pct"] == pytest.approx(2.0)
+    assert generated["mean_profile_metrics_pct"] == pytest.approx(1.0)
     assert generated["max_profile_backward_pct"] == pytest.approx(40.0)
     assert generated["profiled_runs"] == 2
     assert summary["best_reported"]["mean_profile_forward_backward_pct"] == pytest.approx(55.0)
+    assert summary["best_reported"]["mean_profile_loss_pct"] == pytest.approx(6.0)
 
 
 def test_summarize_rows_skips_profile_fields_when_absent() -> None:
