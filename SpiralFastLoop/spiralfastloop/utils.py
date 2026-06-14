@@ -131,7 +131,7 @@ def get_amp_policy(device: str, use_amp: AmpSetting = "auto") -> Tuple[bool, tor
 def autocast_ctx(device: str, enabled: bool, amp_dtype: torch.dtype) -> AbstractContextManager[Any]:
     if not enabled:
         return nullcontext()
-    return torch.autocast(device_type=_device_type(device), dtype=amp_dtype)
+    return cast(AbstractContextManager[Any], torch.autocast(device_type=_device_type(device), dtype=amp_dtype))
 
 def to_device(obj: Any, device: str, non_blocking: bool = True) -> Any:
     """Recursively move tensors (and nested structures) to device."""

@@ -116,7 +116,7 @@ def _concatenate_batches(base: Any, extra: Any) -> Any:
 
 def _infer_batch_size(batch: Any) -> int:
     if isinstance(batch, torch.Tensor):
-        return batch.shape[0]
+        return int(batch.shape[0])
     if isinstance(batch, Mapping):
         candidate_values = []
         for value in batch.values():

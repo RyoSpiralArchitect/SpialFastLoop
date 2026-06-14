@@ -55,6 +55,10 @@ ignore_missing_imports = true
 module = ["jax", "jax.*"]
 follow_imports = "skip"
 
+[[tool.mypy.overrides]]
+module = ["torch", "torch.*"]
+follow_imports = "skip"
+
 [tool.flake8]
 max-line-length = 120
 extend-ignore = ["E203", "E302", "E305", "E402", "E501", "W503"]
