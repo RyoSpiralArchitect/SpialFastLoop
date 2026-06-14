@@ -1398,6 +1398,54 @@ class FastTrainer:
         user_metric_invalid_count = 0
         user_metric_non_finite_count = 0
         user_metric_unmeasured_count = 0
+        metrics_fn_requested = metrics_fn_value is not None
+        metrics_fn_calls = 0
+        metrics_fn_failures = 0
+        metrics_fn_last_error = ""
+
+        def build_eval_metrics(*, failed: bool = False, failure_stage: str = "") -> Dict[str, Any]:
+            metrics: Dict[str, Any] = dict(meter.summary())
+            metrics.update(_collect_device_memory_metrics(self.device))
+            weight_value = total_weight.item()
+            if weight_value > 0:
+                metrics["avg_loss"] = (total_loss / total_weight).item()
+            else:
+                metrics["avg_loss"] = 0.0
+            metrics["steps"] = step_idx
+            metrics["measured_steps"] = measured_steps
+            metrics["unmeasured_steps"] = step_idx - measured_steps
+            metrics["batch_size_inference_failures"] = batch_size_inference_failures
+            _add_batch_size_failure_metrics(metrics, batch_size_failure_counts)
+            metrics["samples"] = total_items
+            metrics["reported_samples_per_sec"] = metrics["samples_per_sec"]
+            metrics["device"] = self.device
+            metrics["world_size"] = self.dist_ctx.world_size
+            metrics["rank"] = self.dist_ctx.rank
+            metrics["metrics_fn_requested"] = metrics_fn_requested
+            metrics["metrics_fn_calls"] = metrics_fn_calls
+            metrics["metrics_fn_successes"] = metrics_fn_calls - metrics_fn_failures
+            metrics["metrics_fn_failures"] = metrics_fn_failures
+            metrics["metrics_fn_last_error"] = metrics_fn_last_error
+            metrics["eval_failed"] = failed
+            metrics["eval_failure_stage"] = failure_stage
+            metrics["user_metric_valid_count"] = user_metric_valid_count
+            metrics["user_metric_invalid_count"] = user_metric_invalid_count
+            metrics["user_metric_non_finite_count"] = user_metric_non_finite_count
+            metrics["user_metric_unmeasured_count"] = user_metric_unmeasured_count
+            metrics["user_metric_skipped_count"] = (
+                user_metric_invalid_count
+                + user_metric_non_finite_count
+                + user_metric_unmeasured_count
+            )
+
+            for key, total in metric_sums.items():
+                denom = metric_weights.get(key, 0.0)
+                metrics[key] = total / denom if denom else 0.0
+            if collect_profile_value:
+                profile_summary = profiler.summary()
+                metrics["profile"] = profile_summary
+                _add_profile_phase_metrics(metrics, profile_summary)
+            return metrics
 
         with torch.no_grad():
             data_iter = iter(loader)
@@ -1447,7 +1495,24 @@ class FastTrainer:
                 if metrics_fn_value is not None:
                     profiler.start("user_metrics")
                     try:
+                        metrics_fn_calls += 1
                         extra_metrics = metrics_fn_value(outputs, targets, inputs)
+                    except Exception as exc:
+                        metrics_fn_failures += 1
+                        metrics_fn_last_error = _format_exception_reason(exc)
+                        try:
+                            self._log_metrics(
+                                "eval",
+                                build_eval_metrics(
+                                    failed=True,
+                                    failure_stage="user_metrics",
+                                ),
+                                epoch=epoch,
+                                mode="error",
+                            )
+                        except Exception:
+                            pass
+                        raise
                     finally:
                         profiler.stop("user_metrics")
 
@@ -1539,40 +1604,7 @@ class FastTrainer:
                 metric_weights[key] = float(
                     distributed_sum(torch.tensor(metric_weights[key], device=total_loss.device)).item()
                 )
-        metrics: Dict[str, Any] = dict(meter.summary())
-        metrics.update(_collect_device_memory_metrics(self.device))
-        weight_value = total_weight.item()
-        if weight_value > 0:
-            metrics["avg_loss"] = (total_loss / total_weight).item()
-        else:
-            metrics["avg_loss"] = 0.0
-        metrics["steps"] = step_idx
-        metrics["measured_steps"] = measured_steps
-        metrics["unmeasured_steps"] = step_idx - measured_steps
-        metrics["batch_size_inference_failures"] = batch_size_inference_failures
-        _add_batch_size_failure_metrics(metrics, batch_size_failure_counts)
-        metrics["samples"] = total_items
-        metrics["reported_samples_per_sec"] = metrics["samples_per_sec"]
-        metrics["device"] = self.device
-        metrics["world_size"] = self.dist_ctx.world_size
-        metrics["rank"] = self.dist_ctx.rank
-        metrics["user_metric_valid_count"] = user_metric_valid_count
-        metrics["user_metric_invalid_count"] = user_metric_invalid_count
-        metrics["user_metric_non_finite_count"] = user_metric_non_finite_count
-        metrics["user_metric_unmeasured_count"] = user_metric_unmeasured_count
-        metrics["user_metric_skipped_count"] = (
-            user_metric_invalid_count
-            + user_metric_non_finite_count
-            + user_metric_unmeasured_count
-        )
-
-        for key, total in metric_sums.items():
-            denom = metric_weights.get(key, 0.0)
-            metrics[key] = total / denom if denom else 0.0
-        if collect_profile_value:
-            profile_summary = profiler.summary()
-            metrics["profile"] = profile_summary
-            _add_profile_phase_metrics(metrics, profile_summary)
+        metrics = build_eval_metrics()
         self._log_metrics("eval", metrics, epoch=epoch, mode="epoch")
         return metrics
 

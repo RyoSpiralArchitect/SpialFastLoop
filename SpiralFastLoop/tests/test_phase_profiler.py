@@ -613,6 +613,13 @@ def test_evaluate_collects_phase_profile_and_user_metrics() -> None:
     assert metrics["user_metric_non_finite_count"] == 0
     assert metrics["user_metric_unmeasured_count"] == 0
     assert metrics["user_metric_skipped_count"] == 0
+    assert metrics["metrics_fn_requested"] is True
+    assert metrics["metrics_fn_calls"] == 2
+    assert metrics["metrics_fn_successes"] == 2
+    assert metrics["metrics_fn_failures"] == 0
+    assert metrics["metrics_fn_last_error"] == ""
+    assert metrics["eval_failed"] is False
+    assert metrics["eval_failure_stage"] == ""
     for phase_name in ("data_wait", "transfer", "forward", "loss", "user_metrics", "metrics"):
         assert phase_name in phases
         assert metrics[f"profile_{phase_name}_time_s"] == pytest.approx(phases[phase_name]["total_s"])
@@ -692,6 +699,11 @@ def test_evaluate_skips_invalid_user_metrics_and_reports_counts() -> None:
     assert metrics["user_metric_non_finite_count"] == 2
     assert metrics["user_metric_unmeasured_count"] == 0
     assert metrics["user_metric_skipped_count"] == 4
+    assert metrics["metrics_fn_requested"] is True
+    assert metrics["metrics_fn_calls"] == 2
+    assert metrics["metrics_fn_successes"] == 2
+    assert metrics["metrics_fn_failures"] == 0
+    assert metrics["metrics_fn_last_error"] == ""
 
 
 def test_evaluate_rejects_coerced_user_metrics_and_bad_names() -> None:
@@ -778,6 +790,64 @@ def test_evaluate_rejects_invalid_metrics_fn_before_loop() -> None:
             nn.CrossEntropyLoss(),
             metrics_fn=object(),  # type: ignore[arg-type]
         )
+
+
+def test_evaluate_logs_metrics_fn_failures_before_reraising() -> None:
+    class CapturingLogger:
+        def __init__(self) -> None:
+            self.rows: list[tuple[str, dict[str, object], str]] = []
+
+        def log_metrics(
+            self,
+            stage: str,
+            metrics: dict[str, object],
+            *,
+            mode: str = "step",
+            **_: object,
+        ) -> None:
+            self.rows.append((stage, metrics, mode))
+
+    inputs = torch.randn(2, 4)
+    targets = torch.randint(0, 3, (2,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    logger = CapturingLogger()
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        logger=logger,
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
+
+    def metrics_fn(
+        _outputs: torch.Tensor,
+        _batch_targets: torch.Tensor,
+        _inputs: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        raise RuntimeError("metrics boom")
+
+    with pytest.raises(RuntimeError, match="metrics boom"):
+        trainer.evaluate(loader, nn.CrossEntropyLoss(), metrics_fn=metrics_fn, steps=1)
+
+    assert len(logger.rows) == 1
+    stage, metrics, mode = logger.rows[0]
+    assert stage == "eval"
+    assert mode == "error"
+    assert metrics["steps"] == 1
+    assert metrics["measured_steps"] == 0
+    assert metrics["metrics_fn_requested"] is True
+    assert metrics["metrics_fn_calls"] == 1
+    assert metrics["metrics_fn_successes"] == 0
+    assert metrics["metrics_fn_failures"] == 1
+    assert metrics["metrics_fn_last_error"] == "RuntimeError: metrics boom"
+    assert metrics["eval_failed"] is True
+    assert metrics["eval_failure_stage"] == "user_metrics"
+    assert metrics["user_metric_valid_count"] == 0
+    assert metrics["user_metric_skipped_count"] == 0
 
 
 def test_evaluate_reports_scalar_tensor_inputs_as_unmeasured() -> None:
