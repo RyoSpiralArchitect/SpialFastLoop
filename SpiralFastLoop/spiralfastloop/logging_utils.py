@@ -93,6 +93,23 @@ def _normalize_metric_payload(metrics: Mapping[Any, Any]) -> Dict[str, Any]:
     return normalized
 
 
+def _csv_header_fields(header: list[str], path: str) -> list[str]:
+    blank_fields = [index for index, field in enumerate(header) if not field.strip()]
+    if blank_fields:
+        raise ValueError(f"csv_path has blank CSV header fields in {path}")
+    seen = set()
+    duplicate_fields = []
+    for field_name in header:
+        if field_name in seen:
+            duplicate_fields.append(field_name)
+        else:
+            seen.add(field_name)
+    if duplicate_fields:
+        names = ", ".join(sorted(set(duplicate_fields)))
+        raise ValueError(f"csv_path has duplicate CSV header fields in {path}: {names}")
+    return header
+
+
 def _csv_safe_metric_value(value: Any) -> Any:
     if isinstance(value, (Mapping, list)):
         return json.dumps(value, ensure_ascii=False, allow_nan=False)
@@ -204,7 +221,9 @@ class MetricsLogger:
         with open(self.csv_path, newline="", encoding="utf-8") as handle:
             reader = csv.reader(handle)
             header = next(reader, None)
-        return list(header) if header else None
+        if not header:
+            return None
+        return _csv_header_fields(list(header), self.csv_path)
 
     def log_metrics(
         self,

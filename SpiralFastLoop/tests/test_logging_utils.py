@@ -276,3 +276,27 @@ def test_metrics_logger_extends_csv_fields_for_new_metrics(tmp_path) -> None:
     assert rows[1]["loss"] == "0.5"
     assert rows[1]["accuracy"] == "0.75"
     assert json.loads(rows[1]["history"]) == [1.0, None]
+
+
+@pytest.mark.parametrize(
+    ("header", "match"),
+    [
+        ("timestamp,stage,,loss\n", "blank CSV header"),
+        ("timestamp,stage,   ,loss\n", "blank CSV header"),
+        ("timestamp,stage,loss,loss\n", "duplicate CSV header"),
+    ],
+)
+def test_metrics_logger_rejects_malformed_existing_csv_headers_without_writing(
+    tmp_path,
+    header: str,
+    match: str,
+) -> None:
+    csv_path = tmp_path / "metrics.csv"
+    original = header + "1.0,train,step,0.5\n"
+    csv_path.write_text(original, encoding="utf-8")
+    metrics_logger = MetricsLogger(logger=None, csv_path=csv_path)
+
+    with pytest.raises(ValueError, match=match):
+        metrics_logger.log_metrics("train", {"loss": 0.25, "accuracy": 0.9})
+
+    assert csv_path.read_text(encoding="utf-8") == original
