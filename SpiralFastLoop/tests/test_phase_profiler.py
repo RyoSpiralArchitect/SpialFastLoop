@@ -86,6 +86,95 @@ def test_phase_profiler_rejects_invalid_detail_durations(seconds: object) -> Non
     assert profile["phase_breakdowns"] == {}
 
 
+@pytest.mark.parametrize("name", [None, True, "", "   ", object()])
+def test_phase_profiler_rejects_invalid_phase_names_without_mutating_state(name: object) -> None:
+    profiler = PhaseProfiler(enabled=True)
+
+    with pytest.raises(ValueError, match="name"):
+        profiler.start(name)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="name"):
+        profiler.stop(name)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="name"):
+        profiler.cancel(name)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="name"):
+        profiler._record(name, 0.001)  # type: ignore[arg-type]
+
+    profile = profiler.summary()
+    assert profiler._starts == {}
+    assert profile["phases"] == {}
+
+
+@pytest.mark.parametrize(
+    ("parent", "name", "match"),
+    [
+        (None, "module", "parent"),
+        (True, "module", "parent"),
+        ("", "module", "parent"),
+        ("   ", "module", "parent"),
+        ("forward", None, "name"),
+        ("forward", True, "name"),
+        ("forward", "", "name"),
+        ("forward", "   ", "name"),
+    ],
+)
+def test_phase_profiler_rejects_invalid_detail_names_without_mutating_state(
+    parent: object,
+    name: object,
+    match: str,
+) -> None:
+    profiler = PhaseProfiler(enabled=True)
+
+    with pytest.raises(ValueError, match=match):
+        profiler.start_detail(parent, name)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match=match):
+        profiler.stop_detail(parent, name)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match=match):
+        profiler._record_detail(parent, name, 0.001)  # type: ignore[arg-type]
+
+    profile = profiler.summary()
+    assert profiler._detail_starts == {}
+    assert profile["phase_breakdowns"] == {}
+
+
+@pytest.mark.parametrize(
+    ("parent", "group", "name", "match"),
+    [
+        (None, "grad", "module", "parent"),
+        ("backward", None, "module", "group"),
+        ("backward", "", "module", "group"),
+        ("backward", "grad", None, "name"),
+        ("backward", "grad", "", "name"),
+        ("backward", "grad", True, "name"),
+    ],
+)
+def test_phase_profiler_rejects_invalid_event_names_without_mutating_state(
+    parent: object,
+    group: object,
+    name: object,
+    match: str,
+) -> None:
+    profiler = PhaseProfiler(enabled=True)
+
+    with pytest.raises(ValueError, match=match):
+        profiler.record_event_since_start(parent, group, name)  # type: ignore[arg-type]
+
+    profile = profiler.summary()
+    assert profile["phase_events"] == {}
+
+
+def test_disabled_phase_profiler_ignores_invalid_names() -> None:
+    profiler = PhaseProfiler(enabled=False)
+
+    profiler.start(None)  # type: ignore[arg-type]
+    profiler.stop(True)  # type: ignore[arg-type]
+    profiler.cancel("")  # type: ignore[arg-type]
+    profiler.start_detail(None, True)  # type: ignore[arg-type]
+    profiler.stop_detail("", object())  # type: ignore[arg-type]
+    profiler.record_event_since_start(None, "", True)  # type: ignore[arg-type]
+
+    assert profiler.summary() == {}
+
+
 @pytest.mark.parametrize(
     ("trainer_kwargs", "match"),
     [

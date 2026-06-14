@@ -167,6 +167,12 @@ def _non_negative_finite_float_setting(value: Any, name: str) -> float:
     return normalized
 
 
+def _profile_name_setting(value: Any, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    return value.strip()
+
+
 def get_amp_policy(device: str, use_amp: AmpSetting = "auto") -> Tuple[bool, torch.dtype, bool]:
     """
     Decide AMP usage, dtype, and whether GradScaler should be used.
@@ -814,6 +820,7 @@ class PhaseProfiler:
         return math.sqrt(math.fsum((value - mean) ** 2 for value in values) / (len(values) - 1))
 
     def _record(self, name: str, seconds: float) -> None:
+        name = _profile_name_setting(name, "name")
         duration = _non_negative_finite_float_setting(seconds, "seconds")
         self.totals[name] = self.totals.get(name, 0.0) + duration
         self.calls[name] = self.calls.get(name, 0) + 1
@@ -825,6 +832,8 @@ class PhaseProfiler:
             bucket.append(duration)
 
     def _record_detail(self, parent: str, name: str, seconds: float) -> None:
+        parent = _profile_name_setting(parent, "parent")
+        name = _profile_name_setting(name, "name")
         duration = _non_negative_finite_float_setting(seconds, "seconds")
         totals = self.detail_totals.setdefault(parent, {})
         calls = self.detail_calls.setdefault(parent, {})
@@ -890,16 +899,17 @@ class PhaseProfiler:
     def start(self, name: str) -> None:
         if not self.enabled:
             return
+        key = _profile_name_setting(name, "name")
         if self.sync:
             synchronize_device(self.device)
-        self._starts[str(name)] = time.perf_counter()
+        self._starts[key] = time.perf_counter()
 
     def stop(self, name: str) -> None:
         if not self.enabled:
             return
+        key = _profile_name_setting(name, "name")
         if self.sync:
             synchronize_device(self.device)
-        key = str(name)
         start = self._starts.pop(key, None)
         if start is None:
             return
@@ -907,22 +917,26 @@ class PhaseProfiler:
 
     def cancel(self, name: str) -> None:
         if self.enabled:
-            self._starts.pop(str(name), None)
+            self._starts.pop(_profile_name_setting(name, "name"), None)
 
     def start_detail(self, parent: str, name: str) -> None:
         if not self.enabled:
             return
+        parent_key = _profile_name_setting(parent, "parent")
+        name_key = _profile_name_setting(name, "name")
         if self.sync:
             synchronize_device(self.device)
-        key = (str(parent), str(name))
+        key = (parent_key, name_key)
         self._detail_starts.setdefault(key, []).append(time.perf_counter())
 
     def stop_detail(self, parent: str, name: str) -> None:
         if not self.enabled:
             return
+        parent_key = _profile_name_setting(parent, "parent")
+        name_key = _profile_name_setting(name, "name")
         if self.sync:
             synchronize_device(self.device)
-        key = (str(parent), str(name))
+        key = (parent_key, name_key)
         starts = self._detail_starts.get(key)
         if not starts:
             return
@@ -934,13 +948,14 @@ class PhaseProfiler:
     def record_event_since_start(self, parent: str, group: str, name: str) -> None:
         if not self.enabled:
             return
+        parent_key = _profile_name_setting(parent, "parent")
+        group_key = _profile_name_setting(group, "group")
+        name_key = _profile_name_setting(name, "name")
         if self.sync:
             synchronize_device(self.device)
-        start = self._starts.get(str(parent))
+        start = self._starts.get(parent_key)
         if start is None:
             return
-        group_key = str(group)
-        name_key = str(name)
         duration = time.perf_counter() - start
         totals = self.event_totals.setdefault(group_key, {})
         calls = self.event_calls.setdefault(group_key, {})
