@@ -2,12 +2,20 @@ import csv
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop.metrics import (
     GLOBAL_NORMALIZATION_METRICS,
     NormalizationMetricsCollector,
 )
+
+
+@pytest.mark.parametrize("history_limit", [-1, 1.5, "2", True])
+def test_collector_rejects_invalid_history_limit(history_limit: object):
+    with pytest.raises(ValueError, match="history_limit"):
+        NormalizationMetricsCollector(history_limit=history_limit)  # type: ignore[arg-type]
 
 
 def test_collector_tracks_events_and_summary(tmp_path):
@@ -33,6 +41,36 @@ def test_collector_tracks_events_and_summary(tmp_path):
         rows = list(csv.DictReader(handle))
     assert len(rows) == 3
     assert rows[0]["context"] == "buffer"
+
+
+@pytest.mark.parametrize(
+    "kwargs, field",
+    [
+        ({"before": float("nan"), "after": 0.0}, "before"),
+        ({"before": float("inf"), "after": 0.0}, "before"),
+        ({"before": True, "after": 0.0}, "before"),
+        ({"before": object(), "after": 0.0}, "before"),
+        ({"before": 1.0, "after": float("nan")}, "after"),
+        ({"before": 1.0, "after": float("-inf")}, "after"),
+        ({"before": 1.0, "after": True}, "after"),
+        ({"before": 1.0, "after": 0.0, "timestamp": float("nan")}, "timestamp"),
+        ({"before": 1.0, "after": 0.0, "timestamp": True}, "timestamp"),
+    ],
+)
+def test_collector_rejects_invalid_events_before_mutating_state(kwargs, field):
+    collector = NormalizationMetricsCollector(history_limit=4)
+
+    with pytest.raises(ValueError, match=field):
+        collector.record(**kwargs)
+
+    assert collector.summary() == {
+        "total_events": 0.0,
+        "zeroed_events": 0.0,
+        "zero_ratio": 0.0,
+        "avg_abs_before": 0.0,
+        "avg_abs_after": 0.0,
+    }
+    assert collector.events() == []
 
 
 def test_collector_can_merge_events():

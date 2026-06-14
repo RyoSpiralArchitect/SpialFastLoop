@@ -12,6 +12,7 @@ from statistics import mean, pstdev
 from typing import Any, Deque, List, Optional, Sequence, Tuple
 
 from .utils import (
+    _finite_float_setting,
     _int_setting,
     _non_negative_finite_float_setting,
     _positive_int_setting,
@@ -169,18 +170,6 @@ def _expected_improvement(
         cdf = 0.5 * (1.0 + math.erf(z / sqrt_two))
         results.append(improvement * cdf + sigma * pdf)
     return results
-
-
-def _finite_float_setting(value: Any, name: str) -> float:
-    if isinstance(value, bool):
-        raise ValueError(f"{name} must be a finite number")
-    try:
-        normalized = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a finite number") from exc
-    if not math.isfinite(normalized):
-        raise ValueError(f"{name} must be a finite number")
-    return normalized
 
 
 def _positive_finite_float_setting(value: Any, name: str) -> float:

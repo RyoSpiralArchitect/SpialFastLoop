@@ -8,6 +8,8 @@ from typing import Any, Dict, Iterable, List, Optional
 import csv
 import time
 
+from .utils import _finite_float_setting, _non_negative_int_setting
+
 
 @dataclass
 class NormalizationEvent:
@@ -40,7 +42,7 @@ class NormalizationMetricsCollector:
     """
 
     def __init__(self, *, history_limit: int = 512) -> None:
-        self.history_limit = max(0, history_limit)
+        self.history_limit = _non_negative_int_setting(history_limit, "history_limit")
         self._history: List[NormalizationEvent] = []
         self.total_events = 0
         self.zeroed_events = 0
@@ -60,18 +62,29 @@ class NormalizationMetricsCollector:
     ) -> None:
         """Register a normalization event."""
 
+        before_value = _finite_float_setting(before, "before")
+        after_value = _finite_float_setting(after, "after")
+        timestamp_value: Optional[float] = None
+        if timestamp is not None:
+            timestamp_value = _finite_float_setting(timestamp, "timestamp")
+
         self.total_events += 1
-        if after == 0.0:
+        if after_value == 0.0:
             self.zeroed_events += 1
-        self._sum_abs_before += abs(before)
-        self._sum_abs_after += abs(after)
+        self._sum_abs_before += abs(before_value)
+        self._sum_abs_after += abs(after_value)
 
         if self.history_limit == 0:
             return
 
-        if timestamp is None:
-            timestamp = time.time()
-        event = NormalizationEvent(timestamp=timestamp, before=before, after=after, context=context)
+        if timestamp_value is None:
+            timestamp_value = time.time()
+        event = NormalizationEvent(
+            timestamp=timestamp_value,
+            before=before_value,
+            after=after_value,
+            context=context,
+        )
         self._history.append(event)
         if len(self._history) > self.history_limit:
             self._history.pop(0)

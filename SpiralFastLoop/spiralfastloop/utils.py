@@ -136,14 +136,21 @@ def _optional_positive_int_setting(value: Any, name: str) -> Optional[int]:
     return _positive_int_setting(value, name)
 
 
-def _non_negative_finite_float_setting(value: Any, name: str) -> float:
+def _finite_float_setting(value: Any, name: str) -> float:
     if isinstance(value, bool):
-        raise ValueError(f"{name} must be a non-negative finite number")
+        raise ValueError(f"{name} must be a finite number")
     try:
         normalized = float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a non-negative finite number") from exc
-    if not math.isfinite(normalized) or normalized < 0.0:
+        raise ValueError(f"{name} must be a finite number") from exc
+    if not math.isfinite(normalized):
+        raise ValueError(f"{name} must be a finite number")
+    return normalized
+
+
+def _non_negative_finite_float_setting(value: Any, name: str) -> float:
+    normalized = _finite_float_setting(value, name)
+    if normalized < 0.0:
         raise ValueError(f"{name} must be a non-negative finite number")
     return normalized
 
