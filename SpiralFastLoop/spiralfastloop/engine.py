@@ -1051,7 +1051,11 @@ class FastTrainer:
                     except StopIteration:
                         profiler.cancel("data_wait")
                         break
-                    profiler.stop("data_wait")
+                    except Exception:
+                        profiler.cancel("data_wait")
+                        raise
+                    else:
+                        profiler.stop("data_wait")
                     step_idx += 1
                     yield batch, step_started_at
             finally:
@@ -1064,8 +1068,10 @@ class FastTrainer:
         for batch, step_started_at in profiled_batches():
 
             profiler.start("transfer")
-            batch = to_device(batch, self.device, non_blocking=True)
-            profiler.stop("transfer")
+            try:
+                batch = to_device(batch, self.device, non_blocking=True)
+            finally:
+                profiler.stop("transfer")
             # Support (inputs, targets) or dict with 'inputs','targets'
             if isinstance(batch, (list, tuple)) and len(batch) == 2:
                 inputs, targets = batch
@@ -1080,8 +1086,10 @@ class FastTrainer:
 
             with autocast_ctx(self.device, self.amp_enabled, self.amp_dtype):
                 profiler.start("forward")
-                outputs = self.model(inputs)
-                profiler.stop("forward")
+                try:
+                    outputs = self.model(inputs)
+                finally:
+                    profiler.stop("forward")
 
                 if targets is not None and criterion is not None:
                     if supports_per_sample and self.trigger_hook is not None:
@@ -1092,8 +1100,10 @@ class FastTrainer:
                         try:
                             # per-sample loss for trigger decisions
                             profiler.start("loss")
-                            loss_vec = _ensure_loss_vector(criterion(outputs, targets))
-                            profiler.stop("loss")
+                            try:
+                                loss_vec = _ensure_loss_vector(criterion(outputs, targets))
+                            finally:
+                                profiler.stop("loss")
                         finally:
                             if reduction_to_restore is not None:
                                 criterion.reduction = reduction_to_restore
@@ -1120,26 +1130,32 @@ class FastTrainer:
                             if trig_result.extra_inputs is not None:
                                 # Concatenate and recompute outputs & loss_vec
                                 profiler.start("inject_transfer")
-                                extra_x = to_device(trig_result.extra_inputs, self.device, non_blocking=True)
-                                extra_y = (
-                                    to_device(trig_result.extra_targets, self.device, non_blocking=True)
-                                    if trig_result.extra_targets is not None
-                                    else None
-                                )
-                                inputs = _concatenate_batches(inputs, extra_x)
-                                targets = _concatenate_batches(targets, extra_y)
-                                profiler.stop("inject_transfer")
+                                try:
+                                    extra_x = to_device(trig_result.extra_inputs, self.device, non_blocking=True)
+                                    extra_y = (
+                                        to_device(trig_result.extra_targets, self.device, non_blocking=True)
+                                        if trig_result.extra_targets is not None
+                                        else None
+                                    )
+                                    inputs = _concatenate_batches(inputs, extra_x)
+                                    targets = _concatenate_batches(targets, extra_y)
+                                finally:
+                                    profiler.stop("inject_transfer")
                                 profiler.start("forward")
-                                outputs = self.model(inputs)
-                                profiler.stop("forward")
+                                try:
+                                    outputs = self.model(inputs)
+                                finally:
+                                    profiler.stop("forward")
                                 reduction_to_restore = None
                                 if hasattr(criterion, "reduction") and getattr(criterion, "reduction") != "none":
                                     reduction_to_restore = getattr(criterion, "reduction")
                                     criterion.reduction = "none"
                                 try:
                                     profiler.start("loss")
-                                    loss_vec = _ensure_loss_vector(criterion(outputs, targets))
-                                    profiler.stop("loss")
+                                    try:
+                                        loss_vec = _ensure_loss_vector(criterion(outputs, targets))
+                                    finally:
+                                        profiler.stop("loss")
                                 finally:
                                     if reduction_to_restore is not None:
                                         criterion.reduction = reduction_to_restore
@@ -1148,29 +1164,40 @@ class FastTrainer:
 
                         if weights is not None:
                             profiler.start("loss_reduce")
-                            w = weights.to(loss_vec.device, dtype=loss_vec.dtype)
-                            if w.ndim != 1 or w.shape[0] != loss_vec.shape[0]:
-                                raise ValueError("Trigger weights must be a 1D tensor that matches the concatenated batch size.")
-                            weight_sum = w.sum()
-                            weight_sum_detached = weight_sum.detach()
-                            if not torch.isfinite(weight_sum_detached):
-                                raise ValueError("Trigger weights must be finite.")
-                            if weight_sum_detached.item() <= 0:
-                                raise ValueError("Trigger weights must sum to a positive value.")
-                            loss = (loss_vec * w).sum() / weight_sum
-                            loss_weight_tensor = weight_sum_detached.to(device=total_loss.device, dtype=total_loss.dtype)
-                            profiler.stop("loss_reduce")
+                            try:
+                                w = weights.to(loss_vec.device, dtype=loss_vec.dtype)
+                                if w.ndim != 1 or w.shape[0] != loss_vec.shape[0]:
+                                    raise ValueError(
+                                        "Trigger weights must be a 1D tensor that matches the concatenated batch size."
+                                    )
+                                weight_sum = w.sum()
+                                weight_sum_detached = weight_sum.detach()
+                                if not torch.isfinite(weight_sum_detached):
+                                    raise ValueError("Trigger weights must be finite.")
+                                if weight_sum_detached.item() <= 0:
+                                    raise ValueError("Trigger weights must sum to a positive value.")
+                                loss = (loss_vec * w).sum() / weight_sum
+                                loss_weight_tensor = weight_sum_detached.to(
+                                    device=total_loss.device,
+                                    dtype=total_loss.dtype,
+                                )
+                            finally:
+                                profiler.stop("loss_reduce")
                         else:
                             profiler.start("loss_reduce")
-                            loss = loss_vec.mean()
-                            loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
-                            profiler.stop("loss_reduce")
+                            try:
+                                loss = loss_vec.mean()
+                                loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
+                            finally:
+                                profiler.stop("loss_reduce")
                     else:
                         profiler.start("loss")
-                        loss = criterion(outputs, targets)
-                        if isinstance(loss, torch.Tensor) and loss.ndim > 0:
-                            loss = loss.mean()
-                        profiler.stop("loss")
+                        try:
+                            loss = criterion(outputs, targets)
+                            if isinstance(loss, torch.Tensor) and loss.ndim > 0:
+                                loss = loss.mean()
+                        finally:
+                            profiler.stop("loss")
                         reference = targets if targets is not None else inputs
                         batch_size = _infer_batch_size(reference)
                         loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
@@ -1186,11 +1213,13 @@ class FastTrainer:
 
             # Backward
             profiler.start("backward")
-            if self.scaler.is_enabled():
-                self.scaler.scale(loss).backward()
-            else:
-                loss.backward()
-            profiler.stop("backward")
+            try:
+                if self.scaler.is_enabled():
+                    self.scaler.scale(loss).backward()
+                else:
+                    loss.backward()
+            finally:
+                profiler.stop("backward")
 
             # Step if accumulation boundary
             pending_accum_steps += 1
@@ -1202,32 +1231,34 @@ class FastTrainer:
 
             # Metrics
             profiler.start("metrics")
-            if batch_size is None:
-                reference = targets if targets is not None else inputs
-                batch_size = _infer_batch_size(reference)
-            if loss_weight_tensor is None:
-                loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
+            try:
+                if batch_size is None:
+                    reference = targets if targets is not None else inputs
+                    batch_size = _infer_batch_size(reference)
+                if loss_weight_tensor is None:
+                    loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
 
-            batch_size_int = int(batch_size)
-            batch_duration_s = max(0.0, time.perf_counter() - step_started_at)
-            meter.record(batch_duration_s, batch_size_int)
-            total_items += batch_size_int
-            loss_detached = raw_loss.detach().to(device=total_loss.device, dtype=total_loss.dtype)
-            total_loss += loss_detached * loss_weight_tensor
-            total_weight += loss_weight_tensor
-            if warmup_step_limit > 0 and step_idx <= warmup_step_limit:
-                warmup_meter.record(batch_duration_s, batch_size_int)
-                warmup_items += batch_size_int
-                warmup_loss += loss_detached * loss_weight_tensor
-                warmup_weight += loss_weight_tensor
-                warmup_recorded_steps += 1
-            else:
-                steady_meter.record(batch_duration_s, batch_size_int)
-                steady_items += batch_size_int
-                steady_loss += loss_detached * loss_weight_tensor
-                steady_weight += loss_weight_tensor
-                steady_recorded_steps += 1
-            profiler.stop("metrics")
+                batch_size_int = int(batch_size)
+                batch_duration_s = max(0.0, time.perf_counter() - step_started_at)
+                meter.record(batch_duration_s, batch_size_int)
+                total_items += batch_size_int
+                loss_detached = raw_loss.detach().to(device=total_loss.device, dtype=total_loss.dtype)
+                total_loss += loss_detached * loss_weight_tensor
+                total_weight += loss_weight_tensor
+                if warmup_step_limit > 0 and step_idx <= warmup_step_limit:
+                    warmup_meter.record(batch_duration_s, batch_size_int)
+                    warmup_items += batch_size_int
+                    warmup_loss += loss_detached * loss_weight_tensor
+                    warmup_weight += loss_weight_tensor
+                    warmup_recorded_steps += 1
+                else:
+                    steady_meter.record(batch_duration_s, batch_size_int)
+                    steady_items += batch_size_int
+                    steady_loss += loss_detached * loss_weight_tensor
+                    steady_weight += loss_weight_tensor
+                    steady_recorded_steps += 1
+            finally:
+                profiler.stop("metrics")
 
             if self.log_interval > 0 and (step_idx % self.log_interval) == 0:
                 m = meter.summary()

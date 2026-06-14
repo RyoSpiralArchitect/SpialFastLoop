@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 import torch
@@ -30,6 +31,18 @@ def _make_supervised_components() -> tuple[
     model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
     return loader, model, optimizer
+
+
+def _capture_engine_phase_profilers(monkeypatch: pytest.MonkeyPatch) -> list[PhaseProfiler]:
+    profilers: list[PhaseProfiler] = []
+
+    class CapturingPhaseProfiler(PhaseProfiler):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            profilers.append(self)
+
+    monkeypatch.setattr(engine, "PhaseProfiler", CapturingPhaseProfiler)
+    return profilers
 
 
 @pytest.mark.parametrize(
@@ -1175,6 +1188,76 @@ def test_train_one_epoch_collects_phase_and_model_profile() -> None:
     optimizer_children = profile["phase_breakdowns"]["optimizer"]["top_children"]
     assert optimizer_children
     assert optimizer_children[0]["name"] in {"optimizer.step", "zero_grad"}
+
+
+def test_train_one_epoch_cleans_profile_phase_when_loader_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingLoader:
+        def __iter__(self) -> "FailingLoader":
+            return self
+
+        def __next__(self) -> tuple[torch.Tensor, torch.Tensor]:
+            raise RuntimeError("loader boom")
+
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    with pytest.raises(RuntimeError, match="loader boom"):
+        trainer.train_one_epoch(FailingLoader(), nn.CrossEntropyLoss(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+
+
+def test_train_one_epoch_cleans_profile_phase_when_forward_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.proj = nn.Linear(4, 3)
+
+        def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+            raise RuntimeError("forward boom")
+
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    inputs = torch.randn(2, 4)
+    targets = torch.randint(0, 3, (2,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
+    model = FailingModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    with pytest.raises(RuntimeError, match="forward boom"):
+        trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+
+
+def test_train_one_epoch_cleans_profile_phase_when_loss_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingCriterion(nn.Module):
+        def forward(self, _outputs: torch.Tensor, _targets: torch.Tensor) -> torch.Tensor:
+            raise RuntimeError("loss boom")
+
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    inputs = torch.randn(2, 4)
+    targets = torch.randint(0, 3, (2,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    with pytest.raises(RuntimeError, match="loss boom"):
+        trainer.train_one_epoch(loader, FailingCriterion(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
 
 
 def test_profile_flat_metrics_skip_invalid_values() -> None:
