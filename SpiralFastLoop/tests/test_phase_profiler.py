@@ -76,6 +76,50 @@ def _single_error_metrics(logger: _CapturingLogger, stage: str) -> dict[str, obj
     return metrics
 
 
+def _make_logged_cpu_trainer(
+    logger: _CapturingLogger,
+    *,
+    trigger_hook: object = None,
+) -> tuple[
+    DataLoader[tuple[torch.Tensor, torch.Tensor]],
+    torch.optim.Optimizer,
+    FastTrainer,
+]:
+    loader, model, optimizer = _make_supervised_components()
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        logger=logger,
+        trigger_hook=trigger_hook,  # type: ignore[arg-type]
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
+    return loader, optimizer, trainer
+
+
+def _assert_train_failure_metrics(
+    logger: _CapturingLogger,
+    *,
+    stage: str,
+    last_error: str,
+    optimizer_steps: int = 0,
+    exact_error: bool = True,
+) -> dict[str, object]:
+    metrics = _single_error_metrics(logger, "train")
+    assert metrics["steps"] == 1
+    assert metrics["optimizer_steps"] == optimizer_steps
+    assert metrics["samples"] == 0
+    assert metrics["train_failed"] is True
+    assert metrics["train_failure_stage"] == stage
+    if exact_error:
+        assert metrics["train_failure_last_error"] == last_error
+    else:
+        assert last_error in metrics["train_failure_last_error"]
+    return metrics
+
+
 @pytest.mark.parametrize(
     ("batch", "reason", "match"),
     [
@@ -1655,6 +1699,149 @@ def test_train_one_epoch_logs_metrics_failures_before_reraising(
     phases = profile["phases"]
     assert "optimizer" in phases
     assert "metrics" in phases
+
+
+def test_train_one_epoch_logs_transfer_failures_before_reraising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_to_device(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("transfer boom")
+
+    monkeypatch.setattr(engine, "to_device", fail_to_device)
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    logger = _CapturingLogger()
+    loader, _optimizer, trainer = _make_logged_cpu_trainer(logger)
+
+    with pytest.raises(RuntimeError, match="transfer boom"):
+        trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    metrics = _assert_train_failure_metrics(
+        logger,
+        stage="transfer",
+        last_error="RuntimeError: transfer boom",
+    )
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "data_wait" in phases
+    assert "transfer" in phases
+
+
+def test_train_one_epoch_logs_trigger_observe_failures_before_reraising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingObserveTrigger:
+        def observe(self, _ctx: dict[str, object]) -> None:
+            raise RuntimeError("observe boom")
+
+        def __call__(self, _ctx: dict[str, object]) -> None:
+            return None
+
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    logger = _CapturingLogger()
+    loader, _optimizer, trainer = _make_logged_cpu_trainer(logger, trigger_hook=FailingObserveTrigger())
+
+    with pytest.raises(RuntimeError, match="observe boom"):
+        trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    metrics = _assert_train_failure_metrics(
+        logger,
+        stage="trigger_observe",
+        last_error="RuntimeError: observe boom",
+    )
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "loss" in phases
+    assert "trigger" not in phases
+
+
+def test_train_one_epoch_logs_trigger_failures_before_reraising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def trigger(_ctx: dict[str, object]) -> None:
+        raise RuntimeError("trigger boom")
+
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    logger = _CapturingLogger()
+    loader, _optimizer, trainer = _make_logged_cpu_trainer(logger, trigger_hook=trigger)
+
+    with pytest.raises(RuntimeError, match="trigger boom"):
+        trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    metrics = _assert_train_failure_metrics(
+        logger,
+        stage="trigger",
+        last_error="RuntimeError: trigger boom",
+    )
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "loss" in phases
+    assert "trigger" in phases
+
+
+def test_train_one_epoch_logs_inject_transfer_failures_before_reraising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def trigger(_ctx: dict[str, object]) -> TriggerResult:
+        return TriggerResult(
+            extra_inputs={"inputs": torch.randn(1, 4)},
+            extra_targets=torch.randint(0, 3, (1,)),
+        )
+
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    logger = _CapturingLogger()
+    loader, _optimizer, trainer = _make_logged_cpu_trainer(logger, trigger_hook=trigger)
+
+    with pytest.raises(TypeError, match="mirror tensor structure"):
+        trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    metrics = _assert_train_failure_metrics(
+        logger,
+        stage="inject_transfer",
+        last_error="TypeError: Extra inputs must mirror tensor structure of original batch.",
+    )
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "trigger" in phases
+    assert "inject_transfer" in phases
+
+
+def test_train_one_epoch_logs_loss_reduce_failures_before_reraising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def trigger(_ctx: dict[str, object]) -> TriggerResult:
+        return TriggerResult(weights=torch.ones(1))
+
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    logger = _CapturingLogger()
+    loader, _optimizer, trainer = _make_logged_cpu_trainer(logger, trigger_hook=trigger)
+
+    with pytest.raises(ValueError, match="matches the concatenated batch size"):
+        trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    metrics = _assert_train_failure_metrics(
+        logger,
+        stage="loss_reduce",
+        last_error="ValueError: Trigger weights must be a 1D tensor that matches the concatenated batch size.",
+    )
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "trigger" in phases
+    assert "loss_reduce" in phases
 
 
 def test_profile_flat_metrics_skip_invalid_values() -> None:
