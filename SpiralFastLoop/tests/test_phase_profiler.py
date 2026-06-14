@@ -110,6 +110,30 @@ def test_train_one_epoch_splits_warmup_and_steady_metrics() -> None:
     assert metrics["steady_avg_loss"] > 0.0
 
 
+def test_train_one_epoch_can_disable_step_logs_and_compile(capsys) -> None:
+    inputs = torch.randn(8, 4)
+    targets = torch.randint(0, 3, (8,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=4, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=0,
+    )
+
+    metrics = trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), steps=2)
+    output = capsys.readouterr().out
+
+    assert "[train:step]" not in output
+    assert metrics["compile_requested"] is False
+    assert metrics["compiled"] is False
+    assert metrics["compile_init_time_s"] == 0.0
+
+
 def test_model_profile_hooks_are_removed_after_exception() -> None:
     class RaisingLoss(nn.Module):
         def forward(self, outputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:

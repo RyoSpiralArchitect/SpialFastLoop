@@ -84,6 +84,12 @@ throughput when steady steps exist. `compile_init_time_s` captures the immediate
 `torch.compile` wrapper setup cost, while lazy first-forward compilation shows up
 inside the warmup/cold-start window.
 
+For short MPS or smoke-test runs where compile startup dominates, pass
+`--no-compile` in the benchmark scripts or `FastTrainer(..., use_compile=False)`.
+Benchmark scripts also default to `--log-interval 0` so step logs do not force
+extra host/device synchronization; pass a positive `--log-interval` when you want
+live step output.
+
 ## Surprise→Repair (Surprisal Sandwich)
 **Goal:** Inject *surprise* mid-sentence by penalizing the most likely tokens, then **repair** coherence near the end.
 Use it to create *novel but coherent* samples and mix them into training (loss-std triggered) to avoid over-smoothed gradients.
@@ -114,7 +120,7 @@ Profile the transactional benchmark:
 ```bash
 python scripts/bench_parallel_transactions.py \
   --device mps --steps 40 --runs 1 --workers 2 \
-  --warmup-steps 4 \
+  --warmup-steps 4 --no-compile \
   --collect-profile --profile-model --profile-model-depth 1 \
   --profile-model-include 0,2 \
   --json-out reports/bench_parallel_profile.json

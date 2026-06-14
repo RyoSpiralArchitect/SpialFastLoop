@@ -129,6 +129,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prefetch-factor", type=int, default=2)
     parser.add_argument("--steps", type=int, default=12)
     parser.add_argument("--warmup-steps", type=int, default=0)
+    parser.add_argument(
+        "--no-compile",
+        dest="compile",
+        action="store_false",
+        help="Disable torch.compile for lower cold-start cost.",
+    )
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--profile-sync", action="store_true")
     parser.add_argument("--profile-window", type=int, default=256)
@@ -161,6 +167,7 @@ def main() -> None:
         model,
         optimizer,
         device=device,
+        use_compile=args.compile,
         grad_accum=args.grad_accum,
         log_interval=max(args.steps + 1, 1),
     )
@@ -186,6 +193,7 @@ def main() -> None:
         "grad_accum": args.grad_accum,
         "steps": args.steps,
         "warmup_steps": args.warmup_steps,
+        "compile": args.compile,
         "profile_model_include": args.profile_model_include,
         "profile_model_depth": args.profile_model_depth,
         "metrics": metrics,
