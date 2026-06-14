@@ -522,6 +522,27 @@ def _optional_trigger_hook_setting(trigger_hook: Any) -> Optional[Callable[[Dict
     return cast(Callable[[Dict[str, Any]], Optional[TriggerResult]], trigger_hook)
 
 
+def _optional_trigger_observe_setting(trigger_hook: Any) -> Optional[Callable[[Dict[str, Any]], None]]:
+    observe = getattr(trigger_hook, "observe", None)
+    if observe is None:
+        return None
+    if not callable(observe):
+        raise ValueError("trigger_hook.observe must be callable")
+    return cast(Callable[[Dict[str, Any]], None], observe)
+
+
+def _optional_trigger_result_setting(result: Any) -> Optional[TriggerResult]:
+    if result is None:
+        return None
+    if not isinstance(result, TriggerResult):
+        raise ValueError("trigger_hook must return TriggerResult or None")
+    if result.extra_inputs is not None and result.extra_targets is None:
+        raise ValueError("TriggerResult.extra_targets must be provided when extra_inputs is set")
+    if result.weights is not None and not isinstance(result.weights, torch.Tensor):
+        raise ValueError("TriggerResult.weights must be a torch.Tensor or None")
+    return result
+
+
 def _optional_logger_setting(logger: Any) -> Optional[MetricsLogger]:
     if logger is None:
         return None
@@ -1085,12 +1106,15 @@ class FastTrainer:
                             "device": self.device,
                             "step": step_idx,
                         }
-                        if hasattr(self.trigger_hook, "observe"):
-                            self.trigger_hook.observe(trigger_ctx)
+                        observe = _optional_trigger_observe_setting(self.trigger_hook)
+                        if observe is not None:
+                            observe(trigger_ctx)
                         # Trigger may inject extra samples (e.g., hard examples)
                         profiler.start("trigger")
-                        trig_result = self.trigger_hook(trigger_ctx)
-                        profiler.stop("trigger")
+                        try:
+                            trig_result = _optional_trigger_result_setting(self.trigger_hook(trigger_ctx))
+                        finally:
+                            profiler.stop("trigger")
                         weights: Optional[torch.Tensor] = None
                         if trig_result is not None:
                             if trig_result.extra_inputs is not None:
@@ -1103,8 +1127,6 @@ class FastTrainer:
                                     else None
                                 )
                                 inputs = _concatenate_batches(inputs, extra_x)
-                                if extra_y is None:
-                                    raise ValueError("Trigger provided extra inputs without matching targets.")
                                 targets = _concatenate_batches(targets, extra_y)
                                 profiler.stop("inject_transfer")
                                 profiler.start("forward")

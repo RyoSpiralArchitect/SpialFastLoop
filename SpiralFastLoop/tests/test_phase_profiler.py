@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from spiralfastloop import FastTrainer
 import spiralfastloop.engine as engine
 from spiralfastloop.engine import (
+    TriggerResult,
     _add_profile_phase_metrics,
     _infer_batch_size,
     _try_infer_batch_size_with_reason,
@@ -1263,6 +1264,59 @@ def test_model_profile_events_keep_totals_without_distribution() -> None:
     assert event["total_s"] >= 0.0
     assert event["avg_ms"] >= 0.0
     assert "p95_ms" not in event
+
+
+def test_train_one_epoch_rejects_non_callable_trigger_observe() -> None:
+    class TriggerWithBadObserve:
+        observe = object()
+
+        def __call__(self, _ctx: dict[str, object]) -> None:
+            return None
+
+    loader, model, optimizer = _make_supervised_components()
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        trigger_hook=TriggerWithBadObserve(),  # type: ignore[arg-type]
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
+
+    with pytest.raises(ValueError, match="trigger_hook.observe"):
+        trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), steps=1)
+
+
+@pytest.mark.parametrize(
+    ("trigger_result", "match"),
+    [
+        ({"extra_inputs": None}, "TriggerResult or None"),
+        (TriggerResult(extra_inputs=torch.randn(1, 4)), "extra_targets"),
+        (TriggerResult(weights=[1.0, 1.0]), "TriggerResult.weights"),
+    ],
+)
+def test_train_one_epoch_rejects_malformed_trigger_results(
+    trigger_result: object,
+    match: str,
+) -> None:
+    loader, model, optimizer = _make_supervised_components()
+
+    def trigger(_ctx: dict[str, object]) -> object:
+        return trigger_result
+
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        trigger_hook=trigger,  # type: ignore[arg-type]
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
+
+    with pytest.raises(ValueError, match=match):
+        trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), steps=1)
 
 
 def test_train_one_epoch_splits_warmup_and_steady_metrics() -> None:
