@@ -283,6 +283,38 @@ def test_dataloader_from_dataset_allows_zero_workers() -> None:
     assert first_targets.shape == (4,)
 
 
+@pytest.mark.parametrize(
+    ("loader_kwargs", "match"),
+    [
+        ({"batch_size": 0}, "batch_size"),
+        ({"batch_size": 1.5}, "batch_size"),
+        ({"batch_size": True}, "batch_size"),
+        ({"num_workers": -1}, "num_workers"),
+        ({"num_workers": 1.5}, "num_workers"),
+        ({"prefetch_factor": 0}, "prefetch_factor"),
+        ({"prefetch_factor": 1.5}, "prefetch_factor"),
+        ({"seed": 7.5}, "seed"),
+        ({"seed": "7"}, "seed"),
+        ({"seed": False}, "seed"),
+    ],
+)
+def test_dataloader_from_dataset_rejects_invalid_numeric_settings(
+    loader_kwargs: dict[str, object],
+    match: str,
+) -> None:
+    dataset = TensorDataset(torch.randn(8, 2), torch.randint(0, 2, (8,)))
+    kwargs = {
+        "batch_size": 4,
+        "device": "cpu",
+        "num_workers": 0,
+        "shuffle": False,
+        **loader_kwargs,
+    }
+
+    with pytest.raises(ValueError, match=match):
+        dataloader_from_dataset(dataset, **kwargs)
+
+
 def test_dataloader_from_dataset_applies_seed_to_shuffle_order() -> None:
     dataset = TensorDataset(torch.arange(16).float().unsqueeze(1), torch.arange(16))
 

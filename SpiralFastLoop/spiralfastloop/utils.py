@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import math
+import operator
 import os
 import time
 from collections import deque
@@ -106,6 +107,29 @@ def _device_type(device: str) -> str:
     return device.split(":", 1)[0]
 
 
+def _int_setting(value: Any, name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer")
+    try:
+        return operator.index(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+
+
+def _positive_int_setting(value: Any, name: str) -> int:
+    normalized = _int_setting(value, name)
+    if normalized <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return normalized
+
+
+def _non_negative_int_setting(value: Any, name: str) -> int:
+    normalized = _int_setting(value, name)
+    if normalized < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return normalized
+
+
 def get_amp_policy(device: str, use_amp: AmpSetting = "auto") -> Tuple[bool, torch.dtype, bool]:
     """
     Decide AMP usage, dtype, and whether GradScaler should be used.
@@ -199,6 +223,9 @@ def dataloader_from_dataset(
     drop_last: bool = False,
 ) -> DataLoader[Any]:
     """Create a DataLoader with sensible performance defaults."""
+    batch_size = _positive_int_setting(batch_size, "batch_size")
+    prefetch_factor = _positive_int_setting(prefetch_factor, "prefetch_factor")
+    seed = _int_setting(seed, "seed")
     workers = num_workers
     if workers is None:
         try:
@@ -209,6 +236,8 @@ def dataloader_from_dataset(
             workers = 2
         else:
             workers = max(2, cpu_count // 2)
+    else:
+        workers = _non_negative_int_setting(workers, "num_workers")
     if pin_memory is None:
         pin_memory = (_device_type(device) == "cuda")
     sampler: Optional[DistributedSampler[Any]] = None
