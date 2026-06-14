@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Benchmark FastTrainer under heavy transactional and parallel workloads."""
 
+from __future__ import annotations
+
 import argparse
 import json
 import sys
@@ -42,6 +44,12 @@ class SyntheticTransactionDataset(Dataset):
         seed: int = 17,
         materialized: bool = False,
     ) -> None:
+        if size < 0:
+            raise ValueError("size must be non-negative")
+        if features <= 0:
+            raise ValueError("features must be positive")
+        if classes <= 0:
+            raise ValueError("classes must be positive")
         self.size = size
         self.features = features
         self.classes = classes
@@ -58,10 +66,25 @@ class SyntheticTransactionDataset(Dataset):
     def __len__(self) -> int:
         return self.size
 
-    def __getitem__(self, index: int):
+    @property
+    def materialized_bytes(self) -> int:
+        if not self.materialized or self._features is None or self._targets is None:
+            return 0
+        feature_bytes = self._features.numel() * self._features.element_size()
+        target_bytes = self._targets.numel() * self._targets.element_size()
+        return int(feature_bytes + target_bytes)
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        if index < 0:
+            index += self.size
+        if index < 0 or index >= self.size:
+            raise IndexError(index)
         if self.materialized:
-            assert self._features is not None and self._targets is not None
-            return self._features[index], self._targets[index]
+            features = self._features
+            targets = self._targets
+            if features is None or targets is None:
+                raise RuntimeError("materialized dataset storage was not initialized")
+            return features[index], targets[index]
         generator = torch.Generator()
         generator.manual_seed(self.seed + index)
         features = torch.randn(self.features, generator=generator)
@@ -81,6 +104,8 @@ def build_model(features: int, classes: int) -> nn.Module:
 
 
 def run_once(args, run_index: int) -> BenchmarkResult:
+    setup_start = time.perf_counter()
+    dataset_start = time.perf_counter()
     dataset = SyntheticTransactionDataset(
         size=args.transactions,
         features=args.feature_dim,
@@ -88,7 +113,9 @@ def run_once(args, run_index: int) -> BenchmarkResult:
         seed=args.seed + run_index,
         materialized=args.dataset_mode == "materialized",
     )
+    dataset_setup_time_s = time.perf_counter() - dataset_start
 
+    loader_start = time.perf_counter()
     loader = dataloader_from_dataset(
         dataset,
         batch_size=args.batch_size,
@@ -98,7 +125,9 @@ def run_once(args, run_index: int) -> BenchmarkResult:
         persistent=args.workers > 0,
         shuffle=True,
     )
+    loader_setup_time_s = time.perf_counter() - loader_start
 
+    model_start = time.perf_counter()
     model = build_model(args.feature_dim, args.num_classes)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
     criterion = nn.CrossEntropyLoss()
@@ -112,6 +141,8 @@ def run_once(args, run_index: int) -> BenchmarkResult:
         grad_accum=args.grad_accum,
         log_interval=args.log_interval,
     )
+    model_setup_time_s = time.perf_counter() - model_start
+    setup_time_s = time.perf_counter() - setup_start
 
     start = time.perf_counter()
     metrics = trainer.train_one_epoch(
@@ -131,7 +162,13 @@ def run_once(args, run_index: int) -> BenchmarkResult:
     wall = time.perf_counter() - start
     metrics.update({
         "batch_size": args.batch_size,
+        "dataset_materialized_bytes": dataset.materialized_bytes,
+        "dataset_setup_time_s": dataset_setup_time_s,
         "num_workers": args.workers,
+        "loader_setup_time_s": loader_setup_time_s,
+        "model_setup_time_s": model_setup_time_s,
+        "setup_time_s": setup_time_s,
+        "end_to_end_wall_time_s": setup_time_s + wall,
         "transactions": args.transactions,
         "dataset_mode": args.dataset_mode,
     })
@@ -209,6 +246,8 @@ def main() -> None:
         metrics = result.as_dict()
         print(
             f"Run {run_index}: wall={metrics['wall_time_s']:.2f}s "
+            f"setup={metrics.get('setup_time_s', 0.0):.2f}s "
+            f"e2e={metrics.get('end_to_end_wall_time_s', metrics['wall_time_s']):.2f}s "
             f"thr={metrics.get('reported_samples_per_sec', metrics.get('samples_per_sec', 0.0)):.1f}/s "
             f"total_thr={metrics.get('samples_per_sec', 0.0):.1f}/s "
             f"p99_batch={metrics.get('p99_s', 0.0) * 1e3:.2f}ms "
@@ -267,6 +306,10 @@ def main() -> None:
     aggregate = {
         "runs": args.runs,
         "mean_wall_time_s": sum(r.wall_time_s for r in results) / max(1, len(results)),
+        "mean_setup_time_s": sum(r.trainer_metrics.get("setup_time_s", 0.0) for r in results)
+        / max(1, len(results)),
+        "mean_end_to_end_wall_time_s": sum(r.trainer_metrics.get("end_to_end_wall_time_s", 0.0) for r in results)
+        / max(1, len(results)),
         "mean_samples_per_sec": sum(r.trainer_metrics.get("samples_per_sec", 0.0) for r in results)
         / max(1, len(results)),
         "mean_reported_samples_per_sec": sum(

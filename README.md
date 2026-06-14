@@ -103,7 +103,7 @@ HF demo:
 python examples/sr_generate_demo.py
 ```
 
-## Benchmarks 
+## Benchmarks
 | Device | Baseline (plain loop) | SpiralFastLoop | Speedup |
 |-------:|-----------------------:|---------------:|--------:|
 | GTX 1650 (CUDA) | 450 samples/s | 610 samples/s | 1.35× |
@@ -126,6 +126,10 @@ python scripts/bench_parallel_transactions.py \
   --profile-model-include 0,2 \
   --json-out reports/bench_parallel_profile.json
 ```
+
+The transactional benchmark reports training-only `wall_time_s`, separate
+`setup_time_s`, combined `end_to_end_wall_time_s`, and
+`dataset_materialized_bytes` so materialized-data runs remain transparent.
 
 Drill into ResNet blocks:
 ```bash
