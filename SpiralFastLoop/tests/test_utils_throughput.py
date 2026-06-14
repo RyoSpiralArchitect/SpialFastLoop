@@ -386,6 +386,12 @@ def test_get_amp_policy_rejects_invalid_amp_settings(use_amp: object) -> None:
         get_amp_policy("cpu", use_amp=use_amp)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize("device", [None, True, 1, "", "   ", object()])
+def test_get_amp_policy_rejects_invalid_device_settings(device: object) -> None:
+    with pytest.raises(ValueError, match="device"):
+        get_amp_policy(device, use_amp=False)  # type: ignore[arg-type]
+
+
 def test_maybe_channels_last_rejects_invalid_boolean_setting() -> None:
     model = torch.nn.Linear(2, 2)
 
@@ -397,6 +403,12 @@ def test_maybe_channels_last_rejects_invalid_boolean_setting() -> None:
 def test_autocast_ctx_rejects_invalid_enabled_setting(enabled: object) -> None:
     with pytest.raises(ValueError, match="enabled"):
         autocast_ctx("cpu", enabled=enabled, amp_dtype=torch.float32)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("device", [None, True, 1, "", "   ", object()])
+def test_autocast_ctx_rejects_invalid_device_settings_when_enabled(device: object) -> None:
+    with pytest.raises(ValueError, match="device"):
+        autocast_ctx(device, enabled=True, amp_dtype=torch.float32)  # type: ignore[arg-type]
 
 
 def test_to_device_preserves_nested_structures() -> None:
@@ -420,6 +432,12 @@ def test_to_device_preserves_nested_structures() -> None:
 def test_to_device_rejects_invalid_non_blocking_setting(non_blocking: object) -> None:
     with pytest.raises(ValueError, match="non_blocking"):
         to_device(torch.tensor([1.0]), "cpu", non_blocking=non_blocking)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("device", [None, True, 1, "", "   ", object()])
+def test_to_device_rejects_invalid_device_settings(device: object) -> None:
+    with pytest.raises(ValueError, match="device"):
+        to_device(torch.tensor([1.0]), device)  # type: ignore[arg-type]
 
 
 def test_dataloader_from_dataset_allows_zero_workers() -> None:
@@ -519,6 +537,19 @@ def test_dataloader_from_dataset_rejects_invalid_boolean_settings(
 
     with pytest.raises(ValueError, match=match):
         dataloader_from_dataset(dataset, **kwargs)
+
+
+@pytest.mark.parametrize("device", [None, True, 1, "", "   ", object()])
+def test_dataloader_from_dataset_rejects_invalid_device_settings(device: object) -> None:
+    dataset = TensorDataset(torch.randn(4, 2), torch.randint(0, 2, (4,)))
+
+    with pytest.raises(ValueError, match="device"):
+        dataloader_from_dataset(
+            dataset,
+            batch_size=2,
+            device=device,  # type: ignore[arg-type]
+            num_workers=0,
+        )
 
 
 def test_dataloader_from_dataset_applies_seed_to_shuffle_order() -> None:

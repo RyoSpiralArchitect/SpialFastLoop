@@ -103,8 +103,14 @@ def init_distributed(
 AmpSetting = Union[bool, Literal["auto"], None]
 
 
-def _device_type(device: str) -> str:
-    return device.split(":", 1)[0]
+def _device_setting(device: Any, name: str = "device") -> str:
+    if not isinstance(device, str) or not device.strip():
+        raise ValueError(f"{name} must be a non-empty device string")
+    return device.strip()
+
+
+def _device_type(device: Any) -> str:
+    return _device_setting(device).split(":", 1)[0]
 
 
 def _bool_setting(value: Any, name: str) -> bool:
@@ -206,6 +212,7 @@ def get_amp_policy(device: str, use_amp: AmpSetting = "auto") -> Tuple[bool, tor
         amp_dtype: torch.dtype
         use_scaler: bool  # GradScaler only for CUDA
     """
+    device_type = _device_type(device)
     if use_amp is None:
         use_amp = "auto"
     elif isinstance(use_amp, bool):
@@ -214,7 +221,6 @@ def get_amp_policy(device: str, use_amp: AmpSetting = "auto") -> Tuple[bool, tor
     elif use_amp != "auto":
         raise ValueError("use_amp must be a boolean, 'auto', or None")
 
-    device_type = _device_type(device)
     if device_type == "cuda":
         # Prefer bf16 on Ampere+ (TF32/bf16), else fp16
         major, minor = torch.cuda.get_device_capability(0)
@@ -238,7 +244,8 @@ def autocast_ctx(device: str, enabled: bool, amp_dtype: torch.dtype) -> Abstract
 def to_device(obj: Any, device: str, non_blocking: bool = True) -> Any:
     """Recursively move tensors (and nested structures) to device."""
     non_blocking_value = _bool_setting(non_blocking, "non_blocking")
-    return _to_device(obj, device, non_blocking_value)
+    device_value = _device_setting(device)
+    return _to_device(obj, device_value, non_blocking_value)
 
 
 def _to_device(obj: Any, device: str, non_blocking: bool) -> Any:
@@ -307,7 +314,8 @@ def dataloader_from_dataset(
     shuffle_value = _bool_setting(shuffle, "shuffle")
     distributed_value = _bool_setting(distributed, "distributed")
     drop_last_value = _bool_setting(drop_last, "drop_last")
-    resolved_device = get_best_device() if device == "auto" else device
+    device_value = _device_setting(device)
+    resolved_device = get_best_device() if device_value == "auto" else device_value
     workers = num_workers
     if workers is None:
         try:
