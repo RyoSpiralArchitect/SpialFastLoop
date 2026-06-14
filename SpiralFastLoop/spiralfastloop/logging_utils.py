@@ -9,6 +9,7 @@ import logging
 import math
 import os
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
@@ -20,30 +21,41 @@ __all__ = ["MetricsLogger", "default_logger"]
 
 
 def _json_safe_metric_value(value: Any) -> Any:
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    if isinstance(value, dict):
-        return {key: _json_safe_metric_value(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe_metric_value(item) for item in value]
-    return value
-
-
-def _normalize_metric_value(value: Any) -> Any:
     if isinstance(value, torch.Tensor):
         if value.numel() == 1:
-            return _json_safe_metric_value(float(value.detach().cpu().item()))
+            return _json_safe_metric_value(value.detach().cpu().item())
         return _json_safe_metric_value(value.detach().cpu().tolist())
-    if isinstance(value, dict):
-        return _json_safe_metric_value({key: _normalize_metric_value(item) for key, item in value.items()})
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, os.PathLike):
+        return os.fspath(value)
+    if isinstance(value, Mapping):
+        return {_json_safe_metric_key(key): _json_safe_metric_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
-        return _json_safe_metric_value([_normalize_metric_value(item) for item in value])
-    if isinstance(value, (int, float, str, bool)) or value is None:
-        return _json_safe_metric_value(value)
+        return [_json_safe_metric_value(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return [_json_safe_metric_value(item) for item in sorted(value, key=repr)]
     try:
         return _json_safe_metric_value(float(value))
     except (TypeError, ValueError):
         return str(value)
+
+
+def _json_safe_metric_key(key: Any) -> str:
+    if isinstance(key, str):
+        return key
+    safe_key = _json_safe_metric_value(key)
+    if safe_key is None:
+        return "null"
+    if isinstance(safe_key, (str, int, float, bool)):
+        return str(safe_key)
+    return str(safe_key)
+
+
+def _normalize_metric_value(value: Any) -> Any:
+    return _json_safe_metric_value(value)
 
 
 def default_logger(name: str = "spiralfastloop") -> logging.Logger:
@@ -110,7 +122,7 @@ class MetricsLogger:
     ) -> None:
         if not self.is_primary:
             return
-        normalized = {k: _normalize_metric_value(v) for k, v in metrics.items()}
+        normalized = {_json_safe_metric_key(k): _normalize_metric_value(v) for k, v in metrics.items()}
         payload: Dict[str, Any] = {
             "timestamp": time.time(),
             "stage": stage,

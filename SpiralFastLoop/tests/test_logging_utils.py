@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 
 import pytest
 import torch
@@ -22,7 +23,13 @@ def test_metrics_logger_writes_strict_jsonl_for_non_finite_metrics(tmp_path) -> 
         {
             "loss": float("nan"),
             "vector": torch.tensor([1.0, float("inf")]),
-            "nested": {"score": torch.tensor(float("-inf"))},
+            "nested": {
+                "score": torch.tensor(float("-inf")),
+                "path": Path("artifacts") / "metrics.jsonl",
+                "tags": {"beta", "alpha"},
+                ("tuple", "key"): "value",
+            },
+            ("top", "tuple"): torch.tensor(3.0),
         },
         step=1,
     )
@@ -34,7 +41,13 @@ def test_metrics_logger_writes_strict_jsonl_for_non_finite_metrics(tmp_path) -> 
 
     assert payload["loss"] is None
     assert payload["vector"] == [1.0, None]
-    assert payload["nested"] == {"score": None}
+    assert payload["nested"] == {
+        "score": None,
+        "path": "artifacts/metrics.jsonl",
+        "tags": ["alpha", "beta"],
+        "['tuple', 'key']": "value",
+    }
+    assert payload["['top', 'tuple']"] == 3.0
     assert payload["step"] == 1
 
 
