@@ -53,6 +53,21 @@ class _FailingLoader:
         raise RuntimeError("loader boom")
 
 
+class _CapturingLogger:
+    def __init__(self) -> None:
+        self.rows: list[tuple[str, dict[str, object], str]] = []
+
+    def log_metrics(
+        self,
+        stage: str,
+        metrics: dict[str, object],
+        *,
+        mode: str = "step",
+        **_: object,
+    ) -> None:
+        self.rows.append((stage, metrics, mode))
+
+
 @pytest.mark.parametrize(
     ("batch", "reason", "match"),
     [
@@ -940,13 +955,31 @@ def test_evaluate_cleans_profile_phase_when_loader_fails(
     profilers = _capture_engine_phase_profilers(monkeypatch)
     model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
-    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+    logger = _CapturingLogger()
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        logger=logger,
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
 
     with pytest.raises(RuntimeError, match="loader boom"):
         trainer.evaluate(_FailingLoader(), nn.CrossEntropyLoss(), steps=1, collect_profile=True)
 
     assert len(profilers) == 1
     assert profilers[0]._starts == {}
+    assert len(logger.rows) == 1
+    stage, metrics, mode = logger.rows[0]
+    assert stage == "eval"
+    assert mode == "error"
+    assert metrics["steps"] == 0
+    assert metrics["measured_steps"] == 0
+    assert metrics["eval_failed"] is True
+    assert metrics["eval_failure_stage"] == "data_wait"
+    assert metrics["eval_failure_last_error"] == "RuntimeError: loader boom"
 
 
 def test_evaluate_reports_scalar_tensor_inputs_as_unmeasured() -> None:
@@ -1157,13 +1190,31 @@ def test_predict_cleans_profile_phase_when_loader_fails(
     profilers = _capture_engine_phase_profilers(monkeypatch)
     model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 2))
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
-    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+    logger = _CapturingLogger()
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        logger=logger,
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
 
     with pytest.raises(RuntimeError, match="loader boom"):
         trainer.predict(_FailingLoader(), steps=1, collect_profile=True)
 
     assert len(profilers) == 1
     assert profilers[0]._starts == {}
+    assert len(logger.rows) == 1
+    stage, metrics, mode = logger.rows[0]
+    assert stage == "predict"
+    assert mode == "error"
+    assert metrics["steps"] == 0
+    assert metrics["measured_steps"] == 0
+    assert metrics["predict_failed"] is True
+    assert metrics["predict_failure_stage"] == "data_wait"
+    assert metrics["predict_failure_last_error"] == "RuntimeError: loader boom"
 
 
 def test_predict_reports_unmeasured_steps_when_batch_size_is_unknown() -> None:
@@ -1361,13 +1412,31 @@ def test_train_one_epoch_cleans_profile_phase_when_loader_fails(
     profilers = _capture_engine_phase_profilers(monkeypatch)
     model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
-    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+    logger = _CapturingLogger()
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        logger=logger,
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
 
     with pytest.raises(RuntimeError, match="loader boom"):
         trainer.train_one_epoch(_FailingLoader(), nn.CrossEntropyLoss(), steps=1, collect_profile=True)
 
     assert len(profilers) == 1
     assert profilers[0]._starts == {}
+    assert len(logger.rows) == 1
+    stage, metrics, mode = logger.rows[0]
+    assert stage == "train"
+    assert mode == "error"
+    assert metrics["steps"] == 0
+    assert metrics["optimizer_steps"] == 0
+    assert metrics["train_failed"] is True
+    assert metrics["train_failure_stage"] == "data_wait"
+    assert metrics["train_failure_last_error"] == "RuntimeError: loader boom"
 
 
 def test_train_one_epoch_cleans_profile_phase_when_forward_fails(
