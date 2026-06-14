@@ -98,6 +98,53 @@ def test_eval_and_predict_reject_invalid_step_limits() -> None:
         trainer.predict(loader, steps="2")
 
 
+def test_predict_detaches_nested_outputs_to_cpu() -> None:
+    class NestedOutputModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.proj = nn.Linear(4, 2)
+
+        def forward(self, inputs: torch.Tensor) -> dict[str, object]:
+            logits = self.proj(inputs)
+            return {
+                "logits": logits,
+                "nested": [logits + 1.0, (logits + 2.0,)],
+                "label": "kept",
+            }
+
+    inputs = torch.randn(4, 4)
+    targets = torch.zeros(4)
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
+    model = NestedOutputModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    def postprocess(outputs: dict[str, object]) -> dict[str, object]:
+        logits = outputs["logits"]
+        assert isinstance(logits, torch.Tensor)
+        return {
+            "logits": logits.detach().requires_grad_(),
+            "nested": outputs["nested"],
+            "label": outputs["label"],
+        }
+
+    predictions = trainer.predict(loader, steps=1, postprocess=postprocess)
+
+    assert len(predictions) == 1
+    first = predictions[0]
+    assert isinstance(first, dict)
+    assert first["label"] == "kept"
+    tensors = [
+        first["logits"],
+        first["nested"][0],  # type: ignore[index]
+        first["nested"][1][0],  # type: ignore[index]
+    ]
+    for tensor in tensors:
+        assert isinstance(tensor, torch.Tensor)
+        assert tensor.device.type == "cpu"
+        assert tensor.requires_grad is False
+
+
 def test_train_one_epoch_collects_phase_and_model_profile() -> None:
     inputs = torch.randn(16, 4)
     targets = torch.randint(0, 3, (16,))

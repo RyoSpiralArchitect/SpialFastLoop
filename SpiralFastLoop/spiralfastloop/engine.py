@@ -196,6 +196,31 @@ def _metric_to_float(value: Any) -> float:
         return 0.0
 
 
+def _detach_to_cpu(obj: Any) -> Any:
+    if torch.is_tensor(obj):
+        return obj.detach().cpu()
+    if isinstance(obj, list):
+        return type(obj)(_detach_to_cpu(value) for value in obj)
+    if isinstance(obj, tuple):
+        converted_tuple = tuple(_detach_to_cpu(value) for value in obj)
+        if hasattr(obj, "_fields"):
+            return type(obj)(*converted_tuple)
+        return tuple(converted_tuple)
+    if isinstance(obj, MutableMapping):
+        converted_mapping = {key: _detach_to_cpu(value) for key, value in obj.items()}
+        mapping_type = cast(Any, type(obj))
+        if hasattr(obj, "default_factory"):
+            new_mapping = mapping_type(getattr(obj, "default_factory"))
+        else:
+            new_mapping = mapping_type()
+        new_mapping.update(converted_mapping)
+        return new_mapping
+    if isinstance(obj, Mapping):
+        converted_mapping = {key: _detach_to_cpu(value) for key, value in obj.items()}
+        return cast(Any, type(obj))(converted_mapping)
+    return obj
+
+
 def _int_setting(value: Any, name: str) -> int:
     if isinstance(value, bool):
         raise ValueError(f"{name} must be an integer")
@@ -1147,7 +1172,5 @@ class FastTrainer:
                     outputs = self.model(inputs)
                 if postprocess is not None:
                     outputs = postprocess(outputs)
-                if isinstance(outputs, torch.Tensor):
-                    outputs = outputs.detach().cpu()
-                outputs_list.append(outputs)
+                outputs_list.append(_detach_to_cpu(outputs))
         return outputs_list
