@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from os import PathLike
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +54,18 @@ def _dataset_arg(raw: object) -> str:
     if not isinstance(raw, str) or raw not in DATASET_CHOICES:
         raise ValueError("dataset must be one of fake, cifar10")
     return raw
+
+
+def _path_setting(raw: object, name: str) -> object:
+    if isinstance(raw, (str, PathLike)):
+        return raw
+    raise ValueError(f"{name} must be a path string")
+
+
+def _optional_path_setting(raw: object, name: str) -> object:
+    if raw is None:
+        return raw
+    return _path_setting(raw, name)
 
 
 def _build_dataset(args: argparse.Namespace):
@@ -178,6 +191,10 @@ def validate_resnet_profile_args(args: argparse.Namespace) -> None:
         _positive_int_setting(args.topk, "topk")
     if hasattr(args, "download"):
         _bool_setting(args.download, "download")
+    if hasattr(args, "data_root"):
+        _path_setting(args.data_root, "data_root")
+    if hasattr(args, "json_out"):
+        _optional_path_setting(args.json_out, "json_out")
     if dataset_name == "fake" and dataset_size < batch_size:
         raise ValueError("dataset-size must be at least batch-size when using --dataset fake.")
 

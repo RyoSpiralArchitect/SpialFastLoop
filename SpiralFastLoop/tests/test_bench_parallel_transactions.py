@@ -584,6 +584,8 @@ def test_validate_benchmark_args_rejects_invalid_direct_values(
         ("profile_sync", 0, "profile_sync"),
         ("profile_distribution", "true", "profile_distribution"),
         ("profile_model", 1, "profile_model"),
+        ("profile_model_include", 1, "profile_model_include"),
+        ("profile_model_include", ["0", 2], "profile_model_include"),
         ("dataset_mode", "cached", "dataset_mode"),
     ],
 )
@@ -597,6 +599,20 @@ def test_validate_benchmark_args_rejects_invalid_optional_direct_values(
 
     with pytest.raises(ValueError, match=match):
         validate_benchmark_args(args)
+
+
+@pytest.mark.parametrize("profile_model_include", [None, "0,2", ["0", "2"]])
+def test_validate_benchmark_args_accepts_profile_model_include_forms(
+    profile_model_include: object,
+) -> None:
+    validate_benchmark_args(
+        Namespace(
+            warmup_steps=0,
+            steps=1,
+            device="cpu",
+            profile_model_include=profile_model_include,
+        ),
+    )
 
 
 def test_parse_args_rejects_zero_profile_model_depth(monkeypatch: pytest.MonkeyPatch) -> None:

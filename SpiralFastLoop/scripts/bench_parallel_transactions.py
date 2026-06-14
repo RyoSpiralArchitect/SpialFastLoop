@@ -7,6 +7,7 @@ import argparse
 import math
 import sys
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -303,6 +304,17 @@ def _positive_float_setting(raw: object, name: str) -> float:
     return value
 
 
+def _profile_model_include_setting(raw: object) -> object:
+    if raw is None or isinstance(raw, str):
+        return raw
+    if not isinstance(raw, Sequence):
+        raise ValueError("profile_model_include must be a string, sequence of strings, or None")
+    for item in raw:
+        if not isinstance(item, str):
+            raise ValueError("profile_model_include entries must be strings")
+    return raw
+
+
 def device_arg(raw: object) -> str:
     if not isinstance(raw, str):
         raise argparse.ArgumentTypeError("must be one of auto, cpu, cuda, mps")
@@ -397,6 +409,8 @@ def validate_benchmark_args(args: argparse.Namespace) -> None:
     for field in ("compile", "collect_profile", "profile_sync", "profile_distribution", "profile_model"):
         if hasattr(args, field):
             _bool_setting(getattr(args, field), field)
+    if hasattr(args, "profile_model_include"):
+        _profile_model_include_setting(args.profile_model_include)
     if hasattr(args, "dataset_mode") and args.dataset_mode not in {"generated", "materialized"}:
         raise ValueError("dataset_mode must be one of generated, materialized")
     if hasattr(args, "device"):

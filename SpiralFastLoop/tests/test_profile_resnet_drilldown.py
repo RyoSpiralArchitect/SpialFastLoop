@@ -115,6 +115,11 @@ def test_validate_resnet_profile_args_rejects_unknown_direct_dataset() -> None:
         ("topk", True, "topk"),
         ("download", 1, "download"),
         ("download", "true", "download"),
+        ("data_root", True, "data_root"),
+        ("data_root", 1, "data_root"),
+        ("json_out", True, "json_out"),
+        ("profile_model_include", 1, "profile_model_include"),
+        ("profile_model_include", ["layer1", 2], "profile_model_include"),
     ],
 )
 def test_validate_resnet_profile_args_rejects_invalid_optional_direct_values(
@@ -133,6 +138,21 @@ def test_validate_resnet_profile_args_rejects_invalid_optional_direct_values(
 
     with pytest.raises(ValueError, match=match):
         drilldown.validate_resnet_profile_args(args)
+
+
+def test_validate_resnet_profile_args_accepts_pathlike_direct_values(tmp_path: Path) -> None:
+    args = Namespace(
+        dataset="fake",
+        dataset_size=8,
+        batch_size=4,
+        steps=1,
+        warmup_steps=0,
+        data_root=tmp_path,
+        json_out=tmp_path / "profile.json",
+        profile_model_include=["layer1", "layer4"],
+    )
+
+    drilldown.validate_resnet_profile_args(args)
 
 
 @pytest.mark.parametrize("topk", [0, 1.5, True, "2"])

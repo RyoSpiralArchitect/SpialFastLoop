@@ -191,6 +191,33 @@ def test_train_one_epoch_rejects_invalid_boolean_settings(
         trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), **train_kwargs)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize(
+    "profile_model_include",
+    [
+        0,
+        True,
+        object(),
+        ["0", 2],
+        [True],
+    ],
+)
+def test_train_one_epoch_rejects_invalid_profile_model_include(
+    profile_model_include: object,
+) -> None:
+    loader, model, optimizer = _make_supervised_components()
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    with pytest.raises(ValueError, match="profile_model_include"):
+        trainer.train_one_epoch(
+            loader,
+            nn.CrossEntropyLoss(),
+            steps=1,
+            collect_profile=True,
+            profile_model=True,
+            profile_model_include=profile_model_include,  # type: ignore[arg-type]
+        )
+
+
 def test_eval_and_predict_reject_invalid_step_limits() -> None:
     loader, model, optimizer = _make_supervised_components()
     trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
@@ -912,3 +939,42 @@ def test_model_profile_hooks_look_through_compiled_wrapper() -> None:
     finally:
         for handle in handles:
             handle.remove()
+
+
+def test_model_profile_hooks_accept_sequence_include() -> None:
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, log_interval=999)
+    profiler = PhaseProfiler(enabled=True)
+
+    result = trainer._install_profile_model_hooks(profiler, include=["0", "2"])
+    handles = result.handles
+
+    try:
+        assert handles
+        assert result.modules_selected == 2
+        assert result.hook_failures == 0
+    finally:
+        for handle in handles:
+            handle.remove()
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"depth": 0}, "profile_model_depth"),
+        ({"max_modules": 0}, "profile_model_max_modules"),
+        ({"include": [1]}, "profile_model_include"),
+    ],
+)
+def test_model_profile_hooks_reject_invalid_direct_settings(
+    kwargs: dict[str, object],
+    match: str,
+) -> None:
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, log_interval=999)
+    profiler = PhaseProfiler(enabled=True)
+
+    with pytest.raises(ValueError, match=match):
+        trainer._install_profile_model_hooks(profiler, **kwargs)  # type: ignore[arg-type]

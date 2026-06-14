@@ -91,6 +91,23 @@ def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, An
     metrics["profile_forward_backward_pct"] = forward_backward_pct
 
 
+def _profile_model_include_patterns(include: Optional[Union[str, Sequence[str]]]) -> list[str]:
+    if include is None:
+        return []
+    if isinstance(include, str):
+        return [item.strip() for item in include.split(",") if item.strip()]
+    if not isinstance(include, Sequence):
+        raise ValueError("profile_model_include must be a string, sequence of strings, or None")
+    patterns = []
+    for item in include:
+        if not isinstance(item, str):
+            raise ValueError("profile_model_include entries must be strings")
+        pattern = item.strip()
+        if pattern:
+            patterns.append(pattern)
+    return patterns
+
+
 @dataclass
 class _ProfileHookInstallResult:
     handles: list[Any]
@@ -470,13 +487,9 @@ class FastTrainer:
             return _ProfileHookInstallResult(handles=[])
         root = getattr(self.model, "module", self.model)
         root = getattr(root, "_orig_mod", root)
-        max_depth = max(1, int(depth))
-        if include is None:
-            include_patterns: list[str] = []
-        elif isinstance(include, str):
-            include_patterns = [item.strip() for item in include.split(",") if item.strip()]
-        else:
-            include_patterns = [str(item).strip() for item in include if str(item).strip()]
+        max_depth = _positive_int_setting(depth, "profile_model_depth")
+        max_selected_modules = _positive_int_setting(max_modules, "profile_model_max_modules")
+        include_patterns = _profile_model_include_patterns(include)
 
         def matches_include(name: str) -> bool:
             if not include_patterns:
@@ -494,7 +507,7 @@ class FastTrainer:
                 continue
             if len(name.split(".")) == max_depth and matches_include(name):
                 selected.append((name, module))
-            if len(selected) >= max(1, int(max_modules)):
+            if len(selected) >= max_selected_modules:
                 break
 
         handles: list[Any] = []
