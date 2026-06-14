@@ -318,11 +318,15 @@ def test_evaluate_collects_phase_profile_and_user_metrics() -> None:
     profile = metrics["profile"]
     phases = profile["phases"]
     assert metrics["steps"] == 2
+    assert metrics["measured_steps"] == 2
+    assert metrics["unmeasured_steps"] == 0
+    assert metrics["batch_size_inference_failures"] == 0
     assert metrics["samples"] == 8
     assert 0.0 <= metrics["accuracy"] <= 1.0
     assert metrics["user_metric_valid_count"] == 2
     assert metrics["user_metric_invalid_count"] == 0
     assert metrics["user_metric_non_finite_count"] == 0
+    assert metrics["user_metric_unmeasured_count"] == 0
     assert metrics["user_metric_skipped_count"] == 0
     for phase_name in ("data_wait", "transfer", "forward", "loss", "user_metrics", "metrics"):
         assert phase_name in phases
@@ -372,7 +376,51 @@ def test_evaluate_skips_invalid_user_metrics_and_reports_counts() -> None:
     assert metrics["user_metric_valid_count"] == 2
     assert metrics["user_metric_invalid_count"] == 2
     assert metrics["user_metric_non_finite_count"] == 2
+    assert metrics["user_metric_unmeasured_count"] == 0
     assert metrics["user_metric_skipped_count"] == 4
+
+
+def test_evaluate_reports_scalar_tensor_inputs_as_unmeasured() -> None:
+    class ScalarTensorDataset(torch.utils.data.Dataset[torch.Tensor]):
+        def __len__(self) -> int:
+            return 2
+
+        def __getitem__(self, index: int) -> torch.Tensor:
+            return torch.tensor(float(index))
+
+    class ScalarModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = nn.Parameter(torch.tensor(1.0))
+
+        def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+            return inputs * self.weight
+
+    def metrics_fn(
+        outputs: torch.Tensor,
+        _targets: None,
+        _inputs: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        return {"score": outputs + 1.0}
+
+    loader = DataLoader(ScalarTensorDataset(), batch_size=None)
+    model = ScalarModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    metrics = trainer.evaluate(loader, metrics_fn=metrics_fn)
+
+    assert metrics["steps"] == 2
+    assert metrics["measured_steps"] == 0
+    assert metrics["unmeasured_steps"] == 2
+    assert metrics["batch_size_inference_failures"] == 2
+    assert metrics["samples"] == 0
+    assert metrics["samples_per_sec"] == 0.0
+    assert metrics["avg_loss"] == 0.0
+    assert "score" not in metrics
+    assert metrics["user_metric_valid_count"] == 0
+    assert metrics["user_metric_unmeasured_count"] == 2
+    assert metrics["user_metric_skipped_count"] == 2
 
 
 def test_predict_can_return_metrics_and_phase_profile() -> None:

@@ -1159,11 +1159,14 @@ class FastTrainer:
         total_weight = torch.zeros((), device=self.device, dtype=metric_dtype)
         total_items = 0
         step_idx = 0
+        measured_steps = 0
+        batch_size_inference_failures = 0
         metric_sums: Dict[str, float] = {}
         metric_weights: Dict[str, float] = {}
         user_metric_valid_count = 0
         user_metric_invalid_count = 0
         user_metric_non_finite_count = 0
+        user_metric_unmeasured_count = 0
 
         with torch.no_grad():
             data_iter = iter(loader)
@@ -1206,8 +1209,8 @@ class FastTrainer:
                     else:
                         loss = None
                 reference = targets if targets is not None else inputs
-                batch_size = _infer_batch_size(reference)
-                batch_size_int = int(batch_size)
+                batch_size = _try_infer_batch_size(reference)
+                batch_size_int = int(batch_size) if batch_size is not None else None
 
                 extra_metrics: Optional[Dict[str, Any]] = None
                 if metrics_fn is not None:
@@ -1220,10 +1223,14 @@ class FastTrainer:
                 profiler.start("metrics")
                 try:
                     batch_duration_s = max(0.0, time.perf_counter() - step_started_at)
-                    meter.record(batch_duration_s, batch_size_int)
-                    total_items += batch_size_int
+                    if batch_size_int is not None:
+                        meter.record(batch_duration_s, batch_size_int)
+                        total_items += batch_size_int
+                        measured_steps += 1
+                    else:
+                        batch_size_inference_failures += 1
 
-                    if loss is not None:
+                    if loss is not None and batch_size_int is not None:
                         loss_detached = loss.detach().to(device=total_loss.device, dtype=total_loss.dtype)
                         weight_tensor = total_weight.new_tensor(batch_size_int, dtype=total_weight.dtype)
                         total_loss += loss_detached * weight_tensor
@@ -1237,6 +1244,9 @@ class FastTrainer:
                                     user_metric_non_finite_count += 1
                                 else:
                                     user_metric_invalid_count += 1
+                                continue
+                            if batch_size_int is None:
+                                user_metric_unmeasured_count += 1
                                 continue
                             metric_sums[key] = metric_sums.get(key, 0.0) + metric_value * batch_size_int
                             metric_weights[key] = metric_weights.get(key, 0.0) + batch_size_int
@@ -1263,6 +1273,10 @@ class FastTrainer:
             total_loss = distributed_sum(total_loss)
             total_weight = distributed_sum(total_weight)
             total_items = int(distributed_sum(torch.tensor(total_items, device=total_loss.device)).item())
+            measured_steps = int(distributed_sum(torch.tensor(measured_steps, device=total_loss.device)).item())
+            batch_size_inference_failures = int(
+                distributed_sum(torch.tensor(batch_size_inference_failures, device=total_loss.device)).item()
+            )
             user_metric_valid_count = int(
                 distributed_sum(torch.tensor(user_metric_valid_count, device=total_loss.device)).item()
             )
@@ -1271,6 +1285,9 @@ class FastTrainer:
             )
             user_metric_non_finite_count = int(
                 distributed_sum(torch.tensor(user_metric_non_finite_count, device=total_loss.device)).item()
+            )
+            user_metric_unmeasured_count = int(
+                distributed_sum(torch.tensor(user_metric_unmeasured_count, device=total_loss.device)).item()
             )
             for key in list(metric_sums.keys()):
                 metric_sums[key] = float(
@@ -1286,6 +1303,9 @@ class FastTrainer:
         else:
             metrics["avg_loss"] = 0.0
         metrics["steps"] = step_idx
+        metrics["measured_steps"] = measured_steps
+        metrics["unmeasured_steps"] = step_idx - measured_steps
+        metrics["batch_size_inference_failures"] = batch_size_inference_failures
         metrics["samples"] = total_items
         metrics["device"] = self.device
         metrics["world_size"] = self.dist_ctx.world_size
@@ -1293,7 +1313,12 @@ class FastTrainer:
         metrics["user_metric_valid_count"] = user_metric_valid_count
         metrics["user_metric_invalid_count"] = user_metric_invalid_count
         metrics["user_metric_non_finite_count"] = user_metric_non_finite_count
-        metrics["user_metric_skipped_count"] = user_metric_invalid_count + user_metric_non_finite_count
+        metrics["user_metric_unmeasured_count"] = user_metric_unmeasured_count
+        metrics["user_metric_skipped_count"] = (
+            user_metric_invalid_count
+            + user_metric_non_finite_count
+            + user_metric_unmeasured_count
+        )
 
         for key, total in metric_sums.items():
             denom = metric_weights.get(key, 0.0)
