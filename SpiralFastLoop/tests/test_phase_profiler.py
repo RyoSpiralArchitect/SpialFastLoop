@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+import pytest
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -114,6 +115,9 @@ def test_train_one_epoch_splits_warmup_and_steady_metrics() -> None:
     assert metrics["reported_samples_per_sec"] == metrics["steady_samples_per_sec"]
     assert metrics["compile_init_time_s"] == 0.0
     assert metrics["compile_fallback_reason"] == "cpu_device"
+    assert metrics["grad_accum"] == 1
+    assert metrics["partial_optimizer_steps"] == 0
+    assert metrics["grad_accum_tail_steps"] == 0
     assert metrics["scheduler_step_failures"] == 0
     assert metrics["scheduler_last_error"] == ""
     assert metrics["profile_model_requested"] is False
@@ -159,6 +163,46 @@ def test_train_one_epoch_records_scheduler_step_failures() -> None:
     assert scheduler.calls == 2
     assert metrics["scheduler_step_failures"] == 2
     assert metrics["scheduler_last_error"] == "RuntimeError: scheduler boom"
+
+
+def test_train_one_epoch_flushes_partial_grad_accumulation() -> None:
+    class Scale(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = nn.Parameter(torch.tensor([0.0]))
+
+        def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+            return inputs * self.weight
+
+    class MeanOutputLoss(nn.Module):
+        def forward(self, outputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+            return outputs.mean()
+
+    inputs = torch.ones(3, 1)
+    targets = torch.zeros(3, 1)
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=1, shuffle=False)
+    model = Scale()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        grad_accum=2,
+        log_interval=999,
+    )
+
+    metrics = trainer.train_one_epoch(loader, MeanOutputLoss())
+
+    assert metrics["steps"] == 3
+    assert metrics["optimizer_steps"] == 2
+    assert metrics["grad_accum"] == 2
+    assert metrics["partial_optimizer_steps"] == 1
+    assert metrics["grad_accum_tail_steps"] == 1
+    assert metrics["steady_optimizer_steps"] == 2
+    assert model.weight.item() == pytest.approx(-0.2, abs=1e-6)
+    assert model.weight.grad is None
 
 
 def test_train_one_epoch_reports_profile_model_hook_failures() -> None:

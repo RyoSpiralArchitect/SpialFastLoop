@@ -541,12 +541,91 @@ class FastTrainer:
         steady_items = 0
         step_idx = 0
         optimizer_steps = 0
+        pending_accum_steps = 0
+        partial_optimizer_steps = 0
+        grad_accum_tail_steps = 0
         scheduler_step_failures = 0
         scheduler_last_error = ""
         warmup_recorded_steps = 0
         steady_recorded_steps = 0
         warmup_optimizer_steps = 0
         steady_optimizer_steps = 0
+
+        def rescale_accumulated_gradients(factor: float) -> None:
+            if factor == 1.0:
+                return
+            for param in self.model.parameters():
+                if param.grad is not None:
+                    param.grad.detach().mul_(factor)
+
+        def run_optimizer_step(accumulated_steps: int) -> None:
+            nonlocal optimizer_steps
+            nonlocal partial_optimizer_steps
+            nonlocal grad_accum_tail_steps
+            nonlocal scheduler_step_failures
+            nonlocal scheduler_last_error
+            nonlocal warmup_optimizer_steps
+            nonlocal steady_optimizer_steps
+            profiler.start("optimizer")
+            try:
+                if accumulated_steps < self.grad_accum:
+                    partial_optimizer_steps += 1
+                    grad_accum_tail_steps = accumulated_steps
+                    scale_factor = self.grad_accum / max(1, accumulated_steps)
+                    profiler.start_detail("optimizer", "grad_accum_rescale")
+                    try:
+                        rescale_accumulated_gradients(scale_factor)
+                    finally:
+                        profiler.stop_detail("optimizer", "grad_accum_rescale")
+
+                if self.clip_grad_norm is not None:
+                    profiler.start_detail("optimizer", "clip_grad_norm")
+                    try:
+                        if self.scaler.is_enabled():
+                            self.scaler.unscale_(self.optimizer)
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_grad_norm)
+                    finally:
+                        profiler.stop_detail("optimizer", "clip_grad_norm")
+
+                if self.scaler.is_enabled():
+                    profiler.start_detail("optimizer", "scaler.step")
+                    try:
+                        self.scaler.step(self.optimizer)
+                    finally:
+                        profiler.stop_detail("optimizer", "scaler.step")
+                    profiler.start_detail("optimizer", "scaler.update")
+                    try:
+                        self.scaler.update()
+                    finally:
+                        profiler.stop_detail("optimizer", "scaler.update")
+                else:
+                    profiler.start_detail("optimizer", "optimizer.step")
+                    try:
+                        self.optimizer.step()
+                    finally:
+                        profiler.stop_detail("optimizer", "optimizer.step")
+
+                profiler.start_detail("optimizer", "zero_grad")
+                try:
+                    self.optimizer.zero_grad(set_to_none=True)
+                finally:
+                    profiler.stop_detail("optimizer", "zero_grad")
+                if self.scheduler is not None:
+                    profiler.start_detail("optimizer", "scheduler.step")
+                    try:
+                        self.scheduler.step()
+                    except Exception as exc:
+                        scheduler_step_failures += 1
+                        scheduler_last_error = _format_exception_reason(exc)
+                    finally:
+                        profiler.stop_detail("optimizer", "scheduler.step")
+                optimizer_steps += 1
+                if warmup_step_limit > 0 and step_idx <= warmup_step_limit:
+                    warmup_optimizer_steps += 1
+                else:
+                    steady_optimizer_steps += 1
+            finally:
+                profiler.stop("optimizer")
 
         def profiled_batches() -> Iterable[tuple[Any, float]]:
             nonlocal step_idx
@@ -701,57 +780,12 @@ class FastTrainer:
             profiler.stop("backward")
 
             # Step if accumulation boundary
-            if step_idx % self.grad_accum == 0:
-                profiler.start("optimizer")
-                try:
-                    if self.clip_grad_norm is not None:
-                        profiler.start_detail("optimizer", "clip_grad_norm")
-                        try:
-                            if self.scaler.is_enabled():
-                                self.scaler.unscale_(self.optimizer)
-                            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_grad_norm)
-                        finally:
-                            profiler.stop_detail("optimizer", "clip_grad_norm")
-
-                    if self.scaler.is_enabled():
-                        profiler.start_detail("optimizer", "scaler.step")
-                        try:
-                            self.scaler.step(self.optimizer)
-                        finally:
-                            profiler.stop_detail("optimizer", "scaler.step")
-                        profiler.start_detail("optimizer", "scaler.update")
-                        try:
-                            self.scaler.update()
-                        finally:
-                            profiler.stop_detail("optimizer", "scaler.update")
-                    else:
-                        profiler.start_detail("optimizer", "optimizer.step")
-                        try:
-                            self.optimizer.step()
-                        finally:
-                            profiler.stop_detail("optimizer", "optimizer.step")
-
-                    profiler.start_detail("optimizer", "zero_grad")
-                    try:
-                        self.optimizer.zero_grad(set_to_none=True)
-                    finally:
-                        profiler.stop_detail("optimizer", "zero_grad")
-                    if self.scheduler is not None:
-                        profiler.start_detail("optimizer", "scheduler.step")
-                        try:
-                            self.scheduler.step()
-                        except Exception as exc:
-                            scheduler_step_failures += 1
-                            scheduler_last_error = _format_exception_reason(exc)
-                        finally:
-                            profiler.stop_detail("optimizer", "scheduler.step")
-                    optimizer_steps += 1
-                    if warmup_step_limit > 0 and step_idx <= warmup_step_limit:
-                        warmup_optimizer_steps += 1
-                    else:
-                        steady_optimizer_steps += 1
-                finally:
-                    profiler.stop("optimizer")
+            pending_accum_steps += 1
+            reached_accum_boundary = pending_accum_steps >= self.grad_accum
+            reached_requested_steps = steps is not None and step_idx >= steps
+            if reached_accum_boundary or reached_requested_steps:
+                run_optimizer_step(pending_accum_steps)
+                pending_accum_steps = 0
 
             # Metrics
             profiler.start("metrics")
@@ -801,6 +835,9 @@ class FastTrainer:
                     epoch=epoch,
                     mode="step",
                 )
+
+        if pending_accum_steps > 0:
+            run_optimizer_step(pending_accum_steps)
 
         metrics: Dict[str, Any] = dict(meter.summary())
         if self.device.startswith("cuda"):
@@ -857,6 +894,9 @@ class FastTrainer:
             metrics["steady_avg_loss"] = 0.0
         metrics["steps"] = step_idx
         metrics["optimizer_steps"] = optimizer_steps
+        metrics["grad_accum"] = self.grad_accum
+        metrics["partial_optimizer_steps"] = partial_optimizer_steps
+        metrics["grad_accum_tail_steps"] = grad_accum_tail_steps
         metrics["scheduler_step_failures"] = scheduler_step_failures
         metrics["scheduler_last_error"] = scheduler_last_error
         metrics["samples"] = total_items
