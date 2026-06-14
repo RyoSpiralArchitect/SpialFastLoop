@@ -20,6 +20,8 @@ from spiralfastloop.engine import (
 from spiralfastloop.extras.trigger_mix import (
     COEFVAR_STABILIZER,
     FRACTION_NORMALIZATION_EPS,
+    HardSampleBuffer,
+    HardSampleProvider,
     LossStdConfig,
     LossStdTrigger,
 )
@@ -45,6 +47,96 @@ def _make_provider(outputs: Optional[Tuple[torch.Tensor, torch.Tensor]] = None):
 
     provider.calls = calls  # type: ignore[attr-defined]
     return provider
+
+
+@pytest.mark.parametrize("max_samples", [-1, 1.5, "2", True])
+def test_hard_sample_buffer_rejects_invalid_max_samples(max_samples: object) -> None:
+    with pytest.raises(ValueError, match="max_samples"):
+        HardSampleBuffer(max_samples=max_samples)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("top_k", [0, -1, 1.5, "2", True])
+def test_hard_sample_buffer_rejects_invalid_top_k(top_k: object) -> None:
+    buffer = HardSampleBuffer(max_samples=8)
+    inputs = torch.arange(6, dtype=torch.float32).reshape(3, 2)
+    targets = torch.arange(3)
+    losses = torch.ones(3)
+
+    with pytest.raises(ValueError, match="top_k"):
+        buffer.add_batch(inputs, targets, losses, top_k=top_k)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("num_samples", [0, -1, 1.5, "2", True])
+def test_hard_sample_buffer_rejects_invalid_sample_request(num_samples: object) -> None:
+    buffer = HardSampleBuffer(max_samples=8)
+    inputs = torch.arange(6, dtype=torch.float32).reshape(3, 2)
+    targets = torch.arange(3)
+    losses = torch.ones(3)
+    buffer.add_batch(inputs, targets, losses, top_k=2)
+
+    with pytest.raises(ValueError, match="num_samples"):
+        buffer.sample(num_samples)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("select_top_k", [0, -1, 1.5, "2", True])
+def test_hard_sample_provider_rejects_invalid_select_top_k(select_top_k: object) -> None:
+    with pytest.raises(ValueError, match="select_top_k"):
+        HardSampleProvider(
+            HardSampleBuffer(),
+            select_top_k=select_top_k,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "kwargs, field",
+    [
+        ({"std_threshold": -0.1}, "std_threshold"),
+        ({"std_threshold": float("nan")}, "std_threshold"),
+        ({"inject_ratio": -0.1}, "inject_ratio"),
+        ({"inject_ratio": float("inf")}, "inject_ratio"),
+        ({"weight_alpha": -0.1}, "weight_alpha"),
+        ({"weight_alpha": True}, "weight_alpha"),
+        ({"budget_frac": -0.1}, "budget_frac"),
+        ({"budget_frac": float("nan")}, "budget_frac"),
+        ({"pulse_every": -1}, "pulse_every"),
+        ({"pulse_every": 1.5}, "pulse_every"),
+        ({"pulse_every": "2"}, "pulse_every"),
+        ({"pulse_every": True}, "pulse_every"),
+        ({"max_injected_per_step": -1}, "max_injected_per_step"),
+        ({"max_injected_per_step": 1.5}, "max_injected_per_step"),
+        ({"max_injected_per_step": "2"}, "max_injected_per_step"),
+        ({"max_injected_per_step": True}, "max_injected_per_step"),
+    ],
+)
+def test_loss_std_config_rejects_invalid_numeric_settings(
+    kwargs: Dict[str, object],
+    field: str,
+) -> None:
+    with pytest.raises(ValueError, match=field):
+        LossStdConfig(**kwargs)  # type: ignore[arg-type]
+
+
+def test_loss_std_config_allows_zero_disable_values() -> None:
+    cfg = LossStdConfig(
+        inject_ratio=0.0,
+        budget_frac=0.0,
+        pulse_every=0,
+        max_injected_per_step=0,
+    )
+
+    assert cfg.inject_ratio == 0.0
+    assert cfg.budget_frac == 0.0
+    assert cfg.pulse_every == 0
+    assert cfg.max_injected_per_step == 0
+
+
+@pytest.mark.parametrize("step", [-1, 1.5, "2", True])
+def test_trigger_rejects_invalid_step_values(step: object) -> None:
+    trigger = LossStdTrigger(provider=_make_provider())
+    ctx = {"loss_vec": torch.ones(4), "device": "cpu", "step": step}
+
+    with pytest.raises(ValueError, match="step"):
+        trigger(ctx)
 
 
 @pytest.mark.parametrize(

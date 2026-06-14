@@ -27,6 +27,12 @@ import torch
 
 from ..engine import TriggerResult
 from ..metrics import GLOBAL_NORMALIZATION_METRICS, NormalizationMetricsCollector
+from ..utils import (
+    _non_negative_finite_float_setting,
+    _non_negative_int_setting,
+    _optional_positive_int_setting,
+    _positive_int_setting,
+)
 
 # Exposed tolerances so downstream callers (or tests) can tune them if their
 # loss scales differ drastically from the default cross-entropy-ish regime.
@@ -110,7 +116,7 @@ class HardSampleBuffer:
     """Ring buffer of hard samples to support trigger-based injections."""
 
     def __init__(self, *, max_samples: int = 2048) -> None:
-        self.max_samples = max(0, int(max_samples))
+        self.max_samples = _non_negative_int_setting(max_samples, "max_samples")
         self._inputs: Deque[Any] = deque(maxlen=self.max_samples)
         self._targets: Deque[Any] = deque(maxlen=self.max_samples)
 
@@ -132,7 +138,8 @@ class HardSampleBuffer:
         batch_size = loss_vec.shape[0]
         if batch_size == 0:
             return
-        k = batch_size if top_k is None else max(1, min(batch_size, int(top_k)))
+        requested_top_k = _optional_positive_int_setting(top_k, "top_k")
+        k = batch_size if requested_top_k is None else min(batch_size, requested_top_k)
         _, indices = torch.topk(loss_vec, k=k, largest=True)
         selected_inputs = _select_indices(inputs, indices.tolist())
         selected_targets = _select_indices(targets, indices.tolist())
@@ -147,7 +154,7 @@ class HardSampleBuffer:
     def sample(self, num_samples: int) -> Tuple[Any, Any]:
         if len(self._inputs) == 0:
             raise ValueError("HardSampleBuffer is empty; cannot sample.")
-        requested = max(1, int(num_samples))
+        requested = _positive_int_setting(num_samples, "num_samples")
         indices = torch.randint(0, len(self._inputs), (requested,))
         samples_in = [self._inputs[i] for i in indices.tolist()]
         samples_tgt = [self._targets[i] for i in indices.tolist()]
@@ -170,7 +177,7 @@ class HardSampleProvider:
         self.buffer = buffer
         self.augmenter = augmenter
         self.fallback = fallback
-        self.select_top_k = select_top_k
+        self.select_top_k = _optional_positive_int_setting(select_top_k, "select_top_k")
 
     def observe(self, ctx: Dict[str, Any]) -> None:
         loss_vec = ctx["loss_vec"]
@@ -200,6 +207,29 @@ class LossStdConfig:
     budget_frac: float = 0.03  # token/sample budget per epoch (approx)
     pulse_every: int = 800  # force a pulse every N steps
     max_injected_per_step: int = 128
+
+    def __post_init__(self) -> None:
+        self.std_threshold = _non_negative_finite_float_setting(
+            self.std_threshold,
+            "std_threshold",
+        )
+        self.inject_ratio = _non_negative_finite_float_setting(
+            self.inject_ratio,
+            "inject_ratio",
+        )
+        self.weight_alpha = _non_negative_finite_float_setting(
+            self.weight_alpha,
+            "weight_alpha",
+        )
+        self.budget_frac = _non_negative_finite_float_setting(
+            self.budget_frac,
+            "budget_frac",
+        )
+        self.pulse_every = _non_negative_int_setting(self.pulse_every, "pulse_every")
+        self.max_injected_per_step = _non_negative_int_setting(
+            self.max_injected_per_step,
+            "max_injected_per_step",
+        )
 
 
 class LossStdTrigger:
@@ -267,7 +297,7 @@ class LossStdTrigger:
 
         device = ctx["device"]
         raw_step = ctx.get("step")
-        step = int(raw_step) if raw_step is not None else 0
+        step = _non_negative_int_setting(raw_step, "step") if raw_step is not None else 0
         has_step = raw_step is not None
         if has_step:
             if self._last_step is not None and step < self._last_step:
