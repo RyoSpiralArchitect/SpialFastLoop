@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader, TensorDataset
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer
+import spiralfastloop.engine as engine
 from spiralfastloop.engine import _add_profile_phase_metrics
 from spiralfastloop.utils import PhaseProfiler
 
@@ -361,6 +362,35 @@ def test_evaluate_collects_phase_profile_and_user_metrics() -> None:
         assert metrics[f"profile_{phase_name}_time_s"] == pytest.approx(phases[phase_name]["total_s"])
         assert metrics[f"profile_{phase_name}_pct"] == pytest.approx(phases[phase_name]["pct"])
         assert metrics[f"profile_{phase_name}_avg_ms"] == pytest.approx(phases[phase_name]["avg_ms"])
+
+
+def test_train_eval_predict_share_device_memory_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reset_devices: list[str] = []
+    collect_devices: list[str] = []
+
+    def fake_reset(device: str) -> None:
+        reset_devices.append(device)
+
+    def fake_collect(device: str) -> dict[str, int]:
+        collect_devices.append(device)
+        return {"cuda_current_mem_bytes": len(collect_devices)}
+
+    monkeypatch.setattr(engine, "_reset_device_peak_memory_stats", fake_reset)
+    monkeypatch.setattr(engine, "_collect_device_memory_metrics", fake_collect)
+    loader, model, optimizer = _make_supervised_components()
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    train_metrics = trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), steps=1)
+    eval_metrics = trainer.evaluate(loader, nn.CrossEntropyLoss(), steps=1)
+    _predictions, predict_metrics = trainer.predict(loader, steps=1, return_metrics=True)
+
+    assert train_metrics["cuda_current_mem_bytes"] == 1
+    assert eval_metrics["cuda_current_mem_bytes"] == 2
+    assert predict_metrics["cuda_current_mem_bytes"] == 3
+    assert reset_devices == ["cpu", "cpu", "cpu"]
+    assert collect_devices == ["cpu", "cpu", "cpu"]
 
 
 def test_evaluate_skips_invalid_user_metrics_and_reports_counts() -> None:

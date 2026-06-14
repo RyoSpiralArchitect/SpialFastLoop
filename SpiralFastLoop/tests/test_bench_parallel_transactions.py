@@ -257,6 +257,41 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["best_end_to_end"]["run"] == 1
 
 
+def test_summarize_results_includes_device_memory_metrics_when_present() -> None:
+    rows = [
+        {
+            "run": 0,
+            "seed": 10,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 90.0,
+            "steady_samples_per_sec": 100.0,
+            "wall_time_s": 1.0,
+            "end_to_end_wall_time_s": 1.2,
+            "cuda_current_mem_bytes": 1024,
+            "cuda_max_mem_bytes": 2048,
+        },
+        {
+            "run": 1,
+            "seed": 11,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 90.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 90.0,
+            "wall_time_s": 1.5,
+            "end_to_end_wall_time_s": 1.7,
+        },
+    ]
+
+    summary = summarize_results(rows)
+
+    assert summary["mean_cuda_current_mem_bytes"] == pytest.approx(1024.0)
+    assert summary["sample_count_cuda_current_mem_bytes"] == pytest.approx(1.0)
+    assert summary["mean_cuda_max_mem_bytes"] == pytest.approx(2048.0)
+    assert summary["best_reported"]["cuda_max_mem_bytes"] == 2048
+    assert "mean_mps_current_mem_bytes" not in summary
+
+
 def test_summarize_results_handles_empty_input() -> None:
     summary = summarize_results([])
 

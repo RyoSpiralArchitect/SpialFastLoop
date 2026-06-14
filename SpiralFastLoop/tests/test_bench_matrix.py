@@ -298,6 +298,8 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_loss_reduce_pct": 3.0,
             "profile_backward_pct": 40.0,
             "profile_metrics_pct": 1.5,
+            "cuda_current_mem_bytes": 1024,
+            "cuda_max_mem_bytes": 2048,
         },
         {
             "matrix_dataset_mode": "materialized",
@@ -343,6 +345,9 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["mean_profile_loss_reduce_pct"] == pytest.approx(2.0)
     assert generated["mean_profile_metrics_pct"] == pytest.approx(1.0)
     assert generated["max_profile_backward_pct"] == pytest.approx(40.0)
+    assert generated["mean_cuda_current_mem_bytes"] == pytest.approx(1024.0)
+    assert generated["sample_count_cuda_current_mem_bytes"] == pytest.approx(1.0)
+    assert generated["mean_cuda_max_mem_bytes"] == pytest.approx(2048.0)
     assert generated["profiled_runs"] == 2
     assert summary["best_reported"]["mean_profile_flat_metric_invalid_count"] == pytest.approx(1.0)
     assert summary["best_reported"]["mean_profile_forward_backward_pct"] == pytest.approx(55.0)

@@ -77,7 +77,18 @@ PROFILE_SUMMARY_FIELDS = (
     "profile_metrics_avg_ms",
 )
 
-SUMMARY_FIELDS = BASE_SUMMARY_FIELDS + PROFILE_SUMMARY_FIELDS
+DEVICE_MEMORY_SUMMARY_FIELDS = (
+    "cuda_current_mem_bytes",
+    "cuda_max_mem_bytes",
+    "cuda_reserved_mem_bytes",
+    "cuda_max_reserved_mem_bytes",
+    "mps_current_mem_bytes",
+    "mps_max_mem_bytes",
+    "mps_driver_mem_bytes",
+    "mps_recommended_max_mem_bytes",
+)
+
+SUMMARY_FIELDS = BASE_SUMMARY_FIELDS + PROFILE_SUMMARY_FIELDS + DEVICE_MEMORY_SUMMARY_FIELDS
 
 BEST_RUN_FIELDS = (
     "run",
@@ -98,6 +109,14 @@ BEST_RUN_FIELDS = (
     "profile_backward_pct",
     "profile_optimizer_pct",
     "profile_metrics_pct",
+    "cuda_current_mem_bytes",
+    "cuda_max_mem_bytes",
+    "cuda_reserved_mem_bytes",
+    "cuda_max_reserved_mem_bytes",
+    "mps_current_mem_bytes",
+    "mps_max_mem_bytes",
+    "mps_driver_mem_bytes",
+    "mps_recommended_max_mem_bytes",
 )
 
 DEVICE_CHOICES = ("auto", "cpu", "cuda", "mps")
@@ -176,7 +195,8 @@ def summary_fields_for_rows(rows: list[dict]) -> tuple[str, ...]:
     for row in rows:
         present_fields.update(row.keys())
     profile_fields = tuple(field for field in PROFILE_SUMMARY_FIELDS if field in present_fields)
-    return BASE_SUMMARY_FIELDS + profile_fields
+    memory_fields = tuple(field for field in DEVICE_MEMORY_SUMMARY_FIELDS if field in present_fields)
+    return BASE_SUMMARY_FIELDS + profile_fields + memory_fields
 
 
 def count_profiled_rows(rows: list[dict]) -> int:

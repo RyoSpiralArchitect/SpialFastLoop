@@ -147,6 +147,53 @@ def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, An
     _record_profile_flat_metric_invalids(metrics, invalid_fields)
 
 
+def _reset_device_peak_memory_stats(device: str) -> None:
+    if device.startswith("cuda"):
+        try:
+            torch.cuda.reset_peak_memory_stats(device)
+        except Exception:
+            pass
+    elif device.startswith("mps"):
+        try:
+            reset_mps_peak = getattr(torch.mps, "reset_peak_memory_stats", None)
+            if callable(reset_mps_peak):
+                reset_mps_peak()
+        except Exception:
+            pass
+
+
+def _collect_device_memory_metrics(device: str) -> Dict[str, Any]:
+    metrics: Dict[str, Any] = {}
+    if device.startswith("cuda"):
+        try:
+            metrics["cuda_current_mem_bytes"] = torch.cuda.memory_allocated(device)
+            metrics["cuda_max_mem_bytes"] = torch.cuda.max_memory_allocated(device)
+            metrics["cuda_reserved_mem_bytes"] = torch.cuda.memory_reserved(device)
+            metrics["cuda_max_reserved_mem_bytes"] = torch.cuda.max_memory_reserved(device)
+        except Exception:
+            pass
+    elif device.startswith("mps"):
+        try:
+            metrics["mps_current_mem_bytes"] = torch.mps.current_allocated_memory()
+        except Exception:
+            pass
+        try:
+            metrics["mps_driver_mem_bytes"] = torch.mps.driver_allocated_memory()
+        except Exception:
+            pass
+        try:
+            metrics["mps_recommended_max_mem_bytes"] = torch.mps.recommended_max_memory()
+        except Exception:
+            pass
+        try:
+            max_mps_memory = getattr(torch.mps, "max_memory_allocated", None)
+            if callable(max_mps_memory):
+                metrics["mps_max_mem_bytes"] = max_mps_memory()
+        except Exception:
+            pass
+    return metrics
+
+
 def _profile_model_include_patterns(include: Optional[Union[str, Sequence[str]]]) -> list[str]:
     if include is None:
         return []
@@ -722,18 +769,7 @@ class FastTrainer:
                     pass
 
         self.optimizer.zero_grad(set_to_none=True)
-        if self.device.startswith("cuda"):
-            try:
-                torch.cuda.reset_peak_memory_stats()
-            except Exception:
-                pass
-        elif self.device.startswith("mps"):
-            try:
-                reset_mps_peak = getattr(torch.mps, "reset_peak_memory_stats", None)
-                if callable(reset_mps_peak):
-                    reset_mps_peak()
-            except Exception:
-                pass
+        _reset_device_peak_memory_stats(self.device)
 
         metric_dtype = torch.float32 if self.device.startswith("mps") else torch.float64
         total_loss = torch.zeros((), device=self.device, dtype=metric_dtype)
@@ -1046,33 +1082,7 @@ class FastTrainer:
             run_optimizer_step(pending_accum_steps)
 
         metrics: Dict[str, Any] = dict(meter.summary())
-        if self.device.startswith("cuda"):
-            try:
-                metrics["cuda_current_mem_bytes"] = torch.cuda.memory_allocated()
-                metrics["cuda_max_mem_bytes"] = torch.cuda.max_memory_allocated()
-                metrics["cuda_reserved_mem_bytes"] = torch.cuda.memory_reserved()
-                metrics["cuda_max_reserved_mem_bytes"] = torch.cuda.max_memory_reserved()
-            except Exception:
-                pass
-        elif self.device.startswith("mps"):
-            try:
-                metrics["mps_current_mem_bytes"] = torch.mps.current_allocated_memory()
-            except Exception:
-                pass
-            try:
-                metrics["mps_driver_mem_bytes"] = torch.mps.driver_allocated_memory()
-            except Exception:
-                pass
-            try:
-                metrics["mps_recommended_max_mem_bytes"] = torch.mps.recommended_max_memory()
-            except Exception:
-                pass
-            try:
-                max_mps_memory = getattr(torch.mps, "max_memory_allocated", None)
-                if callable(max_mps_memory):
-                    metrics["mps_max_mem_bytes"] = max_mps_memory()
-            except Exception:
-                pass
+        metrics.update(_collect_device_memory_metrics(self.device))
         if self.dist_ctx.world_size > 1:
             total_loss = distributed_sum(total_loss)
             total_weight = distributed_sum(total_weight)
@@ -1223,6 +1233,7 @@ class FastTrainer:
             track_distribution=profile_distribution_value,
             window=profile_window_size,
         )
+        _reset_device_peak_memory_stats(self.device)
         metric_dtype = torch.float32 if self.device.startswith("mps") else torch.float64
         total_loss = torch.zeros((), device=self.device, dtype=metric_dtype)
         total_weight = torch.zeros((), device=self.device, dtype=metric_dtype)
@@ -1366,6 +1377,7 @@ class FastTrainer:
                     distributed_sum(torch.tensor(metric_weights[key], device=total_loss.device)).item()
                 )
         metrics: Dict[str, Any] = dict(meter.summary())
+        metrics.update(_collect_device_memory_metrics(self.device))
         weight_value = total_weight.item()
         if weight_value > 0:
             metrics["avg_loss"] = (total_loss / total_weight).item()
@@ -1434,6 +1446,8 @@ class FastTrainer:
             track_distribution=profile_distribution_value,
             window=profile_window_size,
         )
+        if metrics_requested:
+            _reset_device_peak_memory_stats(self.device)
         total_items = 0
         step_idx = 0
         measured_steps = 0
@@ -1495,6 +1509,7 @@ class FastTrainer:
         if not metrics_requested:
             return outputs_list
         metrics: Dict[str, Any] = dict(meter.summary())
+        metrics.update(_collect_device_memory_metrics(self.device))
         metrics["steps"] = step_idx
         metrics["measured_steps"] = measured_steps
         metrics["unmeasured_steps"] = step_idx - measured_steps
