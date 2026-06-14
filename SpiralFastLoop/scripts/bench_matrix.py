@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from argparse import Namespace
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -122,15 +124,40 @@ def summarize_rows(rows: list[dict]) -> dict:
     }
 
 
+def _measured_summary_value(row: dict, mean_field: str) -> Optional[float]:
+    if mean_field not in row:
+        return None
+    try:
+        value = float(row[mean_field])
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+
+    metric_name = mean_field[len("mean_"):] if mean_field.startswith("mean_") else mean_field
+    sample_count_field = f"sample_count_{metric_name}"
+    if sample_count_field in row:
+        try:
+            sample_count = float(row[sample_count_field])
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(sample_count) or sample_count <= 0.0:
+            return None
+    return value
+
+
 def _format_summary_row(row: dict) -> str:
-    profile_suffix = ""
-    if "mean_profile_forward_backward_pct" in row:
-        forward_backward_pct = float(row["mean_profile_forward_backward_pct"])
-        profile_suffix = (
-            f" fwd+bwd={forward_backward_pct:.1f}% "
-            f"loss={float(row.get('mean_profile_loss_pct', 0.0)):.1f}% "
-            f"opt={float(row.get('mean_profile_optimizer_pct', 0.0)):.1f}%"
-        )
+    profile_parts = []
+    forward_backward_pct = _measured_summary_value(row, "mean_profile_forward_backward_pct")
+    if forward_backward_pct is not None:
+        profile_parts.append(f"fwd+bwd={forward_backward_pct:.1f}%")
+    loss_pct = _measured_summary_value(row, "mean_profile_loss_pct")
+    if loss_pct is not None:
+        profile_parts.append(f"loss={loss_pct:.1f}%")
+    optimizer_pct = _measured_summary_value(row, "mean_profile_optimizer_pct")
+    if optimizer_pct is not None:
+        profile_parts.append(f"opt={optimizer_pct:.1f}%")
+    profile_suffix = f" {' '.join(profile_parts)}" if profile_parts else ""
     return (
         f"{row['dataset_mode']} {row['compile_mode']} workers={row['workers']} "
         f"reported={row['mean_reported_samples_per_sec']:.1f}/s "

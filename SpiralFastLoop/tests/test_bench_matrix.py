@@ -93,6 +93,49 @@ def test_format_summary_row_omits_profile_suffix_when_absent() -> None:
     assert "opt=" not in formatted
 
 
+def test_format_summary_row_omits_unmeasured_profile_suffix() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_forward_backward_pct": 0.0,
+        "sample_count_profile_forward_backward_pct": 0.0,
+        "non_finite_count_profile_forward_backward_pct": 1.0,
+        "mean_profile_loss_pct": 0.0,
+        "sample_count_profile_loss_pct": 0.0,
+        "non_finite_count_profile_loss_pct": 1.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "fwd+bwd" not in formatted
+    assert "loss=" not in formatted
+    assert "opt=" not in formatted
+
+
+def test_format_summary_row_includes_only_measured_profile_parts() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_forward_backward_pct": 62.5,
+        "sample_count_profile_forward_backward_pct": 2.0,
+        "mean_profile_loss_pct": 0.0,
+        "sample_count_profile_loss_pct": 0.0,
+        "mean_profile_optimizer_pct": 12.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "fwd+bwd=62.5%" in formatted
+    assert "loss=" not in formatted
+    assert "opt=12.0%" in formatted
+
+
 def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     rows = [
         {
