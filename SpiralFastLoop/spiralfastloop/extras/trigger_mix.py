@@ -19,6 +19,7 @@ retune:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable, Deque, Dict, Optional, Sequence, Tuple
@@ -28,6 +29,7 @@ import torch
 from ..engine import TriggerResult
 from ..metrics import GLOBAL_NORMALIZATION_METRICS, NormalizationMetricsCollector
 from ..utils import (
+    _device_setting,
     _non_negative_finite_float_setting,
     _non_negative_int_setting,
     _optional_positive_int_setting,
@@ -112,6 +114,28 @@ def _split_batch(batch: Any, batch_size: int) -> list[Any]:
     return [batch for _ in range(batch_size)]
 
 
+def _trigger_context_setting(ctx: Any) -> Dict[str, Any]:
+    if not isinstance(ctx, Mapping):
+        raise ValueError("ctx must be a mapping")
+    return dict(ctx)
+
+
+def _callable_setting(value: Any, name: str) -> Any:
+    if not callable(value):
+        raise ValueError(f"{name} must be callable")
+    return value
+
+
+def _finite_loss_vector_setting(loss_vec: Any) -> torch.Tensor:
+    if not isinstance(loss_vec, torch.Tensor):
+        raise TypeError("loss_vec must be a torch.Tensor")
+    if not torch.is_floating_point(loss_vec):
+        raise ValueError("loss_vec must be a floating-point tensor")
+    if not torch.isfinite(loss_vec).all().item():
+        raise ValueError("loss_vec must contain only finite values")
+    return loss_vec
+
+
 class HardSampleBuffer:
     """Ring buffer of hard samples to support trigger-based injections."""
 
@@ -133,6 +157,7 @@ class HardSampleBuffer:
     ) -> None:
         if self.max_samples <= 0:
             return
+        loss_vec = _finite_loss_vector_setting(loss_vec)
         if loss_vec.ndim != 1:
             raise ValueError("loss_vec must be a 1D tensor for hard-sample selection.")
         batch_size = loss_vec.shape[0]
@@ -174,24 +199,41 @@ class HardSampleProvider:
         fallback: Optional[Callable[[int, str, Dict[str, Any]], Tuple[Any, Any]]] = None,
         select_top_k: Optional[int] = None,
     ) -> None:
+        if not isinstance(buffer, HardSampleBuffer):
+            raise ValueError("buffer must be a HardSampleBuffer")
+        if augmenter is not None:
+            _callable_setting(augmenter, "augmenter")
+        if fallback is not None:
+            _callable_setting(fallback, "fallback")
         self.buffer = buffer
         self.augmenter = augmenter
         self.fallback = fallback
         self.select_top_k = _optional_positive_int_setting(select_top_k, "select_top_k")
 
     def observe(self, ctx: Dict[str, Any]) -> None:
-        loss_vec = ctx["loss_vec"]
+        ctx_value = _trigger_context_setting(ctx)
+        loss_vec = ctx_value.get("loss_vec")
         if not isinstance(loss_vec, torch.Tensor):
             return
-        self.buffer.add_batch(ctx["inputs"], ctx["targets"], loss_vec, top_k=self.select_top_k)
+        if "inputs" not in ctx_value or "targets" not in ctx_value:
+            raise ValueError("ctx must include inputs and targets when loss_vec is a tensor")
+        self.buffer.add_batch(
+            ctx_value["inputs"],
+            ctx_value["targets"],
+            _finite_loss_vector_setting(loss_vec),
+            top_k=self.select_top_k,
+        )
 
     def __call__(self, requested: int, device: str, ctx: Dict[str, Any]) -> Tuple[Any, Any]:
+        requested_value = _positive_int_setting(requested, "requested")
+        device_value = _device_setting(device)
+        ctx_value = _trigger_context_setting(ctx)
         try:
-            inputs, targets = self.buffer.sample(requested)
+            inputs, targets = self.buffer.sample(requested_value)
         except ValueError:
             if self.fallback is None:
                 raise
-            inputs, targets = self.fallback(requested, device, ctx)
+            inputs, targets = self.fallback(requested_value, device_value, ctx_value)
         if self.augmenter is not None:
             inputs, targets = self.augmenter(inputs, targets)
         return inputs, targets
@@ -249,6 +291,16 @@ class LossStdTrigger:
         cfg: Optional[LossStdConfig] = None,
         normalization_metrics: Optional[NormalizationMetricsCollector] = None,
     ) -> None:
+        _callable_setting(provider, "provider")
+        if cfg is not None and not isinstance(cfg, LossStdConfig):
+            raise ValueError("cfg must be a LossStdConfig or None")
+        if normalization_metrics is not None and not isinstance(
+            normalization_metrics,
+            NormalizationMetricsCollector,
+        ):
+            raise ValueError(
+                "normalization_metrics must be a NormalizationMetricsCollector or None"
+            )
         self.provider = provider
         self.cfg = cfg or LossStdConfig()
         self.spent: int = 0  # approximate budget spent (injected samples)
@@ -263,8 +315,10 @@ class LossStdTrigger:
 
     def observe(self, ctx: Dict[str, Any]) -> None:
         provider = self.provider
-        if hasattr(provider, "observe"):
-            provider.observe(ctx)
+        observe = getattr(provider, "observe", None)
+        if observe is not None:
+            _callable_setting(observe, "provider.observe")
+            observe(_trigger_context_setting(ctx))
 
     def _drop_rounding_noise(self, value: float, *, context: str = "budget_buffer") -> float:
         """Elide microscopic float residue that should count as zero.
@@ -288,24 +342,36 @@ class LossStdTrigger:
         self._budget_buffer = 0.0
 
     def __call__(self, ctx: Dict[str, Any]) -> Optional[TriggerResult]:
-        loss_tensor = ctx["loss_vec"]
+        ctx_value = _trigger_context_setting(ctx)
+        if "loss_vec" not in ctx_value:
+            raise ValueError("ctx must include loss_vec")
+        if "device" not in ctx_value:
+            raise ValueError("ctx must include device")
+
+        loss_tensor = ctx_value["loss_vec"]
         if not isinstance(loss_tensor, torch.Tensor):
             raise TypeError("Loss vector in trigger context must be a torch.Tensor.")
-        loss_vec = loss_tensor.detach()
+        loss_vec = _finite_loss_vector_setting(loss_tensor.detach())
         if loss_vec.numel() == 0:
             return None
 
-        device = ctx["device"]
-        raw_step = ctx.get("step")
+        device = _device_setting(ctx_value["device"])
+        raw_step = ctx_value.get("step")
         step = _non_negative_int_setting(raw_step, "step") if raw_step is not None else 0
         has_step = raw_step is not None
+        spent = self.spent
+        total = self.total
+        budget_buffer = self._budget_buffer
+        last_pulse_step = self._last_pulse_step
         if has_step:
             if self._last_step is not None and step < self._last_step:
-                self._reset_budget_counters()
-            self._last_step = step
+                spent = 0
+                total = 0
+                last_pulse_step = None
+                budget_buffer = 0.0
 
         batch = loss_vec.numel()
-        self.total += batch
+        next_total = total + batch
 
         coefvar = loss_vec.std(unbiased=False) / (
             loss_vec.mean().abs() + COEFVAR_STABILIZER
@@ -313,56 +379,78 @@ class LossStdTrigger:
         pulse_due = (
             self.cfg.pulse_every > 0 and step > 0 and step % self.cfg.pulse_every == 0
         )
-        force_pulse = pulse_due and step != self._last_pulse_step
+        force_pulse = pulse_due and step != last_pulse_step
         need = coefvar.item() <= self.cfg.std_threshold or force_pulse
 
-        budget_ok = self.spent <= self.cfg.budget_frac * max(1, self.total)
+        def commit_state(
+            *,
+            spent_value: int = spent,
+            total_value: int = next_total,
+            budget_buffer_value: float = budget_buffer,
+            pulse_step_value: Optional[int] = last_pulse_step,
+        ) -> None:
+            self.spent = spent_value
+            self.total = total_value
+            self._budget_buffer = budget_buffer_value
+            self._last_pulse_step = pulse_step_value
+            if has_step:
+                self._last_step = step
+
+        budget_ok = spent <= self.cfg.budget_frac * max(1, next_total)
         if not (need and budget_ok):
             if force_pulse and has_step:
-                self._last_pulse_step = step
+                last_pulse_step = step
+            commit_state(pulse_step_value=last_pulse_step)
             return None
 
         requested = min(int(batch * self.cfg.inject_ratio), self.cfg.max_injected_per_step)
         if requested <= 0:
             if force_pulse and has_step:
-                self._last_pulse_step = step
+                last_pulse_step = step
+            commit_state(pulse_step_value=last_pulse_step)
             return None
 
-        budget_limit = self.cfg.budget_frac * max(1, self.total)
-        remaining_budget = budget_limit - self.spent
-        available_budget = max(0.0, remaining_budget + self._budget_buffer)
+        budget_limit = self.cfg.budget_frac * max(1, next_total)
+        remaining_budget = budget_limit - spent
+        available_budget = max(0.0, remaining_budget + budget_buffer)
         if available_budget <= 0.0:
-            self._budget_buffer = 0.0
             if force_pulse and has_step:
-                self._last_pulse_step = step
+                last_pulse_step = step
+            commit_state(budget_buffer_value=0.0, pulse_step_value=last_pulse_step)
             return None
 
         allowed_whole = int(available_budget)
-        fractional_credit = self._drop_rounding_noise(
-            max(0.0, available_budget - allowed_whole), context="fractional_credit"
-        )
         if allowed_whole <= 0:
-            self._budget_buffer = fractional_credit
+            fractional_credit = self._drop_rounding_noise(
+                max(0.0, available_budget - allowed_whole), context="fractional_credit"
+            )
             if force_pulse and has_step:
-                self._last_pulse_step = step
+                last_pulse_step = step
+            commit_state(
+                budget_buffer_value=fractional_credit,
+                pulse_step_value=last_pulse_step,
+            )
             return None
         requested = min(requested, allowed_whole)
         if requested <= 0:
-            self._budget_buffer = fractional_credit
             if force_pulse and has_step:
-                self._last_pulse_step = step
+                last_pulse_step = step
+            commit_state(pulse_step_value=last_pulse_step)
             return None
 
-        extra_x, extra_y = self.provider(requested, device, ctx)
-        self.spent += requested
+        extra_x, extra_y = self.provider(requested, device, ctx_value)
         leftover_available = max(0.0, available_budget - requested)
         remaining_budget_after = max(0.0, remaining_budget - requested)
         carryover_credit = self._drop_rounding_noise(
             max(0.0, leftover_available - remaining_budget_after), context="carryover_credit"
         )
-        self._budget_buffer = carryover_credit
         if force_pulse:
-            self._last_pulse_step = step
+            last_pulse_step = step
+        commit_state(
+            spent_value=spent + requested,
+            budget_buffer_value=carryover_credit,
+            pulse_step_value=last_pulse_step,
+        )
 
         # weights: original ones at 1.0, injected at alpha
         weights = torch.ones(batch + requested, device=loss_vec.device)

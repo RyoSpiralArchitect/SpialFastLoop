@@ -66,6 +66,31 @@ def test_hard_sample_buffer_rejects_invalid_top_k(top_k: object) -> None:
         buffer.add_batch(inputs, targets, losses, top_k=top_k)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize(
+    "loss_vec, error_type, match",
+    [
+        (None, TypeError, "loss_vec"),
+        ([1.0, 2.0, 3.0], TypeError, "loss_vec"),
+        (torch.tensor([1, 2, 3]), ValueError, "floating-point"),
+        (torch.tensor([True, False, True]), ValueError, "floating-point"),
+        (torch.tensor([1.0, float("nan"), 3.0]), ValueError, "finite"),
+        (torch.tensor([1.0, float("inf"), 3.0]), ValueError, "finite"),
+    ],
+)
+def test_hard_sample_buffer_rejects_invalid_loss_vectors(
+    loss_vec: object,
+    error_type: type[Exception],
+    match: str,
+) -> None:
+    buffer = HardSampleBuffer(max_samples=8)
+    inputs = torch.arange(6, dtype=torch.float32).reshape(3, 2)
+    targets = torch.arange(3)
+
+    with pytest.raises(error_type, match=match):
+        buffer.add_batch(inputs, targets, loss_vec)  # type: ignore[arg-type]
+    assert len(buffer) == 0
+
+
 @pytest.mark.parametrize("num_samples", [0, -1, 1.5, "2", True])
 def test_hard_sample_buffer_rejects_invalid_sample_request(num_samples: object) -> None:
     buffer = HardSampleBuffer(max_samples=8)
@@ -85,6 +110,107 @@ def test_hard_sample_provider_rejects_invalid_select_top_k(select_top_k: object)
             HardSampleBuffer(),
             select_top_k=select_top_k,  # type: ignore[arg-type]
         )
+
+
+@pytest.mark.parametrize("buffer", [None, True, object()])
+def test_hard_sample_provider_rejects_invalid_buffers(buffer: object) -> None:
+    with pytest.raises(ValueError, match="buffer"):
+        HardSampleProvider(buffer)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "kwargs, field",
+    [
+        ({"augmenter": True}, "augmenter"),
+        ({"augmenter": object()}, "augmenter"),
+        ({"fallback": True}, "fallback"),
+        ({"fallback": object()}, "fallback"),
+    ],
+)
+def test_hard_sample_provider_rejects_invalid_callables(
+    kwargs: Dict[str, object],
+    field: str,
+) -> None:
+    with pytest.raises(ValueError, match=field):
+        HardSampleProvider(HardSampleBuffer(), **kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("requested", [0, -1, 1.5, "2", True])
+def test_hard_sample_provider_rejects_invalid_direct_requests(requested: object) -> None:
+    calls: list[int] = []
+
+    def fallback(k: int, device: str, ctx: Dict[str, object]) -> Tuple[torch.Tensor, torch.Tensor]:
+        calls.append(k)
+        return torch.zeros(k, 2, device=device), torch.zeros(k, device=device)
+
+    provider = HardSampleProvider(HardSampleBuffer(), fallback=fallback)
+
+    with pytest.raises(ValueError, match="requested"):
+        provider(requested, "cpu", {})  # type: ignore[arg-type]
+    assert calls == []
+
+
+@pytest.mark.parametrize("device", [None, True, 1, "", "   ", object()])
+def test_hard_sample_provider_rejects_invalid_direct_devices(device: object) -> None:
+    provider = HardSampleProvider(HardSampleBuffer(), fallback=_make_provider())
+
+    with pytest.raises(ValueError, match="device"):
+        provider(1, device, {})  # type: ignore[arg-type]
+
+
+def test_hard_sample_provider_rejects_invalid_direct_contexts() -> None:
+    provider = HardSampleProvider(HardSampleBuffer(), fallback=_make_provider())
+
+    with pytest.raises(ValueError, match="ctx"):
+        provider(1, "cpu", object())  # type: ignore[arg-type]
+
+
+def test_hard_sample_provider_observe_requires_context_for_tensor_losses() -> None:
+    provider = HardSampleProvider(HardSampleBuffer())
+
+    with pytest.raises(ValueError, match="ctx"):
+        provider.observe(object())  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="inputs and targets"):
+        provider.observe({"loss_vec": torch.ones(2)})
+
+
+def test_hard_sample_provider_observe_rejects_non_finite_losses_without_mutating() -> None:
+    buffer = HardSampleBuffer(max_samples=8)
+    provider = HardSampleProvider(buffer)
+    ctx = {
+        "inputs": torch.zeros(2, 2),
+        "targets": torch.zeros(2),
+        "loss_vec": torch.tensor([1.0, float("nan")]),
+    }
+
+    with pytest.raises(ValueError, match="loss_vec"):
+        provider.observe(ctx)
+    assert len(buffer) == 0
+
+
+@pytest.mark.parametrize(
+    "loss_vec, match",
+    [
+        (torch.tensor([1, 2]), "floating-point"),
+        (torch.tensor([True, False]), "floating-point"),
+        (torch.tensor([1.0, float("inf")]), "finite"),
+    ],
+)
+def test_hard_sample_provider_observe_rejects_invalid_loss_tensor_values(
+    loss_vec: torch.Tensor,
+    match: str,
+) -> None:
+    buffer = HardSampleBuffer(max_samples=8)
+    provider = HardSampleProvider(buffer)
+    ctx = {
+        "inputs": torch.zeros(2, 2),
+        "targets": torch.zeros(2),
+        "loss_vec": loss_vec,
+    }
+
+    with pytest.raises(ValueError, match=match):
+        provider.observe(ctx)
+    assert len(buffer) == 0
 
 
 @pytest.mark.parametrize(
@@ -130,6 +256,43 @@ def test_loss_std_config_allows_zero_disable_values() -> None:
     assert cfg.max_injected_per_step == 0
 
 
+@pytest.mark.parametrize("provider", [None, True, object()])
+def test_trigger_rejects_invalid_providers(provider: object) -> None:
+    with pytest.raises(ValueError, match="provider"):
+        LossStdTrigger(provider=provider)  # type: ignore[arg-type]
+
+
+def test_trigger_rejects_invalid_config_objects() -> None:
+    with pytest.raises(ValueError, match="cfg"):
+        LossStdTrigger(provider=_make_provider(), cfg=object())  # type: ignore[arg-type]
+
+
+def test_trigger_rejects_invalid_normalization_collectors() -> None:
+    with pytest.raises(ValueError, match="normalization_metrics"):
+        LossStdTrigger(
+            provider=_make_provider(),
+            normalization_metrics=object(),  # type: ignore[arg-type]
+        )
+
+
+def test_trigger_observe_rejects_non_callable_provider_observe() -> None:
+    class ProviderWithBadObserve:
+        observe = object()
+
+        def __call__(
+            self,
+            k: int,
+            device: str,
+            ctx: Dict[str, object],
+        ) -> Tuple[torch.Tensor, torch.Tensor]:
+            return torch.zeros(k, 2, device=device), torch.zeros(k, device=device)
+
+    trigger = LossStdTrigger(provider=ProviderWithBadObserve())
+
+    with pytest.raises(ValueError, match="provider.observe"):
+        trigger.observe({})
+
+
 @pytest.mark.parametrize("step", [-1, 1.5, "2", True])
 def test_trigger_rejects_invalid_step_values(step: object) -> None:
     trigger = LossStdTrigger(provider=_make_provider())
@@ -137,6 +300,82 @@ def test_trigger_rejects_invalid_step_values(step: object) -> None:
 
     with pytest.raises(ValueError, match="step"):
         trigger(ctx)
+
+
+def test_trigger_rejects_invalid_context_shapes() -> None:
+    trigger = LossStdTrigger(provider=_make_provider())
+
+    with pytest.raises(ValueError, match="ctx"):
+        trigger(object())  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="loss_vec"):
+        trigger({"device": "cpu"})
+    with pytest.raises(ValueError, match="device"):
+        trigger({"loss_vec": torch.ones(2)})
+    with pytest.raises(ValueError, match="device"):
+        trigger({"loss_vec": torch.ones(2), "device": ""})
+
+
+def test_trigger_rejects_non_finite_losses_without_mutating_state() -> None:
+    provider = _make_provider()
+    trigger = LossStdTrigger(provider=provider)
+    ctx = {"loss_vec": torch.tensor([1.0, float("inf")]), "device": "cpu", "step": 1}
+
+    with pytest.raises(ValueError, match="loss_vec"):
+        trigger(ctx)
+
+    assert provider.calls["requested"] == []
+    assert trigger.total == 0
+    assert trigger.spent == 0
+    assert trigger._last_step is None
+    assert trigger._budget_buffer == 0.0
+
+
+@pytest.mark.parametrize(
+    "loss_vec, match",
+    [
+        (torch.tensor([1, 2]), "floating-point"),
+        (torch.tensor([True, False]), "floating-point"),
+        (torch.tensor([1.0, float("nan")]), "finite"),
+    ],
+)
+def test_trigger_rejects_invalid_loss_tensor_values_without_mutating_state(
+    loss_vec: torch.Tensor,
+    match: str,
+) -> None:
+    provider = _make_provider()
+    trigger = LossStdTrigger(provider=provider)
+    ctx = {"loss_vec": loss_vec, "device": "cpu", "step": 1}
+
+    with pytest.raises(ValueError, match=match):
+        trigger(ctx)
+
+    assert provider.calls["requested"] == []
+    assert trigger.total == 0
+    assert trigger.spent == 0
+    assert trigger._last_step is None
+
+
+def test_trigger_provider_failures_do_not_mutate_budget_state() -> None:
+    def provider(k: int, device: str, ctx: Dict[str, object]) -> Tuple[torch.Tensor, torch.Tensor]:
+        raise RuntimeError("provider failed")
+
+    cfg = LossStdConfig(std_threshold=10.0, inject_ratio=0.5, budget_frac=1.0)
+    trigger = LossStdTrigger(provider=provider, cfg=cfg)
+    trigger.total = 30
+    trigger.spent = 3
+    trigger._last_step = 7
+    trigger._last_pulse_step = 6
+    trigger._budget_buffer = 0.25
+    ctx = {"loss_vec": torch.ones(4), "device": "cpu", "step": 1}
+
+    with pytest.raises(RuntimeError, match="provider failed"):
+        trigger(ctx)
+
+    assert trigger.total == 30
+    assert trigger.spent == 3
+    assert trigger._last_step == 7
+    assert trigger._last_pulse_step == 6
+    assert trigger._budget_buffer == pytest.approx(0.25)
 
 
 @pytest.mark.parametrize(
