@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from os import PathLike
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +27,8 @@ from scripts.bench_parallel_transactions import (
     _format_metric_value,
     _has_positive_display_value,
     _list_value,
+    _optional_path_setting,
+    _path_setting,
     _profile_child_rows,
     _profile_row_name,
     device_arg,
@@ -54,18 +55,6 @@ def _dataset_arg(raw: object) -> str:
     if not isinstance(raw, str) or raw not in DATASET_CHOICES:
         raise ValueError("dataset must be one of fake, cifar10")
     return raw
-
-
-def _path_setting(raw: object, name: str) -> object:
-    if isinstance(raw, (str, PathLike)):
-        return raw
-    raise ValueError(f"{name} must be a path string")
-
-
-def _optional_path_setting(raw: object, name: str) -> object:
-    if raw is None:
-        return raw
-    return _path_setting(raw, name)
 
 
 def _build_dataset(args: argparse.Namespace):

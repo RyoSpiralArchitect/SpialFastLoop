@@ -9,6 +9,7 @@ import sys
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from os import PathLike
 from pathlib import Path
 from typing import Any, Optional
 
@@ -317,6 +318,18 @@ def _profile_model_include_setting(raw: object) -> object:
     return raw
 
 
+def _path_setting(raw: object, name: str) -> object:
+    if isinstance(raw, (str, PathLike)):
+        return raw
+    raise ValueError(f"{name} must be a path string")
+
+
+def _optional_path_setting(raw: object, name: str) -> object:
+    if raw is None:
+        return raw
+    return _path_setting(raw, name)
+
+
 def device_arg(raw: object) -> str:
     if not isinstance(raw, str):
         raise argparse.ArgumentTypeError("must be one of auto, cpu, cuda, mps")
@@ -413,6 +426,9 @@ def validate_benchmark_args(args: argparse.Namespace) -> None:
             _bool_setting(getattr(args, field), field)
     if hasattr(args, "profile_model_include"):
         _profile_model_include_setting(args.profile_model_include)
+    for field in ("json_out", "summary_out"):
+        if hasattr(args, field):
+            _optional_path_setting(getattr(args, field), field)
     if hasattr(args, "dataset_mode") and args.dataset_mode not in {"generated", "materialized"}:
         raise ValueError("dataset_mode must be one of generated, materialized")
     if hasattr(args, "device"):

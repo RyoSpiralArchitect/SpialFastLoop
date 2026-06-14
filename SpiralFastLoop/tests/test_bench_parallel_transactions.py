@@ -591,6 +591,9 @@ def test_validate_benchmark_args_rejects_invalid_direct_values(
         ("profile_model", 1, "profile_model"),
         ("profile_model_include", 1, "profile_model_include"),
         ("profile_model_include", ["0", 2], "profile_model_include"),
+        ("json_out", True, "json_out"),
+        ("json_out", 1, "json_out"),
+        ("summary_out", True, "summary_out"),
         ("dataset_mode", "cached", "dataset_mode"),
     ],
 )
@@ -616,6 +619,18 @@ def test_validate_benchmark_args_accepts_profile_model_include_forms(
             steps=1,
             device="cpu",
             profile_model_include=profile_model_include,
+        ),
+    )
+
+
+def test_validate_benchmark_args_accepts_output_pathlike_values(tmp_path: Path) -> None:
+    validate_benchmark_args(
+        Namespace(
+            warmup_steps=0,
+            steps=1,
+            device="cpu",
+            json_out=tmp_path / "rows.json",
+            summary_out=str(tmp_path / "summary.json"),
         ),
     )
 
