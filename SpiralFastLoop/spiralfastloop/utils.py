@@ -109,6 +109,12 @@ def _device_setting(device: Any, name: str = "device") -> str:
     return device.strip()
 
 
+def _compile_mode_setting(mode: Any) -> str:
+    if not isinstance(mode, str) or not mode.strip():
+        raise ValueError("mode must be a non-empty string")
+    return mode.strip()
+
+
 def _device_type(device: Any) -> str:
     return _device_setting(device).split(":", 1)[0]
 
@@ -1133,11 +1139,12 @@ def _format_compile_exception(exc: Exception) -> str:
 
 def safe_compile_with_diagnostics(model: nn.Module, mode: str = "reduce-overhead") -> CompileResult:
     """Compile model if possible and keep a compact fallback reason."""
+    mode_value = _compile_mode_setting(mode)
     compile_fn = getattr(torch, "compile", None)
     if compile_fn is None:
         return CompileResult(model=model, compiled=False, fallback_reason="torch_compile_unavailable")
     try:
-        m = compile_fn(model, mode=mode)
+        m = compile_fn(model, mode=mode_value)
         if isinstance(m, nn.Module):
             return CompileResult(model=m, compiled=True)
         return CompileResult(

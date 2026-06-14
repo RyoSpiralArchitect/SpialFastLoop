@@ -380,6 +380,43 @@ def test_safe_compile_with_diagnostics_reports_non_module_result(monkeypatch: py
     assert result.fallback_reason == "non_module_result:object"
 
 
+@pytest.mark.parametrize("mode", [None, True, 1, "", "   ", b"mode", object()])
+def test_safe_compile_rejects_invalid_compile_modes(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: object,
+) -> None:
+    model = torch.nn.Linear(1, 1)
+
+    def fake_compile(_: torch.nn.Module, mode: str) -> object:
+        raise AssertionError("torch.compile should not be called for invalid mode")
+
+    monkeypatch.setattr(torch, "compile", fake_compile, raising=False)
+
+    with pytest.raises(ValueError, match="mode"):
+        safe_compile(model, mode=mode)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="mode"):
+        safe_compile_with_diagnostics(model, mode=mode)  # type: ignore[arg-type]
+
+
+def test_safe_compile_with_diagnostics_passes_normalized_compile_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = torch.nn.Linear(1, 1)
+    seen_modes: list[str] = []
+
+    def fake_compile(module: torch.nn.Module, mode: str) -> torch.nn.Module:
+        seen_modes.append(mode)
+        return module
+
+    monkeypatch.setattr(torch, "compile", fake_compile, raising=False)
+
+    result = safe_compile_with_diagnostics(model, mode=" reduce-overhead ")
+
+    assert result.compiled is True
+    assert result.model is model
+    assert seen_modes == ["reduce-overhead"]
+
+
 @pytest.mark.parametrize("use_amp", ["false", "auto ", 1, object()])
 def test_get_amp_policy_rejects_invalid_amp_settings(use_amp: object) -> None:
     with pytest.raises(ValueError, match="use_amp"):
