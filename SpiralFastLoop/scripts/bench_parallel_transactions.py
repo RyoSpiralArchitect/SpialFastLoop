@@ -253,28 +253,35 @@ def summarize_results(rows: list[dict]) -> dict:
     return summary
 
 
-def _int_arg(raw: str) -> int:
+def _int_arg(raw: object) -> int:
+    if isinstance(raw, str):
+        try:
+            return int(raw)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError("must be an integer") from exc
     try:
-        return int(raw)
-    except (TypeError, ValueError) as exc:
+        return _int_setting(raw, "value")
+    except ValueError as exc:
         raise argparse.ArgumentTypeError("must be an integer") from exc
 
 
-def positive_int_arg(raw: str) -> int:
+def positive_int_arg(raw: object) -> int:
     value = _int_arg(raw)
     if value <= 0:
         raise argparse.ArgumentTypeError("must be a positive integer")
     return value
 
 
-def non_negative_int_arg(raw: str) -> int:
+def non_negative_int_arg(raw: object) -> int:
     value = _int_arg(raw)
     if value < 0:
         raise argparse.ArgumentTypeError("must be a non-negative integer")
     return value
 
 
-def positive_float_arg(raw: str) -> float:
+def positive_float_arg(raw: object) -> float:
+    if isinstance(raw, bool):
+        raise argparse.ArgumentTypeError("must be a number")
     try:
         value = float(raw)
     except (TypeError, ValueError) as exc:

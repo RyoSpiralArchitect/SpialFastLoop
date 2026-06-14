@@ -6,6 +6,7 @@ import json
 import sys
 from argparse import Namespace
 from pathlib import Path
+from typing import Callable
 
 import pytest
 import torch
@@ -451,6 +452,31 @@ def test_benchmark_arg_types_reject_empty_or_invalid_runs() -> None:
         positive_int_arg("1.5")
     with pytest.raises(argparse.ArgumentTypeError):
         positive_float_arg("nan")
+
+
+def test_benchmark_arg_types_accept_strict_direct_values() -> None:
+    assert positive_int_arg(1) == 1
+    assert non_negative_int_arg(0) == 0
+    assert positive_float_arg(0.25) == pytest.approx(0.25)
+
+
+@pytest.mark.parametrize(
+    ("parser", "raw"),
+    [
+        (positive_int_arg, 1.0),
+        (positive_int_arg, 1.5),
+        (positive_int_arg, True),
+        (non_negative_int_arg, 1.0),
+        (non_negative_int_arg, True),
+        (positive_float_arg, True),
+    ],
+)
+def test_benchmark_arg_types_reject_ambiguous_direct_values(
+    parser: Callable[[object], object],
+    raw: object,
+) -> None:
+    with pytest.raises(argparse.ArgumentTypeError):
+        parser(raw)
 
 
 def test_validate_benchmark_args_rejects_warmup_larger_than_steps() -> None:
