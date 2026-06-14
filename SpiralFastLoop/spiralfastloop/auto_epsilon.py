@@ -6,16 +6,16 @@ from __future__ import annotations
 
 import math
 import random
+from collections.abc import Mapping
 from collections import deque
 from dataclasses import dataclass
 from statistics import mean, pstdev
 from typing import Any, Deque, List, Optional, Sequence, Tuple
 
 from .utils import (
-    _finite_float_setting,
     _int_setting,
-    _non_negative_finite_float_setting,
     _positive_int_setting,
+    _strict_finite_float_setting,
 )
 
 
@@ -173,9 +173,16 @@ def _expected_improvement(
 
 
 def _positive_finite_float_setting(value: Any, name: str) -> float:
-    normalized = _finite_float_setting(value, name)
+    normalized = _strict_finite_float_setting(value, name)
     if normalized <= 0.0:
         raise ValueError(f"{name} must be a positive finite number")
+    return normalized
+
+
+def _non_negative_finite_float_setting(value: Any, name: str) -> float:
+    normalized = _strict_finite_float_setting(value, name)
+    if normalized < 0.0:
+        raise ValueError(f"{name} must be a non-negative finite number")
     return normalized
 
 
@@ -187,10 +194,15 @@ def _unit_interval_setting(value: Any, name: str) -> float:
 
 
 def _epsilon_bounds_setting(bounds: Any) -> Tuple[float, float]:
+    if isinstance(bounds, (str, bytes, bytearray, Mapping)):
+        raise ValueError("epsilon bounds must contain exactly two values")
     try:
-        lower_raw, upper_raw = bounds
-    except (TypeError, ValueError) as exc:
+        values = tuple(bounds)
+    except TypeError as exc:
         raise ValueError("epsilon bounds must contain exactly two values") from exc
+    if len(values) != 2:
+        raise ValueError("epsilon bounds must contain exactly two values")
+    lower_raw, upper_raw = values
     lower = _positive_finite_float_setting(lower_raw, "bounds[0]")
     upper = _positive_finite_float_setting(upper_raw, "bounds[1]")
     if lower >= upper:
@@ -205,13 +217,23 @@ def _candidate_points_setting(value: Any) -> int:
     return normalized
 
 
+def _residual_values_setting(residuals: Any) -> List[float]:
+    if isinstance(residuals, (str, bytes, bytearray, Mapping)):
+        raise ValueError("residuals must be an iterable of finite numbers")
+    try:
+        iterator = iter(residuals)
+    except TypeError as exc:
+        raise ValueError("residuals must be an iterable of finite numbers") from exc
+    return [abs(_strict_finite_float_setting(residual, "residual")) for residual in iterator]
+
+
 def _simulate_objective(
     residuals: Sequence[float],
     epsilon: float,
     weight_zero: float,
     weight_error: float,
 ) -> SimulationResult:
-    values = [abs(_finite_float_setting(r, "residual")) for r in residuals]
+    values = _residual_values_setting(residuals)
     total = len(values)
     if total == 0:
         return SimulationResult(epsilon, 0, 0, 0.0, 0.0, 0.0)
@@ -220,12 +242,17 @@ def _simulate_objective(
     zero_count = sum(1 for flag in zero_mask if flag)
     zero_ratio = zero_count / total
 
-    adjusted_sum = math.fsum(
-        0.0 if mask else value for mask, value in zip(zero_mask, values)
-    )
+    try:
+        adjusted_sum = math.fsum(
+            0.0 if mask else value for mask, value in zip(zero_mask, values)
+        )
+    except OverflowError as exc:
+        raise ValueError("residuals produce a non-finite objective") from exc
     avg_abs_error = adjusted_sum / total
 
     objective = weight_zero * zero_ratio + weight_error * avg_abs_error
+    if not math.isfinite(avg_abs_error) or not math.isfinite(objective):
+        raise ValueError("residuals produce a non-finite objective")
     return SimulationResult(
         epsilon=epsilon,
         zero_count=zero_count,
@@ -305,15 +332,37 @@ class AutoEpsilonOptimizer:
         return self._epsilon
 
     def observe(self, residual: float) -> float:
-        self._residuals.append(_finite_float_setting(residual, "residual"))
-        if len(self._residuals) >= self.min_history:
-            self._pending_steps += 1
-            if self._pending_steps >= self.optimisation_interval:
-                self._pending_steps = 0
-                self._run_optimisation()
+        residual_value = _strict_finite_float_setting(residual, "residual")
+        residuals_snapshot: Deque[float] = deque(
+            self._residuals,
+            maxlen=self._residuals.maxlen,
+        )
+        epsilon_history_snapshot: Deque[float] = deque(
+            self._epsilon_history,
+            maxlen=self._epsilon_history.maxlen,
+        )
+        evaluations_snapshot = list(self._evaluations)
+        pending_steps_snapshot = self._pending_steps
+        epsilon_snapshot = self._epsilon
+        rng_snapshot = self._rng.getstate()
+        try:
+            self._residuals.append(residual_value)
+            if len(self._residuals) >= self.min_history:
+                self._pending_steps += 1
+                if self._pending_steps >= self.optimisation_interval:
+                    self._pending_steps = 0
+                    self._run_optimisation()
 
-        self._epsilon_history.append(self._epsilon)
-        return self._epsilon
+            self._epsilon_history.append(self._epsilon)
+            return self._epsilon
+        except Exception:
+            self._residuals = residuals_snapshot
+            self._epsilon_history = epsilon_history_snapshot
+            self._evaluations = evaluations_snapshot
+            self._pending_steps = pending_steps_snapshot
+            self._epsilon = epsilon_snapshot
+            self._rng.setstate(rng_snapshot)
+            raise
 
     def evaluate(
         self,
@@ -353,6 +402,7 @@ class AutoEpsilonOptimizer:
     # Internal helpers
     # ------------------------------------------------------------------
     def _clip(self, value: float) -> float:
+        value = _strict_finite_float_setting(value, "epsilon")
         return float(min(max(value, self.bounds[0]), self.bounds[1]))
 
     def _register(self, epsilon: float) -> None:
