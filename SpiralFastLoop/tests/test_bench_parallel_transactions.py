@@ -664,16 +664,15 @@ def test_display_formatters_hide_malformed_values() -> None:
     assert _format_metric_value(1.234, precision=1, suffix="/s") == "1.2/s"
     assert _format_metric_value(0.00125, precision=2, scale=1e3, suffix="ms") == "1.25ms"
 
-    for raw in (None, "fast", True, float("nan"), float("inf")):
+    for raw in (None, "fast", "1.0", True, float("nan"), float("inf")):
         assert _format_metric_value(raw, precision=1, suffix="/s") == "n/a"
 
-    assert _format_count("2") == "2"
     assert _format_count(0) == "0"
-    for raw in (True, 1.5, -1, "many"):
+    for raw in (True, 1.5, -1, "many", "2"):
         assert _format_count(raw) == "n/a"
 
-    assert _has_positive_display_value("2")
-    for raw in (0, None, True, float("nan"), float("inf")):
+    assert _has_positive_display_value(2)
+    for raw in (0, None, True, "2", float("nan"), float("inf")):
         assert not _has_positive_display_value(raw)
 
 

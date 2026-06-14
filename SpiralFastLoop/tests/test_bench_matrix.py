@@ -272,9 +272,9 @@ def test_format_run_row_marks_malformed_metrics_as_na() -> None:
         0,
         0,
         {
-            "reported_samples_per_sec": float("nan"),
+            "reported_samples_per_sec": "123.4",
             "samples_per_sec": True,
-            "end_to_end_wall_time_s": None,
+            "end_to_end_wall_time_s": "1.0",
             "wall_time_s": "slow",
         },
     )

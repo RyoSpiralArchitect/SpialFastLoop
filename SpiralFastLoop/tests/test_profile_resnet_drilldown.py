@@ -211,7 +211,7 @@ def test_print_summary_formats_malformed_metrics_as_na(
     output = capsys.readouterr().out
     assert "samples_per_sec=n/a total=n/a" in output
     assert "cold_start_steps=n/a cold_start_time_s=n/a cold_start_samples_per_sec=n/a" in output
-    assert "steady_steps=2 steady_samples_per_sec=n/a steady_p99_ms=n/a" in output
+    assert "steady_steps=" not in output
     assert "batch_latency_p99_ms=n/a batch_latency_std_ms=n/a" in output
     assert "steps=n/a samples=n/a" in output
     assert "forward: n/a avg=n/a" in output

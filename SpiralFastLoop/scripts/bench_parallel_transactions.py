@@ -439,7 +439,7 @@ def device_arg(raw: object) -> str:
 
 
 def _finite_display_value(raw: object) -> Optional[float]:
-    if isinstance(raw, bool):
+    if isinstance(raw, (bool, str)):
         return None
     try:
         value = float(raw)
@@ -464,6 +464,8 @@ def _format_metric_value(
 
 
 def _format_count(raw: object) -> str:
+    if isinstance(raw, (bool, str)):
+        return "n/a"
     try:
         return str(non_negative_int_arg(raw))
     except argparse.ArgumentTypeError:
