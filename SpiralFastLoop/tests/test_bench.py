@@ -162,6 +162,42 @@ def test_plain_loop_rejects_invalid_direct_grad_accum(grad_accum: object) -> Non
         )
 
 
+@pytest.mark.parametrize("warmup_steps", [-1, 1.5, True, "1"])
+def test_plain_loop_rejects_invalid_direct_warmup_steps(warmup_steps: object) -> None:
+    dataset = TensorDataset(torch.randn(2, 2), torch.tensor([0, 1]))
+    loader = DataLoader(dataset, batch_size=1)
+    model = nn.Linear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+    with pytest.raises(ValueError, match="warmup_steps"):
+        bench.plain_loop(
+            loader,
+            model,
+            optimizer,
+            nn.CrossEntropyLoss(),
+            torch.device("cpu"),
+            warmup_steps=warmup_steps,  # type: ignore[arg-type]
+        )
+
+
+def test_plain_loop_rejects_direct_warmup_larger_than_steps() -> None:
+    dataset = TensorDataset(torch.randn(4, 2), torch.tensor([0, 1, 0, 1]))
+    loader = DataLoader(dataset, batch_size=1)
+    model = nn.Linear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+    with pytest.raises(ValueError, match="warmup_steps"):
+        bench.plain_loop(
+            loader,
+            model,
+            optimizer,
+            nn.CrossEntropyLoss(),
+            torch.device("cpu"),
+            steps=2,
+            warmup_steps=3,
+        )
+
+
 def test_plain_loop_respects_step_limit_and_reports_counts() -> None:
     dataset = TensorDataset(torch.randn(4, 2), torch.tensor([0, 1, 0, 1]))
     loader = DataLoader(dataset, batch_size=1, shuffle=False)
@@ -181,9 +217,17 @@ def test_plain_loop_respects_step_limit_and_reports_counts() -> None:
     assert metrics["samples"] == 2
     assert metrics["optimizer_steps"] == 2
     assert metrics["grad_accum"] == 1
+    assert metrics["warmup_steps"] == 0
+    assert metrics["steady_steps"] == 2
+    assert metrics["warmup_samples"] == 0
+    assert metrics["steady_samples"] == 2
+    assert metrics["warmup_optimizer_steps"] == 0
+    assert metrics["steady_optimizer_steps"] == 2
     assert metrics["partial_optimizer_steps"] == 0
     assert metrics["grad_accum_tail_steps"] == 0
     assert metrics["samples_per_sec"] > 0.0
+    assert metrics["steady_samples_per_sec"] > 0.0
+    assert metrics["reported_samples_per_sec"] == metrics["steady_samples_per_sec"]
 
 
 def test_plain_loop_flushes_partial_grad_accumulation() -> None:
@@ -208,6 +252,44 @@ def test_plain_loop_flushes_partial_grad_accumulation() -> None:
     assert metrics["grad_accum"] == 2
     assert metrics["partial_optimizer_steps"] == 1
     assert metrics["grad_accum_tail_steps"] == 1
+
+
+def test_plain_loop_splits_warmup_and_reported_throughput() -> None:
+    dataset = TensorDataset(torch.randn(4, 2), torch.tensor([0, 1, 0, 1]))
+    loader = DataLoader(dataset, batch_size=1, shuffle=False)
+    model = nn.Linear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+    metrics = bench.plain_loop(
+        loader,
+        model,
+        optimizer,
+        nn.CrossEntropyLoss(),
+        torch.device("cpu"),
+        steps=3,
+        grad_accum=2,
+        warmup_steps=1,
+    )
+
+    assert metrics["steps"] == 3
+    assert metrics["samples"] == 3
+    assert metrics["warmup_steps"] == 1
+    assert metrics["steady_steps"] == 2
+    assert metrics["warmup_samples"] == 1
+    assert metrics["steady_samples"] == 2
+    assert metrics["optimizer_steps"] == 2
+    assert metrics["warmup_optimizer_steps"] == 0
+    assert metrics["steady_optimizer_steps"] == 2
+    assert metrics["partial_optimizer_steps"] == 1
+    assert metrics["grad_accum_tail_steps"] == 1
+    assert metrics["warmup_samples_per_sec"] > 0.0
+    assert metrics["steady_samples_per_sec"] > 0.0
+    assert metrics["cold_start_steps"] == metrics["warmup_steps"]
+    assert metrics["cold_start_time_s"] == metrics["warmup_total_time_s"]
+    assert metrics["cold_start_samples_per_sec"] == metrics["warmup_samples_per_sec"]
+    assert metrics["warmup_elapsed_sec"] == metrics["warmup_total_time_s"]
+    assert metrics["steady_elapsed_sec"] == metrics["steady_total_time_s"]
+    assert metrics["reported_samples_per_sec"] == metrics["steady_samples_per_sec"]
 
 
 def test_bench_parse_args_accepts_valid_minimal_run(monkeypatch: pytest.MonkeyPatch) -> None:

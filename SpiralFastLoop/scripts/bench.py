@@ -17,7 +17,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer, recommended_dataloader
 from spiralfastloop.utils import (
+    ThroughputMeter,
     _finite_float_setting,
+    _non_negative_int_setting,
     _optional_positive_int_setting,
     _positive_int_setting,
 )
@@ -110,20 +112,35 @@ def plain_loop(
     epochs: int = 1,
     steps: Optional[int] = None,
     grad_accum: int = 1,
+    warmup_steps: int = 0,
 ) -> dict[str, float]:
     epochs = _positive_int_setting(epochs, "epochs")
     step_limit = _optional_positive_int_setting(steps, "steps")
     grad_accum = _positive_int_setting(grad_accum, "grad_accum")
+    warmup_step_limit = _non_negative_int_setting(warmup_steps, "warmup_steps")
+    if step_limit is not None and warmup_step_limit > step_limit:
+        raise ValueError("warmup_steps must be less than or equal to steps")
     model.to(device).train()
     optimizer.zero_grad(set_to_none=True)
     start = time.perf_counter()
+    meter = ThroughputMeter()
+    warmup_meter = ThroughputMeter()
+    steady_meter = ThroughputMeter()
     step_count = 0
     samples = 0
     loss_acc = 0.0
+    warmup_loss_acc = 0.0
+    steady_loss_acc = 0.0
+    warmup_step_count = 0
+    steady_step_count = 0
+    warmup_samples = 0
+    steady_samples = 0
     pending_accum_steps = 0
     optimizer_steps = 0
     partial_optimizer_steps = 0
     grad_accum_tail_steps = 0
+    warmup_optimizer_steps = 0
+    steady_optimizer_steps = 0
 
     def rescale_accumulated_gradients(factor: float) -> None:
         if factor == 1.0:
@@ -136,6 +153,8 @@ def plain_loop(
         nonlocal optimizer_steps
         nonlocal partial_optimizer_steps
         nonlocal grad_accum_tail_steps
+        nonlocal warmup_optimizer_steps
+        nonlocal steady_optimizer_steps
         if accumulated_steps <= 0:
             return
         if accumulated_steps < grad_accum:
@@ -145,10 +164,18 @@ def plain_loop(
         optimizer.step()
         optimizer.zero_grad(set_to_none=True)
         optimizer_steps += 1
+        if warmup_step_limit > 0 and step_count <= warmup_step_limit:
+            warmup_optimizer_steps += 1
+        else:
+            steady_optimizer_steps += 1
 
     for _ in range(epochs):
-        for inputs, targets in loader:
-            if step_limit is not None and step_count >= step_limit:
+        data_iter = iter(loader)
+        while step_limit is None or step_count < step_limit:
+            batch_started = time.perf_counter()
+            try:
+                inputs, targets = next(data_iter)
+            except StopIteration:
                 break
             inputs = inputs.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True)
@@ -156,30 +183,69 @@ def plain_loop(
             loss = criterion(logits, targets)
             (loss / grad_accum).backward()
             step_count += 1
-            samples += int(inputs.shape[0])
-            loss_acc += float(loss.detach().cpu())
+            batch_size = int(inputs.shape[0])
+            samples += batch_size
+            loss_value = float(loss.detach().cpu())
+            loss_acc += loss_value
             pending_accum_steps += 1
             reached_accum_boundary = pending_accum_steps >= grad_accum
             reached_requested_steps = step_limit is not None and step_count >= step_limit
             if reached_accum_boundary or reached_requested_steps:
                 run_optimizer_step(pending_accum_steps)
                 pending_accum_steps = 0
+            batch_duration_s = max(0.0, time.perf_counter() - batch_started)
+            meter.record(batch_duration_s, batch_size)
+            if warmup_step_limit > 0 and step_count <= warmup_step_limit:
+                warmup_meter.record(batch_duration_s, batch_size)
+                warmup_step_count += 1
+                warmup_samples += batch_size
+                warmup_loss_acc += loss_value
+            else:
+                steady_meter.record(batch_duration_s, batch_size)
+                steady_step_count += 1
+                steady_samples += batch_size
+                steady_loss_acc += loss_value
         if step_limit is not None and step_count >= step_limit:
             break
     if pending_accum_steps > 0:
         run_optimizer_step(pending_accum_steps)
     elapsed = time.perf_counter() - start
-    return {
-        "samples_per_sec": samples / max(1e-9, elapsed),
-        "avg_loss_per_step": loss_acc / max(1, step_count),
-        "elapsed_sec": elapsed,
-        "steps": step_count,
-        "samples": samples,
-        "optimizer_steps": optimizer_steps,
-        "grad_accum": grad_accum,
-        "partial_optimizer_steps": partial_optimizer_steps,
-        "grad_accum_tail_steps": grad_accum_tail_steps,
-    }
+    metrics = dict(meter.summary())
+    warmup_summary = warmup_meter.summary()
+    steady_summary = steady_meter.summary()
+    for key, value in warmup_summary.items():
+        metrics[f"warmup_{key}"] = value
+    for key, value in steady_summary.items():
+        metrics[f"steady_{key}"] = value
+    metrics.update(
+        {
+            "avg_loss_per_step": loss_acc / max(1, step_count),
+            "warmup_avg_loss_per_step": warmup_loss_acc / max(1, warmup_step_count),
+            "steady_avg_loss_per_step": steady_loss_acc / max(1, steady_step_count),
+            "elapsed_sec": elapsed,
+            "steps": step_count,
+            "samples": samples,
+            "warmup_steps": warmup_step_count,
+            "steady_steps": steady_step_count,
+            "warmup_samples": warmup_samples,
+            "steady_samples": steady_samples,
+            "optimizer_steps": optimizer_steps,
+            "grad_accum": grad_accum,
+            "partial_optimizer_steps": partial_optimizer_steps,
+            "grad_accum_tail_steps": grad_accum_tail_steps,
+            "warmup_optimizer_steps": warmup_optimizer_steps,
+            "steady_optimizer_steps": steady_optimizer_steps,
+            "cold_start_steps": warmup_step_count,
+            "cold_start_time_s": warmup_summary["total_time_s"],
+            "cold_start_samples_per_sec": warmup_summary["samples_per_sec"],
+            "warmup_elapsed_sec": warmup_summary["total_time_s"],
+            "steady_elapsed_sec": steady_summary["total_time_s"],
+            "reported_samples_per_sec": (
+                steady_summary["samples_per_sec"] if steady_step_count > 0 else metrics["samples_per_sec"]
+            ),
+        }
+    )
+    return metrics
 
 
 def parse_args() -> argparse.Namespace:
@@ -228,6 +294,7 @@ def main() -> None:
         epochs=1,
         steps=args.steps,
         grad_accum=args.grad_accum,
+        warmup_steps=args.warmup_steps,
     )
 
     loader = recommended_dataloader(
