@@ -66,11 +66,46 @@ def _format_exception_reason(exc: Exception, limit: int = 200) -> str:
     return type(exc).__name__
 
 
+def _finite_profile_value(raw: Any) -> Optional[float]:
+    if isinstance(raw, bool):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+    return value
+
+
+def _set_profile_metric(
+    metrics: Dict[str, Any],
+    name: str,
+    raw: Any,
+    invalid_fields: list[str],
+) -> Optional[float]:
+    value = _finite_profile_value(raw)
+    if value is None:
+        invalid_fields.append(name)
+        return None
+    metrics[name] = value
+    return value
+
+
+def _record_profile_flat_metric_invalids(metrics: Dict[str, Any], invalid_fields: list[str]) -> None:
+    if not invalid_fields:
+        return
+    metrics["profile_flat_metric_invalid_count"] = len(invalid_fields)
+    metrics["profile_flat_metric_invalid_fields"] = invalid_fields
+
+
 def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, Any]) -> None:
     """Expose common phase timers as flat metrics for benchmark tables."""
-    metrics["profile_total_s"] = float(profile.get("profile_total_s", 0.0))
+    invalid_fields: list[str] = []
+    _set_profile_metric(metrics, "profile_total_s", profile.get("profile_total_s", 0.0), invalid_fields)
     phases = profile.get("phases", {})
     if not isinstance(phases, Mapping):
+        _record_profile_flat_metric_invalids(metrics, invalid_fields)
         return
 
     forward_backward_time_s = 0.0
@@ -79,16 +114,32 @@ def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, An
         row = phases.get(phase_name)
         if not isinstance(row, Mapping):
             continue
-        time_s = float(row.get("total_s", 0.0))
-        pct = float(row.get("pct", 0.0))
-        metrics[f"profile_{phase_name}_time_s"] = time_s
-        metrics[f"profile_{phase_name}_pct"] = pct
-        metrics[f"profile_{phase_name}_avg_ms"] = float(row.get("avg_ms", 0.0))
+        time_s = _set_profile_metric(
+            metrics,
+            f"profile_{phase_name}_time_s",
+            row.get("total_s", 0.0),
+            invalid_fields,
+        )
+        pct = _set_profile_metric(
+            metrics,
+            f"profile_{phase_name}_pct",
+            row.get("pct", 0.0),
+            invalid_fields,
+        )
+        _set_profile_metric(
+            metrics,
+            f"profile_{phase_name}_avg_ms",
+            row.get("avg_ms", 0.0),
+            invalid_fields,
+        )
         if phase_name in {"forward", "backward"}:
-            forward_backward_time_s += time_s
-            forward_backward_pct += pct
+            if time_s is not None:
+                forward_backward_time_s += time_s
+            if pct is not None:
+                forward_backward_pct += pct
     metrics["profile_forward_backward_time_s"] = forward_backward_time_s
     metrics["profile_forward_backward_pct"] = forward_backward_pct
+    _record_profile_flat_metric_invalids(metrics, invalid_fields)
 
 
 def _profile_model_include_patterns(include: Optional[Union[str, Sequence[str]]]) -> list[str]:

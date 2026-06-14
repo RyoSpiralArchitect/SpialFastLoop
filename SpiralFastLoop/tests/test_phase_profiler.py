@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader, TensorDataset
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer
+from spiralfastloop.engine import _add_profile_phase_metrics
 from spiralfastloop.utils import PhaseProfiler
 
 
@@ -652,6 +653,43 @@ def test_train_one_epoch_collects_phase_and_model_profile() -> None:
     optimizer_children = profile["phase_breakdowns"]["optimizer"]["top_children"]
     assert optimizer_children
     assert optimizer_children[0]["name"] in {"optimizer.step", "zero_grad"}
+
+
+def test_profile_flat_metrics_skip_invalid_values() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "profile_total_s": "slow",
+        "phases": {
+            "forward": {"total_s": 0.1, "pct": float("nan"), "avg_ms": "bad"},
+            "backward": {"total_s": float("inf"), "pct": 30.0, "avg_ms": True},
+            "optimizer": {"total_s": True, "pct": "5.0", "avg_ms": 1.5},
+            "loss": "bad-row",
+        },
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert "profile_total_s" not in metrics
+    assert metrics["profile_forward_time_s"] == pytest.approx(0.1)
+    assert "profile_forward_pct" not in metrics
+    assert "profile_forward_avg_ms" not in metrics
+    assert "profile_backward_time_s" not in metrics
+    assert metrics["profile_backward_pct"] == pytest.approx(30.0)
+    assert "profile_backward_avg_ms" not in metrics
+    assert "profile_optimizer_time_s" not in metrics
+    assert metrics["profile_optimizer_pct"] == pytest.approx(5.0)
+    assert metrics["profile_optimizer_avg_ms"] == pytest.approx(1.5)
+    assert metrics["profile_forward_backward_time_s"] == pytest.approx(0.1)
+    assert metrics["profile_forward_backward_pct"] == pytest.approx(30.0)
+    assert metrics["profile_flat_metric_invalid_count"] == 6
+    assert metrics["profile_flat_metric_invalid_fields"] == [
+        "profile_total_s",
+        "profile_forward_pct",
+        "profile_forward_avg_ms",
+        "profile_backward_time_s",
+        "profile_backward_avg_ms",
+        "profile_optimizer_time_s",
+    ]
 
 
 def test_model_profile_events_keep_totals_without_distribution() -> None:

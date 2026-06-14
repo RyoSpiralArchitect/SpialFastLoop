@@ -271,6 +271,7 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "wall_time_s": 2.0,
             "cold_start_time_s": 0.5,
             "dataset_materialized_bytes": 0,
+            "profile_flat_metric_invalid_count": 2.0,
             "profile_forward_backward_pct": 40.0,
             "profile_forward_pct": 15.0,
             "profile_loss_pct": 4.0,
@@ -290,6 +291,7 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "wall_time_s": 0.75,
             "cold_start_time_s": 0.1,
             "dataset_materialized_bytes": 0,
+            "profile_flat_metric_invalid_count": 0.0,
             "profile_forward_backward_pct": 60.0,
             "profile_forward_pct": 20.0,
             "profile_loss_pct": 8.0,
@@ -309,6 +311,7 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "wall_time_s": 0.6,
             "cold_start_time_s": 0.05,
             "dataset_materialized_bytes": 1024,
+            "profile_flat_metric_invalid_count": 1.0,
             "profile_forward_backward_pct": 55.0,
             "profile_forward_pct": 25.0,
             "profile_loss_pct": 6.0,
@@ -333,12 +336,15 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["stddev_reported_samples_per_sec"] == pytest.approx(100.0)
     assert generated["mean_end_to_end_wall_time_s"] == pytest.approx(2.0)
     assert generated["stddev_end_to_end_wall_time_s"] == pytest.approx(1.0)
+    assert generated["mean_profile_flat_metric_invalid_count"] == pytest.approx(1.0)
+    assert generated["max_profile_flat_metric_invalid_count"] == pytest.approx(2.0)
     assert generated["mean_profile_forward_backward_pct"] == pytest.approx(50.0)
     assert generated["mean_profile_loss_pct"] == pytest.approx(6.0)
     assert generated["mean_profile_loss_reduce_pct"] == pytest.approx(2.0)
     assert generated["mean_profile_metrics_pct"] == pytest.approx(1.0)
     assert generated["max_profile_backward_pct"] == pytest.approx(40.0)
     assert generated["profiled_runs"] == 2
+    assert summary["best_reported"]["mean_profile_flat_metric_invalid_count"] == pytest.approx(1.0)
     assert summary["best_reported"]["mean_profile_forward_backward_pct"] == pytest.approx(55.0)
     assert summary["best_reported"]["mean_profile_loss_pct"] == pytest.approx(6.0)
 

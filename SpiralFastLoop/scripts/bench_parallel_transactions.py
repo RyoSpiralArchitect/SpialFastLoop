@@ -41,6 +41,7 @@ BASE_SUMMARY_FIELDS = (
 
 PROFILE_SUMMARY_FIELDS = (
     "profile_total_s",
+    "profile_flat_metric_invalid_count",
     "profile_data_wait_time_s",
     "profile_data_wait_pct",
     "profile_data_wait_avg_ms",
@@ -87,6 +88,7 @@ BEST_RUN_FIELDS = (
     "end_to_end_wall_time_s",
     "setup_time_s",
     "wall_time_s",
+    "profile_flat_metric_invalid_count",
     "profile_forward_backward_pct",
     "profile_forward_backward_time_s",
     "profile_forward_pct",
