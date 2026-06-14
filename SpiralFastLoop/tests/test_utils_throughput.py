@@ -8,6 +8,7 @@ from torch.utils.data import TensorDataset
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import spiralfastloop.utils as utils_mod
 from spiralfastloop.utils import (
     ThroughputMeter,
     _PSquareQuantile,
@@ -281,6 +282,23 @@ def test_dataloader_from_dataset_allows_zero_workers() -> None:
 
     assert first_inputs.shape == (4, 2)
     assert first_targets.shape == (4,)
+
+
+def test_dataloader_from_dataset_resolves_auto_device_for_pin_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset = TensorDataset(torch.randn(8, 2), torch.randint(0, 2, (8,)))
+    monkeypatch.setattr(utils_mod, "get_best_device", lambda: "cuda")
+
+    loader = dataloader_from_dataset(
+        dataset,
+        batch_size=4,
+        device="auto",
+        num_workers=0,
+        shuffle=False,
+    )
+
+    assert loader.pin_memory is True
 
 
 @pytest.mark.parametrize(

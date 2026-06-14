@@ -226,6 +226,7 @@ def dataloader_from_dataset(
     batch_size = _positive_int_setting(batch_size, "batch_size")
     prefetch_factor = _positive_int_setting(prefetch_factor, "prefetch_factor")
     seed = _int_setting(seed, "seed")
+    resolved_device = get_best_device() if device == "auto" else device
     workers = num_workers
     if workers is None:
         try:
@@ -239,7 +240,7 @@ def dataloader_from_dataset(
     else:
         workers = _non_negative_int_setting(workers, "num_workers")
     if pin_memory is None:
-        pin_memory = (_device_type(device) == "cuda")
+        pin_memory = (_device_type(resolved_device) == "cuda")
     sampler: Optional[DistributedSampler[Any]] = None
     if distributed:
         ctx = get_distributed_context()
