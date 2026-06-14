@@ -203,11 +203,46 @@ def test_predict_can_return_metrics_and_phase_profile() -> None:
     phases = profile["phases"]
     assert len(predictions) == 2
     assert metrics["steps"] == 2
+    assert metrics["measured_steps"] == 2
+    assert metrics["unmeasured_steps"] == 0
+    assert metrics["batch_size_inference_failures"] == 0
     assert metrics["samples"] == 6
     for phase_name in ("data_wait", "transfer", "forward", "postprocess", "collect_output", "metrics"):
         assert phase_name in phases
         assert metrics[f"profile_{phase_name}_time_s"] == pytest.approx(phases[phase_name]["total_s"])
         assert metrics[f"profile_{phase_name}_pct"] == pytest.approx(phases[phase_name]["pct"])
+
+
+def test_predict_reports_unmeasured_steps_when_batch_size_is_unknown() -> None:
+    class ScalarDataset(torch.utils.data.Dataset[object]):
+        def __len__(self) -> int:
+            return 2
+
+        def __getitem__(self, index: int) -> object:
+            return object()
+
+    class ConstantModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = nn.Parameter(torch.tensor([1.0]))
+
+        def forward(self, _inputs: object) -> torch.Tensor:
+            return self.weight
+
+    loader = DataLoader(ScalarDataset(), batch_size=None)
+    model = ConstantModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    predictions, metrics = trainer.predict(loader, return_metrics=True)
+
+    assert len(predictions) == 2
+    assert metrics["steps"] == 2
+    assert metrics["measured_steps"] == 0
+    assert metrics["unmeasured_steps"] == 2
+    assert metrics["batch_size_inference_failures"] == 2
+    assert metrics["samples"] == 0
+    assert metrics["samples_per_sec"] == 0.0
 
 
 def test_fit_accepts_train_profile_and_loader_options() -> None:

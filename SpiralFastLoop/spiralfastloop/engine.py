@@ -1260,6 +1260,8 @@ class FastTrainer:
         )
         total_items = 0
         step_idx = 0
+        measured_steps = 0
+        batch_size_inference_failures = 0
         with torch.no_grad():
             data_iter = iter(loader)
             while step_limit is None or step_idx < step_limit:
@@ -1309,12 +1311,18 @@ class FastTrainer:
                             batch_duration_s = max(0.0, time.perf_counter() - step_started_at)
                             meter.record(batch_duration_s, batch_size_int)
                             total_items += batch_size_int
+                            measured_steps += 1
+                        else:
+                            batch_size_inference_failures += 1
                     finally:
                         profiler.stop("metrics")
         if not metrics_requested:
             return outputs_list
         metrics: Dict[str, Any] = dict(meter.summary())
         metrics["steps"] = step_idx
+        metrics["measured_steps"] = measured_steps
+        metrics["unmeasured_steps"] = step_idx - measured_steps
+        metrics["batch_size_inference_failures"] = batch_size_inference_failures
         metrics["samples"] = total_items
         metrics["device"] = self.device
         metrics["world_size"] = self.dist_ctx.world_size
