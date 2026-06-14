@@ -9,7 +9,13 @@ import random
 from collections import deque
 from dataclasses import dataclass
 from statistics import mean, pstdev
-from typing import Deque, List, Optional, Sequence, Tuple
+from typing import Any, Deque, List, Optional, Sequence, Tuple
+
+from .utils import (
+    _int_setting,
+    _non_negative_finite_float_setting,
+    _positive_int_setting,
+)
 
 
 @dataclass(frozen=True)
@@ -165,13 +171,58 @@ def _expected_improvement(
     return results
 
 
+def _finite_float_setting(value: Any, name: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite number")
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite number") from exc
+    if not math.isfinite(normalized):
+        raise ValueError(f"{name} must be a finite number")
+    return normalized
+
+
+def _positive_finite_float_setting(value: Any, name: str) -> float:
+    normalized = _finite_float_setting(value, name)
+    if normalized <= 0.0:
+        raise ValueError(f"{name} must be a positive finite number")
+    return normalized
+
+
+def _unit_interval_setting(value: Any, name: str) -> float:
+    normalized = _non_negative_finite_float_setting(value, name)
+    if normalized > 1.0:
+        raise ValueError(f"{name} must lie in [0, 1]")
+    return normalized
+
+
+def _epsilon_bounds_setting(bounds: Any) -> Tuple[float, float]:
+    try:
+        lower_raw, upper_raw = bounds
+    except (TypeError, ValueError) as exc:
+        raise ValueError("epsilon bounds must contain exactly two values") from exc
+    lower = _positive_finite_float_setting(lower_raw, "bounds[0]")
+    upper = _positive_finite_float_setting(upper_raw, "bounds[1]")
+    if lower >= upper:
+        raise ValueError("invalid epsilon bounds")
+    return lower, upper
+
+
+def _candidate_points_setting(value: Any) -> int:
+    normalized = _positive_int_setting(value, "candidate_points")
+    if normalized < 3:
+        raise ValueError("candidate_points must be at least 3")
+    return normalized
+
+
 def _simulate_objective(
     residuals: Sequence[float],
     epsilon: float,
     weight_zero: float,
     weight_error: float,
 ) -> SimulationResult:
-    values = [abs(float(r)) for r in residuals]
+    values = [abs(_finite_float_setting(r, "residual")) for r in residuals]
     total = len(values)
     if total == 0:
         return SimulationResult(epsilon, 0, 0, 0.0, 0.0, 0.0)
@@ -219,41 +270,53 @@ class AutoEpsilonOptimizer:
         candidate_points: int = 64,
         random_state: Optional[int] = None,
     ) -> None:
-        if bounds[0] <= 0 or bounds[1] <= 0:
-            raise ValueError("epsilon bounds must be positive")
-        if bounds[0] >= bounds[1]:
-            raise ValueError("invalid epsilon bounds")
-        if not (0.0 <= smoothing <= 1.0):
-            raise ValueError("smoothing must lie in [0, 1]")
+        self.bounds = _epsilon_bounds_setting(bounds)
+        self.weight_zero = _non_negative_finite_float_setting(weight_zero, "weight_zero")
+        self.weight_error = _non_negative_finite_float_setting(weight_error, "weight_error")
+        self.length_scale = _positive_finite_float_setting(length_scale, "length_scale")
+        self.variance = _positive_finite_float_setting(variance, "variance")
+        self.noise = _non_negative_finite_float_setting(noise, "noise")
+        self.exploration = _non_negative_finite_float_setting(exploration, "exploration")
+        self.optimisation_interval = _positive_int_setting(
+            optimisation_interval,
+            "optimisation_interval",
+        )
+        self.optimisation_steps = _positive_int_setting(
+            optimisation_steps,
+            "optimisation_steps",
+        )
+        self.min_history = _positive_int_setting(min_history, "min_history")
+        self.smoothing = _unit_interval_setting(smoothing, "smoothing")
+        self.candidate_points = _candidate_points_setting(candidate_points)
 
-        self.bounds = bounds
-        self.weight_zero = weight_zero
-        self.weight_error = weight_error
-        self.length_scale = length_scale
-        self.variance = variance
-        self.noise = noise
-        self.exploration = exploration
-        self.optimisation_interval = optimisation_interval
-        self.optimisation_steps = optimisation_steps
-        self.min_history = min_history
-        self.smoothing = smoothing
-        self.candidate_points = max(3, candidate_points)
+        initial_value = _non_negative_finite_float_setting(
+            initial_epsilon,
+            "initial_epsilon",
+        )
+        history_limit = _positive_int_setting(history_size, "history_size")
+        epsilon_history_limit = _positive_int_setting(
+            epsilon_history,
+            "epsilon_history",
+        )
 
-        self._epsilon = self._clip(initial_epsilon)
-        self._residuals: Deque[float] = deque(maxlen=history_size)
-        self._epsilon_history: Deque[float] = deque(maxlen=epsilon_history)
+        self._epsilon = self._clip(initial_value)
+        self._residuals: Deque[float] = deque(maxlen=history_limit)
+        self._epsilon_history: Deque[float] = deque(maxlen=epsilon_history_limit)
         self._epsilon_history.append(self._epsilon)
 
         self._evaluations: List[SimulationResult] = []
         self._pending_steps = 0
-        self._rng = random.Random(random_state)
+        normalized_random_state = (
+            None if random_state is None else _int_setting(random_state, "random_state")
+        )
+        self._rng = random.Random(normalized_random_state)
 
     @property
     def epsilon(self) -> float:
         return self._epsilon
 
     def observe(self, residual: float) -> float:
-        self._residuals.append(float(residual))
+        self._residuals.append(_finite_float_setting(residual, "residual"))
         if len(self._residuals) >= self.min_history:
             self._pending_steps += 1
             if self._pending_steps >= self.optimisation_interval:
@@ -269,7 +332,12 @@ class AutoEpsilonOptimizer:
         epsilon: Optional[float] = None,
     ) -> SimulationResult:
         seq = residuals if residuals is not None else list(self._residuals)
-        value = self._clip(self._epsilon if epsilon is None else epsilon)
+        epsilon_value = (
+            self._epsilon
+            if epsilon is None
+            else _non_negative_finite_float_setting(epsilon, "epsilon")
+        )
+        value = self._clip(epsilon_value)
         return _simulate_objective(seq, value, self.weight_zero, self.weight_error)
 
     def report(self) -> AutoEpsilonReport:

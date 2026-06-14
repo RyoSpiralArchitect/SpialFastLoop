@@ -2,6 +2,8 @@ import random
 import sys
 from pathlib import Path
 
+import pytest
+
 try:
     from spiralfastloop.auto_epsilon import AutoEpsilonOptimizer
 except ModuleNotFoundError:  # pragma: no cover - local editable checkout
@@ -18,6 +20,64 @@ def _generate_residuals(seed: int = 7, total: int = 400) -> list[float]:
         else:
             samples.append(rng.gauss(0.0, 0.08))
     return samples
+
+
+@pytest.mark.parametrize(
+    "kwargs, field",
+    [
+        ({"initial_epsilon": -0.1}, "initial_epsilon"),
+        ({"initial_epsilon": float("nan")}, "initial_epsilon"),
+        ({"initial_epsilon": True}, "initial_epsilon"),
+        ({"bounds": object()}, "bounds"),
+        ({"bounds": (0.1,)}, "bounds"),
+        ({"bounds": (True, 0.2)}, "bounds"),
+        ({"bounds": (float("nan"), 0.2)}, "bounds"),
+        ({"bounds": (0.2, 0.1)}, "bounds"),
+        ({"history_size": 0}, "history_size"),
+        ({"history_size": 1.5}, "history_size"),
+        ({"history_size": "2"}, "history_size"),
+        ({"history_size": True}, "history_size"),
+        ({"epsilon_history": 0}, "epsilon_history"),
+        ({"optimisation_interval": 0}, "optimisation_interval"),
+        ({"optimisation_steps": 0}, "optimisation_steps"),
+        ({"min_history": 0}, "min_history"),
+        ({"candidate_points": 2}, "candidate_points"),
+        ({"candidate_points": 3.5}, "candidate_points"),
+        ({"candidate_points": True}, "candidate_points"),
+        ({"weight_zero": -0.1}, "weight_zero"),
+        ({"weight_error": float("inf")}, "weight_error"),
+        ({"length_scale": 0.0}, "length_scale"),
+        ({"variance": -0.1}, "variance"),
+        ({"noise": -0.1}, "noise"),
+        ({"exploration": float("nan")}, "exploration"),
+        ({"smoothing": -0.1}, "smoothing"),
+        ({"smoothing": 1.1}, "smoothing"),
+        ({"smoothing": True}, "smoothing"),
+        ({"random_state": 1.5}, "random_state"),
+        ({"random_state": "2"}, "random_state"),
+        ({"random_state": True}, "random_state"),
+    ],
+)
+def test_auto_epsilon_rejects_invalid_settings(kwargs: dict[str, object], field: str) -> None:
+    with pytest.raises(ValueError, match=field):
+        AutoEpsilonOptimizer(**kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("residual", [float("nan"), float("inf"), True, object()])
+def test_auto_epsilon_rejects_invalid_observed_residuals(residual: object) -> None:
+    optimiser = AutoEpsilonOptimizer()
+
+    with pytest.raises(ValueError, match="residual"):
+        optimiser.observe(residual)  # type: ignore[arg-type]
+
+
+def test_auto_epsilon_rejects_invalid_evaluation_inputs() -> None:
+    optimiser = AutoEpsilonOptimizer()
+
+    with pytest.raises(ValueError, match="epsilon"):
+        optimiser.evaluate(epsilon=float("nan"))
+    with pytest.raises(ValueError, match="residual"):
+        optimiser.evaluate(residuals=[0.1, float("inf")])
 
 
 def test_auto_epsilon_reduces_unnecessary_zeroing():
