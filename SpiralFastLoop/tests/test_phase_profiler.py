@@ -10,7 +10,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer
 import spiralfastloop.engine as engine
-from spiralfastloop.engine import _add_profile_phase_metrics
+from spiralfastloop.engine import (
+    _add_profile_phase_metrics,
+    _infer_batch_size,
+    _try_infer_batch_size_with_reason,
+)
 from spiralfastloop.utils import PhaseProfiler
 
 
@@ -25,6 +29,32 @@ def _make_supervised_components() -> tuple[
     model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
     return loader, model, optimizer
+
+
+@pytest.mark.parametrize(
+    ("batch", "reason", "match"),
+    [
+        (torch.tensor(1.0), "tensor_scalar", "scalar tensor"),
+        (torch.empty(0, 4), "tensor_empty", "non-zero"),
+        ({}, "mapping_empty", "mapping input"),
+        ({"x": torch.randn(2, 4), "y": torch.randn(3, 4)}, "mapping_inconsistent", "Inconsistent"),
+        ([], "sequence_empty", "Sequence batch dimension"),
+        ((torch.randn(2, 4), torch.randn(3, 4)), "sequence_inconsistent", "Inconsistent"),
+        (None, "none", "None"),
+        (object(), "unsupported_type", "Unsupported batch structure"),
+    ],
+)
+def test_batch_size_inference_reports_failure_reasons(
+    batch: object,
+    reason: str,
+    match: str,
+) -> None:
+    batch_size, failure_reason = _try_infer_batch_size_with_reason(batch)
+
+    assert batch_size is None
+    assert failure_reason == reason
+    with pytest.raises((TypeError, ValueError), match=match):
+        _infer_batch_size(batch)
 
 
 @pytest.mark.parametrize("window", [0, -1, 1.5, "8", True])
@@ -550,6 +580,7 @@ def test_evaluate_collects_phase_profile_and_user_metrics() -> None:
     assert metrics["measured_steps"] == 2
     assert metrics["unmeasured_steps"] == 0
     assert metrics["batch_size_inference_failures"] == 0
+    assert metrics["batch_size_inference_failure_reasons"] == {}
     assert metrics["samples"] == 8
     assert metrics["reported_samples_per_sec"] == metrics["samples_per_sec"]
     assert 0.0 <= metrics["accuracy"] <= 1.0
@@ -759,6 +790,9 @@ def test_evaluate_reports_scalar_tensor_inputs_as_unmeasured() -> None:
     assert metrics["measured_steps"] == 0
     assert metrics["unmeasured_steps"] == 2
     assert metrics["batch_size_inference_failures"] == 2
+    assert metrics["batch_size_inference_failure_reasons"] == {"tensor_scalar": 2}
+    assert metrics["batch_size_inference_tensor_scalar_failures"] == 2
+    assert metrics["batch_size_inference_unsupported_type_failures"] == 0
     assert metrics["samples"] == 0
     assert metrics["samples_per_sec"] == 0.0
     assert metrics["reported_samples_per_sec"] == 0.0
@@ -794,6 +828,7 @@ def test_predict_can_return_metrics_and_phase_profile() -> None:
     assert metrics["measured_steps"] == 2
     assert metrics["unmeasured_steps"] == 0
     assert metrics["batch_size_inference_failures"] == 0
+    assert metrics["batch_size_inference_failure_reasons"] == {}
     assert metrics["samples"] == 6
     assert metrics["reported_samples_per_sec"] == metrics["samples_per_sec"]
     for phase_name in ("data_wait", "transfer", "forward", "postprocess", "collect_output", "metrics"):
@@ -830,6 +865,9 @@ def test_predict_reports_unmeasured_steps_when_batch_size_is_unknown() -> None:
     assert metrics["measured_steps"] == 0
     assert metrics["unmeasured_steps"] == 2
     assert metrics["batch_size_inference_failures"] == 2
+    assert metrics["batch_size_inference_failure_reasons"] == {"unsupported_type": 2}
+    assert metrics["batch_size_inference_unsupported_type_failures"] == 2
+    assert metrics["batch_size_inference_tensor_scalar_failures"] == 0
     assert metrics["samples"] == 0
     assert metrics["samples_per_sec"] == 0.0
     assert metrics["reported_samples_per_sec"] == 0.0
@@ -863,6 +901,9 @@ def test_predict_reports_scalar_tensor_inputs_as_unmeasured() -> None:
     assert metrics["measured_steps"] == 0
     assert metrics["unmeasured_steps"] == 2
     assert metrics["batch_size_inference_failures"] == 2
+    assert metrics["batch_size_inference_failure_reasons"] == {"tensor_scalar": 2}
+    assert metrics["batch_size_inference_tensor_scalar_failures"] == 2
+    assert metrics["batch_size_inference_unsupported_type_failures"] == 0
     assert metrics["samples"] == 0
     assert metrics["reported_samples_per_sec"] == 0.0
 

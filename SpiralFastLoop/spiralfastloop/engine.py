@@ -59,6 +59,28 @@ _PROFILE_PHASE_METRIC_NAMES = (
     "metrics",
 )
 
+_BATCH_SIZE_INFERENCE_FAILURE_REASONS = (
+    "tensor_scalar",
+    "tensor_empty",
+    "mapping_empty",
+    "mapping_inconsistent",
+    "sequence_empty",
+    "sequence_inconsistent",
+    "none",
+    "unsupported_type",
+)
+
+_BATCH_SIZE_INFERENCE_FAILURE_MESSAGES = {
+    "tensor_scalar": "Unable to infer batch size from scalar tensor.",
+    "tensor_empty": "Tensor batch dimension must be non-zero.",
+    "mapping_empty": "Unable to infer batch size from mapping input.",
+    "mapping_inconsistent": "Inconsistent batch sizes detected in mapping input.",
+    "sequence_empty": "Sequence batch dimension must be non-zero.",
+    "sequence_inconsistent": "Inconsistent batch sizes detected in sequence input.",
+    "none": "Cannot infer batch size from None input.",
+    "unsupported_type": "Unsupported batch structure for inferring batch size.",
+}
+
 
 def _format_exception_reason(exc: Exception, limit: int = 200) -> str:
     message = str(exc).strip()
@@ -314,55 +336,93 @@ def _concatenate_batches(base: Any, extra: Any) -> Any:
     raise TypeError("Unsupported batch structure for trigger concatenation.")
 
 
-def _infer_batch_size(batch: Any) -> int:
+def _new_batch_size_failure_counts() -> Dict[str, int]:
+    return {reason: 0 for reason in _BATCH_SIZE_INFERENCE_FAILURE_REASONS}
+
+
+def _record_batch_size_failure(counts: Dict[str, int], reason: str) -> None:
+    if reason not in counts:
+        reason = "unsupported_type"
+    counts[reason] += 1
+
+
+def _nonzero_batch_size_failure_counts(counts: Mapping[str, int]) -> Dict[str, int]:
+    return {reason: count for reason, count in counts.items() if count}
+
+
+def _add_batch_size_failure_metrics(metrics: Dict[str, Any], counts: Mapping[str, int]) -> None:
+    metrics["batch_size_inference_failure_reasons"] = _nonzero_batch_size_failure_counts(counts)
+    for reason in _BATCH_SIZE_INFERENCE_FAILURE_REASONS:
+        metrics[f"batch_size_inference_{reason}_failures"] = counts.get(reason, 0)
+
+
+def _try_infer_batch_size_with_reason(batch: Any) -> tuple[Optional[int], str]:
     if isinstance(batch, torch.Tensor):
         if batch.ndim == 0:
-            raise ValueError("Unable to infer batch size from scalar tensor.")
+            return None, "tensor_scalar"
         if batch.shape[0] <= 0:
-            raise ValueError("Tensor batch dimension must be non-zero.")
-        return int(batch.shape[0])
+            return None, "tensor_empty"
+        return int(batch.shape[0]), ""
     if isinstance(batch, Mapping):
         candidate_values = []
+        child_reasons = []
         for value in batch.values():
             if value is None:
                 continue
-            try:
-                candidate_values.append(_infer_batch_size(value))
-            except (TypeError, ValueError):
+            candidate, reason = _try_infer_batch_size_with_reason(value)
+            if candidate is None:
+                child_reasons.append(reason)
                 continue
+            candidate_values.append(candidate)
         if not candidate_values:
-            raise ValueError("Unable to infer batch size from mapping inputs provided by trigger.")
+            if child_reasons and len(set(child_reasons)) == 1:
+                return None, child_reasons[0]
+            return None, "mapping_empty"
         unique = set(candidate_values)
         if len(unique) != 1:
-            raise ValueError("Inconsistent batch sizes detected in mapping inputs provided by trigger.")
-        return candidate_values[0]
+            return None, "mapping_inconsistent"
+        return candidate_values[0], ""
     if isinstance(batch, (list, tuple)):
         candidate_values = []
+        child_reasons = []
         for value in batch:
             if value is None:
                 continue
-            try:
-                candidate_values.append(_infer_batch_size(value))
-            except (TypeError, ValueError):
+            candidate, reason = _try_infer_batch_size_with_reason(value)
+            if candidate is None:
+                child_reasons.append(reason)
                 continue
+            candidate_values.append(candidate)
         if not candidate_values:
-            if hasattr(batch, "__len__"):
-                return len(batch)
-            raise ValueError("Unable to infer batch size from sequence inputs provided by trigger.")
+            length = len(batch)
+            if length <= 0:
+                return None, "sequence_empty"
+            return length, ""
         unique = set(candidate_values)
         if len(unique) != 1:
-            raise ValueError("Inconsistent batch sizes detected in sequence inputs provided by trigger.")
-        return candidate_values[0]
+            return None, "sequence_inconsistent"
+        return candidate_values[0], ""
     if batch is None:
-        raise ValueError("Cannot infer batch size from None input.")
-    raise TypeError("Unsupported batch structure for inferring batch size.")
+        return None, "none"
+    return None, "unsupported_type"
+
+
+def _infer_batch_size(batch: Any) -> int:
+    batch_size, reason = _try_infer_batch_size_with_reason(batch)
+    if batch_size is not None:
+        return batch_size
+    message = _BATCH_SIZE_INFERENCE_FAILURE_MESSAGES.get(
+        reason,
+        _BATCH_SIZE_INFERENCE_FAILURE_MESSAGES["unsupported_type"],
+    )
+    if reason == "unsupported_type":
+        raise TypeError(message)
+    raise ValueError(message)
 
 
 def _try_infer_batch_size(batch: Any) -> Optional[int]:
-    try:
-        return _infer_batch_size(batch)
-    except (IndexError, TypeError, ValueError):
-        return None
+    batch_size, _reason = _try_infer_batch_size_with_reason(batch)
+    return batch_size
 
 
 def _ensure_loss_vector(loss_tensor: torch.Tensor) -> torch.Tensor:
@@ -1323,6 +1383,7 @@ class FastTrainer:
         step_idx = 0
         measured_steps = 0
         batch_size_inference_failures = 0
+        batch_size_failure_counts = _new_batch_size_failure_counts()
         metric_sums: Dict[str, float] = {}
         metric_weights: Dict[str, float] = {}
         user_metric_valid_count = 0
@@ -1371,7 +1432,7 @@ class FastTrainer:
                     else:
                         loss = None
                 reference = targets if targets is not None else inputs
-                batch_size = _try_infer_batch_size(reference)
+                batch_size, batch_size_failure_reason = _try_infer_batch_size_with_reason(reference)
                 batch_size_int = int(batch_size) if batch_size is not None else None
 
                 extra_metrics: Any = None
@@ -1391,6 +1452,7 @@ class FastTrainer:
                         measured_steps += 1
                     else:
                         batch_size_inference_failures += 1
+                        _record_batch_size_failure(batch_size_failure_counts, batch_size_failure_reason)
 
                     if loss is not None and batch_size_int is not None:
                         loss_detached = loss.detach().to(device=total_loss.device, dtype=total_loss.dtype)
@@ -1446,6 +1508,10 @@ class FastTrainer:
             batch_size_inference_failures = int(
                 distributed_sum(torch.tensor(batch_size_inference_failures, device=total_loss.device)).item()
             )
+            for reason in list(batch_size_failure_counts.keys()):
+                batch_size_failure_counts[reason] = int(
+                    distributed_sum(torch.tensor(batch_size_failure_counts[reason], device=total_loss.device)).item()
+                )
             user_metric_valid_count = int(
                 distributed_sum(torch.tensor(user_metric_valid_count, device=total_loss.device)).item()
             )
@@ -1476,6 +1542,7 @@ class FastTrainer:
         metrics["measured_steps"] = measured_steps
         metrics["unmeasured_steps"] = step_idx - measured_steps
         metrics["batch_size_inference_failures"] = batch_size_inference_failures
+        _add_batch_size_failure_metrics(metrics, batch_size_failure_counts)
         metrics["samples"] = total_items
         metrics["reported_samples_per_sec"] = metrics["samples_per_sec"]
         metrics["device"] = self.device
@@ -1542,6 +1609,7 @@ class FastTrainer:
         step_idx = 0
         measured_steps = 0
         batch_size_inference_failures = 0
+        batch_size_failure_counts = _new_batch_size_failure_counts()
         with torch.no_grad():
             data_iter = iter(loader)
             while step_limit is None or step_idx < step_limit:
@@ -1577,7 +1645,9 @@ class FastTrainer:
                         outputs = postprocess(outputs)
                     finally:
                         profiler.stop("postprocess")
-                batch_size = _try_infer_batch_size(inputs) if metrics_requested else None
+                batch_size, batch_size_failure_reason = (
+                    _try_infer_batch_size_with_reason(inputs) if metrics_requested else (None, "")
+                )
                 profiler.start("collect_output")
                 try:
                     outputs_list.append(_detach_to_cpu(outputs))
@@ -1594,6 +1664,7 @@ class FastTrainer:
                             measured_steps += 1
                         else:
                             batch_size_inference_failures += 1
+                            _record_batch_size_failure(batch_size_failure_counts, batch_size_failure_reason)
                     finally:
                         profiler.stop("metrics")
         if not metrics_requested:
@@ -1604,6 +1675,7 @@ class FastTrainer:
         metrics["measured_steps"] = measured_steps
         metrics["unmeasured_steps"] = step_idx - measured_steps
         metrics["batch_size_inference_failures"] = batch_size_inference_failures
+        _add_batch_size_failure_metrics(metrics, batch_size_failure_counts)
         metrics["samples"] = total_items
         metrics["reported_samples_per_sec"] = metrics["samples_per_sec"]
         metrics["device"] = self.device
