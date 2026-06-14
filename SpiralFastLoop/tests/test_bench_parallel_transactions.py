@@ -168,6 +168,19 @@ def test_summarize_metric_skips_non_finite_values() -> None:
     assert stats["non_finite_count"] == pytest.approx(2.0)
 
 
+def test_summarize_metric_skips_bool_values() -> None:
+    rows = [
+        {"samples_per_sec": 100.0},
+        {"samples_per_sec": True},
+    ]
+
+    stats = summarize_metric(rows, "samples_per_sec")
+
+    assert stats["mean"] == pytest.approx(100.0)
+    assert stats["sample_count"] == pytest.approx(1.0)
+    assert stats["non_finite_count"] == pytest.approx(1.0)
+
+
 def test_dump_json_converts_non_finite_values_to_null() -> None:
     buffer = io.StringIO()
 
@@ -223,9 +236,32 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "reported_samples_per_sec": 200.0,
             "samples_per_sec": 160.0,
             "steady_samples_per_sec": 200.0,
+            "p99_s": 0.010,
+            "std_batch_s": 0.001,
+            "best_samples_per_sec": 250.0,
+            "headroom_ratio": 1.25,
             "wall_time_s": 1.0,
             "setup_time_s": 0.25,
             "end_to_end_wall_time_s": 1.25,
+            "steps": 3,
+            "samples": 12,
+            "optimizer_steps": 2,
+            "grad_accum": 2,
+            "partial_optimizer_steps": 1,
+            "grad_accum_tail_steps": 1,
+            "warmup_steps": 1,
+            "warmup_samples": 4,
+            "warmup_optimizer_steps": 0,
+            "warmup_samples_per_sec": 80.0,
+            "warmup_total_time_s": 0.05,
+            "warmup_p99_s": 0.05,
+            "cold_start_steps": 1,
+            "cold_start_samples_per_sec": 80.0,
+            "steady_steps": 2,
+            "steady_samples": 8,
+            "steady_optimizer_steps": 2,
+            "steady_total_time_s": 0.08,
+            "steady_p99_s": 0.04,
             "profile_flat_metric_invalid_count": 0.0,
             "profile_forward_backward_pct": 60.0,
             "profile_forward_backward_time_s": 0.30,
@@ -248,6 +284,21 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["min_end_to_end_wall_time_s"] == pytest.approx(1.25)
     assert summary["max_end_to_end_wall_time_s"] == pytest.approx(2.0)
     assert summary["stddev_wall_time_s"] == pytest.approx(0.5)
+    assert summary["mean_p99_s"] == pytest.approx(0.010)
+    assert summary["mean_std_batch_s"] == pytest.approx(0.001)
+    assert summary["mean_best_samples_per_sec"] == pytest.approx(250.0)
+    assert summary["mean_headroom_ratio"] == pytest.approx(1.25)
+    assert summary["mean_steps"] == pytest.approx(3.0)
+    assert summary["mean_samples"] == pytest.approx(12.0)
+    assert summary["mean_optimizer_steps"] == pytest.approx(2.0)
+    assert summary["mean_grad_accum"] == pytest.approx(2.0)
+    assert summary["mean_partial_optimizer_steps"] == pytest.approx(1.0)
+    assert summary["mean_grad_accum_tail_steps"] == pytest.approx(1.0)
+    assert summary["mean_warmup_steps"] == pytest.approx(1.0)
+    assert summary["mean_warmup_samples_per_sec"] == pytest.approx(80.0)
+    assert summary["mean_cold_start_samples_per_sec"] == pytest.approx(80.0)
+    assert summary["mean_steady_steps"] == pytest.approx(2.0)
+    assert summary["mean_steady_p99_s"] == pytest.approx(0.04)
     assert summary["mean_profile_flat_metric_invalid_count"] == pytest.approx(1.0)
     assert summary["max_profile_flat_metric_invalid_count"] == pytest.approx(2.0)
     assert summary["mean_profile_forward_backward_pct"] == pytest.approx(50.0)
@@ -265,6 +316,10 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["best_reported"]["profile_loss_pct"] == pytest.approx(7.0)
     assert summary["best_reported"]["profile_postprocess_pct"] == pytest.approx(10.0)
     assert summary["best_reported"]["profile_collect_output_pct"] == pytest.approx(5.0)
+    assert summary["best_reported"]["steps"] == 3
+    assert summary["best_reported"]["warmup_steps"] == 1
+    assert summary["best_reported"]["steady_steps"] == 2
+    assert summary["best_reported"]["steady_p99_s"] == pytest.approx(0.04)
     assert summary["best_end_to_end"]["run"] == 1
 
 
@@ -456,6 +511,8 @@ def test_summarize_results_omits_non_finite_best_run_fields() -> None:
             "wall_time_s": 1.0,
             "setup_time_s": 0.25,
             "end_to_end_wall_time_s": 1.25,
+            "p99_s": True,
+            "steps": "many",
             "profile_forward_backward_pct": float("nan"),
             "profile_backward_pct": float("inf"),
         },
@@ -476,6 +533,8 @@ def test_summarize_results_omits_non_finite_best_run_fields() -> None:
     summary = summarize_results(rows)
 
     assert summary["best_reported"]["run"] == 0
+    assert "p99_s" not in summary["best_reported"]
+    assert "steps" not in summary["best_reported"]
     assert "profile_forward_backward_pct" not in summary["best_reported"]
     assert "profile_backward_pct" not in summary["best_reported"]
     json.dumps(summary, allow_nan=False)
@@ -497,6 +556,17 @@ def test_best_finite_row_requires_positive_sample_count() -> None:
     )
 
     assert best == rows[3]
+
+
+def test_best_finite_row_rejects_bool_rank_values() -> None:
+    rows = [
+        {"run": 0, "mean_score": True},
+        {"run": 1, "mean_score": 0.5},
+    ]
+
+    best = _best_finite_row(rows, "mean_score", prefer_high=True)
+
+    assert best == rows[1]
 
 
 def test_best_finite_row_keeps_rows_without_sample_count_field() -> None:

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import math
 import sys
 from argparse import Namespace
 from pathlib import Path
@@ -15,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bench_parallel_transactions import (
     BASE_SUMMARY_FIELDS,
     _best_finite_row,
+    _finite_summary_value,
     _format_metric_value,
     _int_arg,
     count_profiled_rows,
@@ -148,21 +148,17 @@ def summarize_rows(rows: list[dict]) -> dict:
 def _measured_summary_value(row: dict, mean_field: str) -> Optional[float]:
     if mean_field not in row:
         return None
-    try:
-        value = float(row[mean_field])
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(value):
+    value = _finite_summary_value(row[mean_field])
+    if value is None:
         return None
 
     metric_name = mean_field[len("mean_"):] if mean_field.startswith("mean_") else mean_field
     sample_count_field = f"sample_count_{metric_name}"
     if sample_count_field in row:
-        try:
-            sample_count = float(row[sample_count_field])
-        except (TypeError, ValueError):
+        sample_count = _finite_summary_value(row[sample_count_field])
+        if sample_count is None:
             return None
-        if not math.isfinite(sample_count) or sample_count <= 0.0:
+        if sample_count <= 0.0:
             return None
     return value
 

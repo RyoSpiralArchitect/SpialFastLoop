@@ -12,6 +12,7 @@ from scripts.bench_matrix import (
     _compile_requested,
     _format_run_row,
     _format_summary_row,
+    _measured_summary_value,
     _parse_csv_choices,
     _parse_worker_counts,
     parse_args,
@@ -143,6 +144,20 @@ def test_format_summary_row_marks_unmeasured_base_fields() -> None:
     assert "e2e=0.00s" not in formatted
 
 
+def test_measured_summary_value_rejects_bool_values() -> None:
+    assert _measured_summary_value(
+        {"mean_reported_samples_per_sec": True},
+        "mean_reported_samples_per_sec",
+    ) is None
+    assert _measured_summary_value(
+        {
+            "mean_reported_samples_per_sec": 100.0,
+            "sample_count_reported_samples_per_sec": True,
+        },
+        "mean_reported_samples_per_sec",
+    ) is None
+
+
 def test_format_summary_row_keeps_zero_when_it_was_measured() -> None:
     row = {
         "dataset_mode": "generated",
@@ -266,10 +281,33 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "reported_samples_per_sec": 100.0,
             "samples_per_sec": 80.0,
             "steady_samples_per_sec": 100.0,
+            "p99_s": 0.020,
+            "std_batch_s": 0.002,
+            "best_samples_per_sec": 140.0,
+            "headroom_ratio": 1.4,
             "end_to_end_wall_time_s": 3.0,
             "setup_time_s": 1.0,
             "wall_time_s": 2.0,
             "cold_start_time_s": 0.5,
+            "steps": 3,
+            "samples": 12,
+            "optimizer_steps": 2,
+            "grad_accum": 2,
+            "partial_optimizer_steps": 1,
+            "grad_accum_tail_steps": 1,
+            "warmup_steps": 1,
+            "warmup_samples": 4,
+            "warmup_optimizer_steps": 0,
+            "warmup_samples_per_sec": 70.0,
+            "warmup_total_time_s": 0.06,
+            "warmup_p99_s": 0.06,
+            "cold_start_steps": 1,
+            "cold_start_samples_per_sec": 70.0,
+            "steady_steps": 2,
+            "steady_samples": 8,
+            "steady_optimizer_steps": 2,
+            "steady_total_time_s": 0.09,
+            "steady_p99_s": 0.05,
             "dataset_materialized_bytes": 0,
             "profile_flat_metric_invalid_count": 2.0,
             "profile_forward_backward_pct": 40.0,
@@ -289,10 +327,33 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "reported_samples_per_sec": 300.0,
             "samples_per_sec": 240.0,
             "steady_samples_per_sec": 300.0,
+            "p99_s": 0.010,
+            "std_batch_s": 0.001,
+            "best_samples_per_sec": 360.0,
+            "headroom_ratio": 1.2,
             "end_to_end_wall_time_s": 1.0,
             "setup_time_s": 0.25,
             "wall_time_s": 0.75,
             "cold_start_time_s": 0.1,
+            "steps": 3,
+            "samples": 12,
+            "optimizer_steps": 2,
+            "grad_accum": 2,
+            "partial_optimizer_steps": 1,
+            "grad_accum_tail_steps": 1,
+            "warmup_steps": 1,
+            "warmup_samples": 4,
+            "warmup_optimizer_steps": 0,
+            "warmup_samples_per_sec": 90.0,
+            "warmup_total_time_s": 0.04,
+            "warmup_p99_s": 0.04,
+            "cold_start_steps": 1,
+            "cold_start_samples_per_sec": 90.0,
+            "steady_steps": 2,
+            "steady_samples": 8,
+            "steady_optimizer_steps": 2,
+            "steady_total_time_s": 0.06,
+            "steady_p99_s": 0.03,
             "dataset_materialized_bytes": 0,
             "profile_flat_metric_invalid_count": 0.0,
             "profile_forward_backward_pct": 60.0,
@@ -314,10 +375,33 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "reported_samples_per_sec": 250.0,
             "samples_per_sec": 180.0,
             "steady_samples_per_sec": 250.0,
+            "p99_s": 0.005,
+            "std_batch_s": 0.0005,
+            "best_samples_per_sec": 320.0,
+            "headroom_ratio": 1.28,
             "end_to_end_wall_time_s": 0.8,
             "setup_time_s": 0.2,
             "wall_time_s": 0.6,
             "cold_start_time_s": 0.05,
+            "steps": 3,
+            "samples": 12,
+            "optimizer_steps": 2,
+            "grad_accum": 2,
+            "partial_optimizer_steps": 1,
+            "grad_accum_tail_steps": 1,
+            "warmup_steps": 1,
+            "warmup_samples": 4,
+            "warmup_optimizer_steps": 0,
+            "warmup_samples_per_sec": 100.0,
+            "warmup_total_time_s": 0.03,
+            "warmup_p99_s": 0.03,
+            "cold_start_steps": 1,
+            "cold_start_samples_per_sec": 100.0,
+            "steady_steps": 2,
+            "steady_samples": 8,
+            "steady_optimizer_steps": 2,
+            "steady_total_time_s": 0.04,
+            "steady_p99_s": 0.02,
             "dataset_materialized_bytes": 1024,
             "profile_flat_metric_invalid_count": 1.0,
             "profile_forward_backward_pct": 55.0,
@@ -344,6 +428,21 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["stddev_reported_samples_per_sec"] == pytest.approx(100.0)
     assert generated["mean_end_to_end_wall_time_s"] == pytest.approx(2.0)
     assert generated["stddev_end_to_end_wall_time_s"] == pytest.approx(1.0)
+    assert generated["mean_p99_s"] == pytest.approx(0.015)
+    assert generated["mean_std_batch_s"] == pytest.approx(0.0015)
+    assert generated["mean_best_samples_per_sec"] == pytest.approx(250.0)
+    assert generated["mean_headroom_ratio"] == pytest.approx(1.3)
+    assert generated["mean_steps"] == pytest.approx(3.0)
+    assert generated["mean_samples"] == pytest.approx(12.0)
+    assert generated["mean_optimizer_steps"] == pytest.approx(2.0)
+    assert generated["mean_grad_accum"] == pytest.approx(2.0)
+    assert generated["mean_partial_optimizer_steps"] == pytest.approx(1.0)
+    assert generated["mean_grad_accum_tail_steps"] == pytest.approx(1.0)
+    assert generated["mean_warmup_steps"] == pytest.approx(1.0)
+    assert generated["mean_warmup_samples_per_sec"] == pytest.approx(80.0)
+    assert generated["mean_cold_start_samples_per_sec"] == pytest.approx(80.0)
+    assert generated["mean_steady_steps"] == pytest.approx(2.0)
+    assert generated["mean_steady_p99_s"] == pytest.approx(0.04)
     assert generated["mean_profile_flat_metric_invalid_count"] == pytest.approx(1.0)
     assert generated["max_profile_flat_metric_invalid_count"] == pytest.approx(2.0)
     assert generated["mean_profile_forward_backward_pct"] == pytest.approx(50.0)
@@ -361,6 +460,8 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert summary["best_reported"]["mean_profile_flat_metric_invalid_count"] == pytest.approx(1.0)
     assert summary["best_reported"]["mean_profile_forward_backward_pct"] == pytest.approx(55.0)
     assert summary["best_reported"]["mean_profile_loss_pct"] == pytest.approx(6.0)
+    assert summary["best_reported"]["mean_steps"] == pytest.approx(3.0)
+    assert summary["best_reported"]["mean_steady_p99_s"] == pytest.approx(0.02)
 
 
 def test_summarize_rows_skips_profile_fields_when_absent() -> None:

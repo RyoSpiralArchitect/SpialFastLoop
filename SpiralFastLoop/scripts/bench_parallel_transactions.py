@@ -40,6 +40,38 @@ BASE_SUMMARY_FIELDS = (
     "cold_start_time_s",
 )
 
+BATCH_SUMMARY_FIELDS = (
+    "p50_s",
+    "p95_s",
+    "p99_s",
+    "std_batch_s",
+    "avg_batch_s",
+    "best_samples_per_sec",
+    "headroom_ratio",
+)
+
+WORKLOAD_SUMMARY_FIELDS = (
+    "steps",
+    "samples",
+    "optimizer_steps",
+    "grad_accum",
+    "partial_optimizer_steps",
+    "grad_accum_tail_steps",
+    "warmup_steps",
+    "warmup_samples",
+    "warmup_optimizer_steps",
+    "warmup_samples_per_sec",
+    "warmup_total_time_s",
+    "warmup_p99_s",
+    "cold_start_steps",
+    "cold_start_samples_per_sec",
+    "steady_steps",
+    "steady_samples",
+    "steady_optimizer_steps",
+    "steady_total_time_s",
+    "steady_p99_s",
+)
+
 PROFILE_SUMMARY_FIELDS = (
     "profile_total_s",
     "profile_flat_metric_invalid_count",
@@ -97,7 +129,13 @@ DEVICE_MEMORY_SUMMARY_FIELDS = (
     "mps_recommended_max_mem_bytes",
 )
 
-SUMMARY_FIELDS = BASE_SUMMARY_FIELDS + PROFILE_SUMMARY_FIELDS + DEVICE_MEMORY_SUMMARY_FIELDS
+SUMMARY_FIELDS = (
+    BASE_SUMMARY_FIELDS
+    + BATCH_SUMMARY_FIELDS
+    + WORKLOAD_SUMMARY_FIELDS
+    + PROFILE_SUMMARY_FIELDS
+    + DEVICE_MEMORY_SUMMARY_FIELDS
+)
 
 BEST_RUN_FIELDS = (
     "run",
@@ -106,9 +144,33 @@ BEST_RUN_FIELDS = (
     "reported_samples_per_sec",
     "samples_per_sec",
     "steady_samples_per_sec",
+    "p99_s",
+    "std_batch_s",
+    "best_samples_per_sec",
+    "headroom_ratio",
     "end_to_end_wall_time_s",
     "setup_time_s",
     "wall_time_s",
+    "steps",
+    "samples",
+    "optimizer_steps",
+    "grad_accum",
+    "partial_optimizer_steps",
+    "grad_accum_tail_steps",
+    "warmup_steps",
+    "warmup_samples",
+    "warmup_optimizer_steps",
+    "warmup_samples_per_sec",
+    "warmup_total_time_s",
+    "warmup_p99_s",
+    "cold_start_steps",
+    "cold_start_time_s",
+    "cold_start_samples_per_sec",
+    "steady_steps",
+    "steady_samples",
+    "steady_optimizer_steps",
+    "steady_total_time_s",
+    "steady_p99_s",
     "profile_flat_metric_invalid_count",
     "profile_forward_backward_pct",
     "profile_forward_backward_time_s",
@@ -132,6 +194,7 @@ BEST_RUN_FIELDS = (
 )
 
 DEVICE_CHOICES = ("auto", "cpu", "cuda", "mps")
+BEST_RUN_TEXT_FIELDS = frozenset({"dataset_mode"})
 
 
 @dataclass
@@ -156,27 +219,34 @@ def _summary_row(row: dict) -> dict:
     return normalized
 
 
+def _finite_summary_value(raw: object) -> Optional[float]:
+    if isinstance(raw, bool):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+    return value
+
+
 def _compact_run(row: dict) -> dict:
     compact = {}
     for field in BEST_RUN_FIELDS:
         if field not in row:
             continue
         value = row[field]
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            if not math.isfinite(float(value)):
-                continue
+        if field not in BEST_RUN_TEXT_FIELDS and _finite_summary_value(value) is None:
+            continue
         compact[field] = value
     return compact
 
 
 def _finite_metric_value(row: dict, field: str) -> Optional[float]:
-    try:
-        value = float(row[field])
-    except (KeyError, TypeError, ValueError):
+    if field not in row:
         return None
-    if not math.isfinite(value):
-        return None
-    return value
+    return _finite_summary_value(row[field])
 
 
 def _best_finite_row(
@@ -206,9 +276,11 @@ def summary_fields_for_rows(rows: list[dict]) -> tuple[str, ...]:
     present_fields = set()
     for row in rows:
         present_fields.update(row.keys())
+    batch_fields = tuple(field for field in BATCH_SUMMARY_FIELDS if field in present_fields)
+    workload_fields = tuple(field for field in WORKLOAD_SUMMARY_FIELDS if field in present_fields)
     profile_fields = tuple(field for field in PROFILE_SUMMARY_FIELDS if field in present_fields)
     memory_fields = tuple(field for field in DEVICE_MEMORY_SUMMARY_FIELDS if field in present_fields)
-    return BASE_SUMMARY_FIELDS + profile_fields + memory_fields
+    return BASE_SUMMARY_FIELDS + batch_fields + workload_fields + profile_fields + memory_fields
 
 
 def count_profiled_rows(rows: list[dict]) -> int:
@@ -224,12 +296,8 @@ def summarize_metric(rows: list[dict], field: str, *, missing_as_zero: bool = Tr
     non_finite_count = 0
     for row in rows:
         if field in row:
-            try:
-                value = float(row[field])
-            except (TypeError, ValueError):
-                non_finite_count += 1
-                continue
-            if not math.isfinite(value):
+            value = _finite_summary_value(row[field])
+            if value is None:
                 non_finite_count += 1
                 continue
             values.append(value)
