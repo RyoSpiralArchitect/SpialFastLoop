@@ -120,6 +120,7 @@ Profile the transactional benchmark:
 ```bash
 python scripts/bench_parallel_transactions.py \
   --device mps --steps 40 --runs 1 --workers 2 \
+  --dataset-mode materialized \
   --warmup-steps 4 --no-compile \
   --collect-profile --profile-model --profile-model-depth 1 \
   --profile-model-include 0,2 \

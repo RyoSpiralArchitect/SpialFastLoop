@@ -33,16 +33,35 @@ class BenchmarkResult:
 class SyntheticTransactionDataset(Dataset):
     """Synthetic tabular dataset that simulates transactional workloads."""
 
-    def __init__(self, size: int, features: int, classes: int, *, seed: int = 17) -> None:
+    def __init__(
+        self,
+        size: int,
+        features: int,
+        classes: int,
+        *,
+        seed: int = 17,
+        materialized: bool = False,
+    ) -> None:
         self.size = size
         self.features = features
         self.classes = classes
         self.seed = seed
+        self.materialized = bool(materialized)
+        self._features: torch.Tensor | None = None
+        self._targets: torch.Tensor | None = None
+        if self.materialized:
+            generator = torch.Generator()
+            generator.manual_seed(seed)
+            self._features = torch.randn(size, features, generator=generator)
+            self._targets = torch.randint(0, classes, (size,), generator=generator)
 
     def __len__(self) -> int:
         return self.size
 
     def __getitem__(self, index: int):
+        if self.materialized:
+            assert self._features is not None and self._targets is not None
+            return self._features[index], self._targets[index]
         generator = torch.Generator()
         generator.manual_seed(self.seed + index)
         features = torch.randn(self.features, generator=generator)
@@ -67,6 +86,7 @@ def run_once(args, run_index: int) -> BenchmarkResult:
         features=args.feature_dim,
         classes=args.num_classes,
         seed=args.seed + run_index,
+        materialized=args.dataset_mode == "materialized",
     )
 
     loader = dataloader_from_dataset(
@@ -113,6 +133,7 @@ def run_once(args, run_index: int) -> BenchmarkResult:
         "batch_size": args.batch_size,
         "num_workers": args.workers,
         "transactions": args.transactions,
+        "dataset_mode": args.dataset_mode,
     })
     return BenchmarkResult(wall_time_s=wall, trainer_metrics=metrics, run_index=run_index)
 
@@ -122,6 +143,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--transactions", type=int, default=100_000, help="Total synthetic transactions to sample.")
     parser.add_argument("--feature-dim", type=int, default=128, help="Width of each synthetic transaction vector.")
     parser.add_argument("--num-classes", type=int, default=32, help="Number of synthetic classification targets.")
+    parser.add_argument(
+        "--dataset-mode",
+        choices=["generated", "materialized"],
+        default="generated",
+        help="Generate each sample on demand or precompute tensors once to reduce DataLoader noise.",
+    )
     parser.add_argument("--batch-size", type=int, default=512, help="Batch size for the benchmark dataloader.")
     parser.add_argument("--grad-accum", type=int, default=2, help="Gradient accumulation factor.")
     parser.add_argument("--workers", type=int, default=4, help="Number of dataloader worker processes.")

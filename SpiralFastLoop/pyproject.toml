@@ -23,7 +23,7 @@ classifiers = [
 extras = ["transformers>=4.40"]
 dev = [
   "pytest>=8.0",
-  "mypy>=1.9",
+  "mypy>=1.9,<2.0",
   "flake8>=7.0",
 ]
 
@@ -50,6 +50,14 @@ ignore_errors = true
 [[tool.mypy.overrides]]
 module = ["transformers", "transformers.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["jax", "jax.*"]
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = ["torch", "torch.*"]
+follow_imports = "skip"
 
 [tool.flake8]
 max-line-length = 120
