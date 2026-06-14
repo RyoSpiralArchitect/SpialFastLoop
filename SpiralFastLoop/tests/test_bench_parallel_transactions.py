@@ -14,7 +14,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.bench_parallel_transactions import (
     SyntheticTransactionDataset,
-    dump_json,
     non_negative_int_arg,
     parse_args,
     positive_float_arg,
@@ -24,6 +23,7 @@ from scripts.bench_parallel_transactions import (
     summarize_results,
     validate_benchmark_args,
 )
+from scripts.json_utils import dump_json
 
 
 def test_materialized_transaction_dataset_matches_shape_and_is_stable() -> None:

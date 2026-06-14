@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -17,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer
 from spiralfastloop.utils import dataloader_from_dataset, get_best_device
+from scripts.json_utils import dumps_json
 
 
 def _build_fake_dataset(size: int, image_size: int, classes: int) -> TensorDataset:
@@ -203,7 +203,7 @@ def main() -> None:
     if args.json_out:
         out_path = Path(args.json_out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        out_path.write_text(dumps_json(payload), encoding="utf-8")
         print(f"wrote {out_path}")
 
 

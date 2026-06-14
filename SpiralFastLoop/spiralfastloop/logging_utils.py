@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import math
 import os
 import time
 from dataclasses import dataclass, field
@@ -16,15 +17,29 @@ import torch
 __all__ = ["MetricsLogger", "default_logger"]
 
 
+def _json_safe_metric_value(value: Any) -> Any:
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _json_safe_metric_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_metric_value(item) for item in value]
+    return value
+
+
 def _normalize_metric_value(value: Any) -> Any:
     if isinstance(value, torch.Tensor):
         if value.numel() == 1:
-            return float(value.detach().cpu().item())
-        return value.detach().cpu().tolist()
+            return _json_safe_metric_value(float(value.detach().cpu().item()))
+        return _json_safe_metric_value(value.detach().cpu().tolist())
+    if isinstance(value, dict):
+        return _json_safe_metric_value({key: _normalize_metric_value(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return _json_safe_metric_value([_normalize_metric_value(item) for item in value])
     if isinstance(value, (int, float, str, bool)) or value is None:
-        return value
+        return _json_safe_metric_value(value)
     try:
-        return float(value)
+        return _json_safe_metric_value(float(value))
     except (TypeError, ValueError):
         return str(value)
 
@@ -61,7 +76,7 @@ class MetricsLogger:
             return
         self._ensure_dir(self.jsonl_path)
         with open(self.jsonl_path, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            handle.write(json.dumps(payload, ensure_ascii=False, allow_nan=False) + "\n")
 
     def _write_csv(self, payload: Dict[str, Any]) -> None:
         if self.csv_path is None:

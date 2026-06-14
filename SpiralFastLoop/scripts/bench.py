@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import time
 from pathlib import Path
@@ -16,6 +15,7 @@ from torch.utils.data import DataLoader, Dataset
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer, recommended_dataloader
+from scripts.json_utils import dumps_json
 
 
 class Synth(Dataset):
@@ -145,7 +145,7 @@ def main() -> None:
         warmup_steps=args.warmup_steps,
     )
 
-    print(json.dumps({"device": str(device), "baseline": baseline, "spiralfastloop": fast}, indent=2))
+    print(dumps_json({"device": str(device), "baseline": baseline, "spiralfastloop": fast}))
 
 
 if __name__ == "__main__":

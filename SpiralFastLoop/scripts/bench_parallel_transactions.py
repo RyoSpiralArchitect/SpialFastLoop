@@ -4,13 +4,11 @@
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TextIO
 
 import torch
 import torch.nn as nn
@@ -20,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer
 from spiralfastloop.utils import dataloader_from_dataset
+from scripts.json_utils import dump_json, dumps_json
 
 BASE_SUMMARY_FIELDS = (
     "reported_samples_per_sec",
@@ -94,20 +93,6 @@ def _summary_row(row: dict) -> dict:
 
 def _compact_run(row: dict) -> dict:
     return {field: row[field] for field in BEST_RUN_FIELDS if field in row}
-
-
-def json_safe(value: Any) -> Any:
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    if isinstance(value, dict):
-        return {key: json_safe(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [json_safe(item) for item in value]
-    return value
-
-
-def dump_json(payload: Any, handle: TextIO) -> None:
-    json.dump(json_safe(payload), handle, indent=2, allow_nan=False)
 
 
 def summary_fields_for_rows(rows: list[dict]) -> tuple[str, ...]:
@@ -527,7 +512,7 @@ def main() -> None:
             dump_json(aggregate, handle)
         print(f"Wrote aggregate summary to {out_path}")
 
-    print("Aggregate:", json.dumps(json_safe(aggregate), indent=2, allow_nan=False))
+    print("Aggregate:", dumps_json(aggregate))
 
 
 if __name__ == "__main__":

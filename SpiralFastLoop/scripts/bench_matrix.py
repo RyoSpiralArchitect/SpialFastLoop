@@ -13,7 +13,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bench_parallel_transactions import (
     BASE_SUMMARY_FIELDS,
     count_profiled_rows,
-    dump_json,
     non_negative_int_arg,
     positive_float_arg,
     positive_int_arg,
@@ -22,6 +21,7 @@ from bench_parallel_transactions import (
     summary_fields_for_rows,
     validate_benchmark_args,
 )
+from json_utils import dump_json
 
 
 def _parse_csv_choices(raw: str, allowed: set[str], *, name: str) -> list[str]:
