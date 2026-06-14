@@ -18,6 +18,9 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.dataset import Dataset
 
+SampleWindow = Union[deque[float], Tuple[()], list[float]]
+
+
 def get_best_device() -> str:
     """Pick the best available device among CUDA, MPS, CPU."""
     if torch.cuda.is_available():
@@ -183,7 +186,7 @@ def dataloader_from_dataset(
             workers = max(2, cpu_count // 2)
     if pin_memory is None:
         pin_memory = (_device_type(device) == "cuda")
-    sampler = None
+    sampler: Optional[DistributedSampler[Any]] = None
     if distributed:
         ctx = get_distributed_context()
         if ctx.world_size > 1:
@@ -394,7 +397,12 @@ class ThroughputMeter:
             self._start = self._meter._time_fn()
             return self
 
-        def __exit__(self, exc_type, exc, tb) -> bool:
+        def __exit__(
+            self,
+            exc_type: Optional[type[BaseException]],
+            exc: Optional[BaseException],
+            tb: Any,
+        ) -> Literal[False]:
             end = self._meter._time_fn()
             self._meter.last = end
             if self._start is None:
@@ -686,7 +694,7 @@ class PhaseProfiler:
         if len(values) < 2:
             return 0.0
         mean = math.fsum(values) / len(values)
-        return (math.fsum((value - mean) ** 2 for value in values) / (len(values) - 1)) ** 0.5
+        return math.sqrt(math.fsum((value - mean) ** 2 for value in values) / (len(values) - 1))
 
     def _record(self, name: str, seconds: float) -> None:
         duration = float(seconds)
@@ -717,7 +725,7 @@ class PhaseProfiler:
         self,
         total: float,
         calls: int,
-        samples: deque[float] | tuple[()] | list[float],
+        samples: SampleWindow,
         denom: float,
         pct_name: str = "pct",
     ) -> Dict[str, Any]:
@@ -741,7 +749,7 @@ class PhaseProfiler:
             })
         return row
 
-    def _event_row(self, total: float, calls: int, samples: deque[float] | list[float]) -> Dict[str, Any]:
+    def _event_row(self, total: float, calls: int, samples: SampleWindow) -> Dict[str, Any]:
         calls = max(1, int(calls))
         sample_values = list(samples or ())
         row: Dict[str, Any] = {

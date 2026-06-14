@@ -92,7 +92,7 @@ def _split_batch(batch: Any, batch_size: int) -> list[Any]:
         if len(batch) == batch_size and not (batch and isinstance(batch[0], torch.Tensor)):
             return list(batch)
         per_item = [_split_batch(item, batch_size) for item in batch]
-        samples = []
+        samples: list[Any] = []
         for i in range(batch_size):
             assembled = [per_item[j][i] for j in range(len(per_item))]
             if isinstance(batch, tuple):

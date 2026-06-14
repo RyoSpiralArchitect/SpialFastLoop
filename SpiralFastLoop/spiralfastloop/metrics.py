@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 import csv
 import time
 
@@ -94,7 +94,7 @@ class NormalizationMetricsCollector:
             "avg_abs_after": avg_after,
         }
 
-    def to_timeseries(self) -> List[Dict[str, float]]:
+    def to_timeseries(self) -> List[Dict[str, Any]]:
         return [
             {
                 "timestamp": event.timestamp,

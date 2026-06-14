@@ -33,7 +33,6 @@ if HAVE_HYPOTHESIS:
         rest = st.lists(st.integers(min_value=1, max_value=4), min_size=0, max_size=2)
         return rest.map(lambda dims: torch.randn((batch_dim, *dims), dtype=torch.float32))
 
-
     @st.composite
     def batch_structure(draw, depth: int = 0, batch_dim: int | None = None):
         if batch_dim is None:
@@ -63,7 +62,6 @@ if HAVE_HYPOTHESIS:
         base = {k: draw(batch_structure(depth + 1, batch_dim=batch_dim)) for k in keys}
         return base
 
-
     def _extra_like(base):
         if torch.is_tensor(base):
             return base + 1.0
@@ -86,13 +84,11 @@ if HAVE_HYPOTHESIS:
                 return new_mapping
         raise TypeError(f"Unsupported batch leaf: {type(base)!r}")
 
-
     @st.composite
     def batch_pairs(draw):
         base = draw(batch_structure())
         extra = _extra_like(base)
         return base, extra
-
 
     def _assert_structure(result, base, extra):
         if torch.is_tensor(base):
@@ -122,7 +118,6 @@ if HAVE_HYPOTHESIS:
             return
         raise AssertionError(f"Unexpected structure {type(base)!r}")
 
-
     def _structures_close(first, second):
         if torch.is_tensor(first) and torch.is_tensor(second):
             assert torch.allclose(first, second)
@@ -147,7 +142,6 @@ if HAVE_HYPOTHESIS:
             return
         raise AssertionError(f"Unexpected structure {type(first)!r}")
 
-
     def _expected_batch_size(batch):
         if torch.is_tensor(batch):
             return int(batch.shape[0])
@@ -164,7 +158,6 @@ if HAVE_HYPOTHESIS:
             return len(batch)
         raise AssertionError(f"Unsupported batch element {type(batch)!r}")
 
-
     @settings(max_examples=120, suppress_health_check=[HealthCheck.too_slow])
     @given(batch_pairs())
     def test_concatenate_batches_preserves_structure(pair):
@@ -176,13 +169,11 @@ if HAVE_HYPOTHESIS:
         combined_size = _expected_batch_size(combined)
         assert combined_size == base_size + extra_size
 
-
     @settings(max_examples=120, suppress_health_check=[HealthCheck.too_slow])
     @given(batch_structure())
     def test_concatenate_handles_none_base(extra):
         combined = _concatenate_batches(None, extra)
         _structures_close(combined, extra)
-
 
     @settings(max_examples=120, suppress_health_check=[HealthCheck.too_slow])
     @given(batch_structure())
@@ -268,7 +259,6 @@ if HAVE_HYPOTHESIS:
         dim1 = draw(st.integers(min_value=1, max_value=4))
         dim2 = draw(st.integers(min_value=1, max_value=4))
         return torch.randn(dim0, dim1, dim2, dtype=torch.float32)
-
 
     @settings(max_examples=120, suppress_health_check=[HealthCheck.too_slow])
     @given(loss_tensors())

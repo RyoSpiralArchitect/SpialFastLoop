@@ -59,13 +59,13 @@ class CoherenceTailBoost(LogitsProcessor):
         self,
         start_frac: float = 0.7,
         mu: float = 0.4,
-        tiny_model: Optional[AutoModelForCausalLM] = None,
-        primary_tokenizer: Optional[AutoTokenizer] = None,
-        tiny_tokenizer: Optional[AutoTokenizer] = None,
+        tiny_model: Optional[Any] = None,
+        primary_tokenizer: Optional[Any] = None,
+        tiny_tokenizer: Optional[Any] = None,
     ) -> None:
         self.sf: float = start_frac
         self.mu: float = mu
-        self.tiny: Optional[AutoModelForCausalLM] = tiny_model
+        self.tiny: Optional[Any] = tiny_model
         self.step: int = 0
         self.max_steps: Optional[int] = None
         self.past: Any = None
@@ -130,11 +130,11 @@ def surprise_repair_generate(
     mu: float = 0.4,
     **genkw: Any,
 ) -> str:
-    tok = AutoTokenizer.from_pretrained(main_name)
-    main = AutoModelForCausalLM.from_pretrained(main_name, device_map="auto").eval()
+    tok: Any = AutoTokenizer.from_pretrained(main_name)
+    main: Any = AutoModelForCausalLM.from_pretrained(main_name, device_map="auto").eval()
 
-    tiny: Optional[AutoModelForCausalLM] = None
-    tiny_tok: Optional[AutoTokenizer] = None
+    tiny: Optional[Any] = None
+    tiny_tok: Optional[Any] = None
     if tiny_name is not None:
         tiny_tok = AutoTokenizer.from_pretrained(tiny_name)
         tiny = AutoModelForCausalLM.from_pretrained(tiny_name, device_map="auto").eval()

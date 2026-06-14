@@ -80,7 +80,7 @@ def _stochastic_round(value: float, unit: float, rng: random.Random) -> float:
     return lower * unit
 
 
-@dataclass(slots=True)
+@dataclass
 class HybridCompensatedAccumulator:
     """Running sum with compensation and stochastic rounding.
 

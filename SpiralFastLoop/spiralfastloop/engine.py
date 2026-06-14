@@ -355,22 +355,22 @@ class FastTrainer:
                 dynamo = getattr(torch, "_dynamo", None)
                 disable = getattr(dynamo, "disable", None)
                 if callable(disable):
-                    return disable(hook)
+                    return cast(Callable[..., Any], disable(hook))
             except Exception:
                 pass
             return hook
 
-        def forward_pre(label: str):
+        def forward_pre(label: str) -> Callable[[nn.Module, Any], None]:
             def hook(_module: nn.Module, _inputs: Any) -> None:
                 profiler.start_detail("forward", label)
             return hook
 
-        def forward_post(label: str):
+        def forward_post(label: str) -> Callable[[nn.Module, Any, Any], None]:
             def hook(_module: nn.Module, _inputs: Any, _outputs: Any) -> None:
                 profiler.stop_detail("forward", label)
             return hook
 
-        def grad_ready(label: str):
+        def grad_ready(label: str) -> Callable[[torch.Tensor], torch.Tensor]:
             def hook(grad: torch.Tensor) -> torch.Tensor:
                 profiler.record_event_since_start("backward", "backward_grad_ready", label)
                 return grad
