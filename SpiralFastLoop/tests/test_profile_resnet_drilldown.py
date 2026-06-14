@@ -104,6 +104,43 @@ def test_validate_resnet_profile_args_rejects_unknown_direct_dataset() -> None:
         drilldown.validate_resnet_profile_args(args)
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("image_size", 0, "image_size"),
+        ("image_size", 1.5, "image_size"),
+        ("image_size", True, "image_size"),
+        ("topk", 0, "topk"),
+        ("topk", "2", "topk"),
+        ("topk", True, "topk"),
+        ("download", 1, "download"),
+        ("download", "true", "download"),
+    ],
+)
+def test_validate_resnet_profile_args_rejects_invalid_optional_direct_values(
+    field: str,
+    value: object,
+    match: str,
+) -> None:
+    args = Namespace(
+        dataset="fake",
+        dataset_size=8,
+        batch_size=4,
+        steps=1,
+        warmup_steps=0,
+    )
+    setattr(args, field, value)
+
+    with pytest.raises(ValueError, match=match):
+        drilldown.validate_resnet_profile_args(args)
+
+
+@pytest.mark.parametrize("topk", [0, 1.5, True, "2"])
+def test_print_summary_rejects_invalid_direct_topk(topk: object) -> None:
+    with pytest.raises(ValueError, match="topk"):
+        drilldown._print_summary({"samples_per_sec": 1.0}, topk=topk)  # type: ignore[arg-type]
+
+
 def test_print_summary_formats_malformed_metrics_as_na(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

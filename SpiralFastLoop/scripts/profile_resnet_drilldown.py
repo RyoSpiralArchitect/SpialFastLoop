@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer
 from spiralfastloop.utils import (
+    _bool_setting,
     _positive_int_setting,
     dataloader_from_dataset,
     get_best_device,
@@ -98,6 +99,7 @@ def _top_rows(profile: dict[str, Any], group: str, key: str, limit: int) -> list
 
 
 def _print_summary(metrics: dict[str, Any], topk: int) -> None:
+    topk = _positive_int_setting(topk, "topk")
     profile = _dict_value(metrics.get("profile"))
     print(
         f"samples_per_sec="
@@ -170,6 +172,12 @@ def validate_resnet_profile_args(args: argparse.Namespace) -> None:
     dataset_name = _dataset_arg(args.dataset)
     dataset_size = _positive_int_setting(args.dataset_size, "dataset_size")
     batch_size = _positive_int_setting(args.batch_size, "batch_size")
+    if hasattr(args, "image_size"):
+        _positive_int_setting(args.image_size, "image_size")
+    if hasattr(args, "topk"):
+        _positive_int_setting(args.topk, "topk")
+    if hasattr(args, "download"):
+        _bool_setting(args.download, "download")
     if dataset_name == "fake" and dataset_size < batch_size:
         raise ValueError("dataset-size must be at least batch-size when using --dataset fake.")
 
