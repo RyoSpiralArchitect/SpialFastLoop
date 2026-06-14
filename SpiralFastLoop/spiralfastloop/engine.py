@@ -539,6 +539,14 @@ def _optional_metrics_fn_setting(metrics_fn: Any) -> Optional[Callable[[Any, Any
     return cast(Callable[[Any, Any, Any], Any], metrics_fn)
 
 
+def _optional_postprocess_setting(postprocess: Any) -> Optional[Callable[[Any], Any]]:
+    if postprocess is None:
+        return None
+    if not callable(postprocess):
+        raise ValueError("postprocess must be callable")
+    return cast(Callable[[Any], Any], postprocess)
+
+
 def _optional_ddp_kwargs_setting(ddp_kwargs: Any) -> Dict[str, Any]:
     if ddp_kwargs is None:
         return {}
@@ -1592,6 +1600,7 @@ class FastTrainer:
         profile_sync_value = _bool_setting(profile_sync, "profile_sync")
         profile_distribution_value = _bool_setting(profile_distribution, "profile_distribution")
         return_metrics_value = _bool_setting(return_metrics, "return_metrics")
+        postprocess_value = _optional_postprocess_setting(postprocess)
         metrics_requested = return_metrics_value or collect_profile_value
         self.model.eval()
         outputs_list: list[Any] = []
@@ -1610,6 +1619,37 @@ class FastTrainer:
         measured_steps = 0
         batch_size_inference_failures = 0
         batch_size_failure_counts = _new_batch_size_failure_counts()
+        postprocess_requested = postprocess_value is not None
+        postprocess_calls = 0
+        postprocess_failures = 0
+        postprocess_last_error = ""
+
+        def build_predict_metrics(*, failed: bool = False, failure_stage: str = "") -> Dict[str, Any]:
+            metrics: Dict[str, Any] = dict(meter.summary())
+            metrics.update(_collect_device_memory_metrics(self.device))
+            metrics["steps"] = step_idx
+            metrics["measured_steps"] = measured_steps
+            metrics["unmeasured_steps"] = step_idx - measured_steps
+            metrics["batch_size_inference_failures"] = batch_size_inference_failures
+            _add_batch_size_failure_metrics(metrics, batch_size_failure_counts)
+            metrics["samples"] = total_items
+            metrics["reported_samples_per_sec"] = metrics["samples_per_sec"]
+            metrics["device"] = self.device
+            metrics["world_size"] = self.dist_ctx.world_size
+            metrics["rank"] = self.dist_ctx.rank
+            metrics["postprocess_requested"] = postprocess_requested
+            metrics["postprocess_calls"] = postprocess_calls
+            metrics["postprocess_successes"] = postprocess_calls - postprocess_failures
+            metrics["postprocess_failures"] = postprocess_failures
+            metrics["postprocess_last_error"] = postprocess_last_error
+            metrics["predict_failed"] = failed
+            metrics["predict_failure_stage"] = failure_stage
+            if collect_profile_value:
+                profile_summary = profiler.summary()
+                metrics["profile"] = profile_summary
+                _add_profile_phase_metrics(metrics, profile_summary)
+            return metrics
+
         with torch.no_grad():
             data_iter = iter(loader)
             while step_limit is None or step_idx < step_limit:
@@ -1639,10 +1679,27 @@ class FastTrainer:
                         outputs = self.model(inputs)
                     finally:
                         profiler.stop("forward")
-                if postprocess is not None:
+                if postprocess_value is not None:
                     profiler.start("postprocess")
                     try:
-                        outputs = postprocess(outputs)
+                        postprocess_calls += 1
+                        outputs = postprocess_value(outputs)
+                    except Exception as exc:
+                        postprocess_failures += 1
+                        postprocess_last_error = _format_exception_reason(exc)
+                        if metrics_requested:
+                            try:
+                                self._log_metrics(
+                                    "predict",
+                                    build_predict_metrics(
+                                        failed=True,
+                                        failure_stage="postprocess",
+                                    ),
+                                    mode="error",
+                                )
+                            except Exception:
+                                pass
+                        raise
                     finally:
                         profiler.stop("postprocess")
                 batch_size, batch_size_failure_reason = (
@@ -1669,21 +1726,6 @@ class FastTrainer:
                         profiler.stop("metrics")
         if not metrics_requested:
             return outputs_list
-        metrics: Dict[str, Any] = dict(meter.summary())
-        metrics.update(_collect_device_memory_metrics(self.device))
-        metrics["steps"] = step_idx
-        metrics["measured_steps"] = measured_steps
-        metrics["unmeasured_steps"] = step_idx - measured_steps
-        metrics["batch_size_inference_failures"] = batch_size_inference_failures
-        _add_batch_size_failure_metrics(metrics, batch_size_failure_counts)
-        metrics["samples"] = total_items
-        metrics["reported_samples_per_sec"] = metrics["samples_per_sec"]
-        metrics["device"] = self.device
-        metrics["world_size"] = self.dist_ctx.world_size
-        metrics["rank"] = self.dist_ctx.rank
-        if collect_profile_value:
-            profile_summary = profiler.summary()
-            metrics["profile"] = profile_summary
-            _add_profile_phase_metrics(metrics, profile_summary)
+        metrics = build_predict_metrics()
         self._log_metrics("predict", metrics, mode="epoch")
         return outputs_list, metrics

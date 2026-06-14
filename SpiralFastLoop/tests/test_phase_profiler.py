@@ -507,6 +507,30 @@ def test_predict_rejects_invalid_boolean_settings(
         trainer.predict(loader, **predict_kwargs)  # type: ignore[arg-type]
 
 
+def test_predict_rejects_invalid_postprocess_before_loop() -> None:
+    class CountingModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+            self.proj = nn.Linear(4, 2)
+
+        def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+            self.calls += 1
+            return self.proj(inputs)
+
+    inputs = torch.randn(2, 4)
+    targets = torch.zeros(2)
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
+    model = CountingModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    with pytest.raises(ValueError, match="postprocess"):
+        trainer.predict(loader, postprocess=object())  # type: ignore[arg-type]
+
+    assert model.calls == 0
+
+
 def test_predict_detaches_nested_outputs_to_cpu() -> None:
     class NestedOutputModel(nn.Module):
         def __init__(self) -> None:
@@ -831,10 +855,69 @@ def test_predict_can_return_metrics_and_phase_profile() -> None:
     assert metrics["batch_size_inference_failure_reasons"] == {}
     assert metrics["samples"] == 6
     assert metrics["reported_samples_per_sec"] == metrics["samples_per_sec"]
+    assert metrics["postprocess_requested"] is True
+    assert metrics["postprocess_calls"] == 2
+    assert metrics["postprocess_successes"] == 2
+    assert metrics["postprocess_failures"] == 0
+    assert metrics["postprocess_last_error"] == ""
+    assert metrics["predict_failed"] is False
+    assert metrics["predict_failure_stage"] == ""
     for phase_name in ("data_wait", "transfer", "forward", "postprocess", "collect_output", "metrics"):
         assert phase_name in phases
         assert metrics[f"profile_{phase_name}_time_s"] == pytest.approx(phases[phase_name]["total_s"])
         assert metrics[f"profile_{phase_name}_pct"] == pytest.approx(phases[phase_name]["pct"])
+
+
+def test_predict_logs_postprocess_failures_before_reraising() -> None:
+    class CapturingLogger:
+        def __init__(self) -> None:
+            self.rows: list[tuple[str, dict[str, object], str]] = []
+
+        def log_metrics(
+            self,
+            stage: str,
+            metrics: dict[str, object],
+            *,
+            mode: str = "step",
+            **_: object,
+        ) -> None:
+            self.rows.append((stage, metrics, mode))
+
+    inputs = torch.randn(2, 4)
+    targets = torch.zeros(2)
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 2))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    logger = CapturingLogger()
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        logger=logger,
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
+
+    def postprocess(_outputs: torch.Tensor) -> torch.Tensor:
+        raise RuntimeError("postprocess boom")
+
+    with pytest.raises(RuntimeError, match="postprocess boom"):
+        trainer.predict(loader, postprocess=postprocess, return_metrics=True, steps=1)
+
+    assert len(logger.rows) == 1
+    stage, metrics, mode = logger.rows[0]
+    assert stage == "predict"
+    assert mode == "error"
+    assert metrics["steps"] == 1
+    assert metrics["measured_steps"] == 0
+    assert metrics["postprocess_requested"] is True
+    assert metrics["postprocess_calls"] == 1
+    assert metrics["postprocess_successes"] == 0
+    assert metrics["postprocess_failures"] == 1
+    assert metrics["postprocess_last_error"] == "RuntimeError: postprocess boom"
+    assert metrics["predict_failed"] is True
+    assert metrics["predict_failure_stage"] == "postprocess"
 
 
 def test_predict_reports_unmeasured_steps_when_batch_size_is_unknown() -> None:
@@ -868,6 +951,10 @@ def test_predict_reports_unmeasured_steps_when_batch_size_is_unknown() -> None:
     assert metrics["batch_size_inference_failure_reasons"] == {"unsupported_type": 2}
     assert metrics["batch_size_inference_unsupported_type_failures"] == 2
     assert metrics["batch_size_inference_tensor_scalar_failures"] == 0
+    assert metrics["postprocess_requested"] is False
+    assert metrics["postprocess_calls"] == 0
+    assert metrics["postprocess_failures"] == 0
+    assert metrics["postprocess_last_error"] == ""
     assert metrics["samples"] == 0
     assert metrics["samples_per_sec"] == 0.0
     assert metrics["reported_samples_per_sec"] == 0.0
