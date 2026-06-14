@@ -11,7 +11,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from bench_parallel_transactions import run_once, summarize_metric
+from bench_parallel_transactions import (
+    non_negative_int_arg,
+    positive_float_arg,
+    positive_int_arg,
+    run_once,
+    summarize_metric,
+    validate_benchmark_args,
+)
 
 SUMMARY_FIELDS = (
     "reported_samples_per_sec",
@@ -40,9 +47,10 @@ def _parse_worker_counts(raw: str) -> list[int]:
         text = item.strip()
         if not text:
             continue
-        value = int(text)
-        if value < 0:
-            raise ValueError("worker counts must be non-negative")
+        try:
+            value = non_negative_int_arg(text)
+        except argparse.ArgumentTypeError as exc:
+            raise ValueError(f"worker counts {exc}") from exc
         values.append(value)
     if not values:
         raise ValueError("worker counts must include at least one value")
@@ -112,33 +120,38 @@ def _format_summary_row(row: dict) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--transactions", type=int, default=4096)
-    parser.add_argument("--feature-dim", type=int, default=64)
-    parser.add_argument("--num-classes", type=int, default=8)
-    parser.add_argument("--batch-size", type=int, default=128)
-    parser.add_argument("--grad-accum", type=int, default=2)
-    parser.add_argument("--steps", type=int, default=16)
-    parser.add_argument("--warmup-steps", type=int, default=2)
-    parser.add_argument("--runs", type=int, default=1)
-    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--transactions", type=positive_int_arg, default=4096)
+    parser.add_argument("--feature-dim", type=positive_int_arg, default=64)
+    parser.add_argument("--num-classes", type=positive_int_arg, default=8)
+    parser.add_argument("--batch-size", type=positive_int_arg, default=128)
+    parser.add_argument("--grad-accum", type=positive_int_arg, default=2)
+    parser.add_argument("--steps", type=positive_int_arg, default=16)
+    parser.add_argument("--warmup-steps", type=non_negative_int_arg, default=2)
+    parser.add_argument("--runs", type=positive_int_arg, default=1)
+    parser.add_argument("--learning-rate", type=positive_float_arg, default=3e-4)
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--device", type=str, default="auto")
-    parser.add_argument("--prefetch-factor", type=int, default=4)
-    parser.add_argument("--log-interval", type=int, default=0)
+    parser.add_argument("--prefetch-factor", type=positive_int_arg, default=4)
+    parser.add_argument("--log-interval", type=non_negative_int_arg, default=0)
     parser.add_argument("--dataset-modes", type=str, default="generated,materialized")
     parser.add_argument("--compile-modes", type=str, default="no-compile")
     parser.add_argument("--worker-counts", type=str, default="0")
     parser.add_argument("--collect-profile", action="store_true")
     parser.add_argument("--profile-sync", action="store_true")
     parser.add_argument("--no-profile-distribution", dest="profile_distribution", action="store_false")
-    parser.add_argument("--profile-window", type=int, default=512)
+    parser.add_argument("--profile-window", type=positive_int_arg, default=512)
     parser.add_argument("--profile-model", action="store_true")
-    parser.add_argument("--profile-model-depth", type=int, default=1)
-    parser.add_argument("--profile-model-max-modules", type=int, default=64)
+    parser.add_argument("--profile-model-depth", type=non_negative_int_arg, default=1)
+    parser.add_argument("--profile-model-max-modules", type=positive_int_arg, default=64)
     parser.add_argument("--profile-model-include", type=str, default=None)
     parser.add_argument("--json-out", type=str, default=None)
     parser.add_argument("--summary-out", type=str, default=None)
-    return parser.parse_args()
+    args = parser.parse_args()
+    try:
+        validate_benchmark_args(args)
+    except ValueError as exc:
+        parser.error(str(exc))
+    return args
 
 
 def _run_args(args: argparse.Namespace, dataset_mode: str, compile_mode: str, workers: int) -> Namespace:

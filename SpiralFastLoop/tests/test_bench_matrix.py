@@ -34,6 +34,8 @@ def test_parse_worker_counts_rejects_empty_or_negative_values() -> None:
         _parse_worker_counts("")
     with pytest.raises(ValueError):
         _parse_worker_counts("-1")
+    with pytest.raises(ValueError):
+        _parse_worker_counts("cpu")
 
 
 def test_compile_requested_maps_modes() -> None:

@@ -104,6 +104,42 @@ def summarize_results(rows: list[dict]) -> dict:
     return summary
 
 
+def _int_arg(raw: str) -> int:
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+
+
+def positive_int_arg(raw: str) -> int:
+    value = _int_arg(raw)
+    if value <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return value
+
+
+def non_negative_int_arg(raw: str) -> int:
+    value = _int_arg(raw)
+    if value < 0:
+        raise argparse.ArgumentTypeError("must be a non-negative integer")
+    return value
+
+
+def positive_float_arg(raw: str) -> float:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("must be a number") from exc
+    if not math.isfinite(value) or value <= 0.0:
+        raise argparse.ArgumentTypeError("must be a positive finite number")
+    return value
+
+
+def validate_benchmark_args(args: argparse.Namespace) -> None:
+    if int(args.warmup_steps) > int(args.steps):
+        raise ValueError("warmup-steps must be less than or equal to steps")
+
+
 class SyntheticTransactionDataset(Dataset):
     """Synthetic tabular dataset that simulates transactional workloads."""
 
@@ -256,22 +292,22 @@ def run_once(args, run_index: int) -> BenchmarkResult:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--transactions", type=int, default=100_000, help="Total synthetic transactions to sample.")
-    parser.add_argument("--feature-dim", type=int, default=128, help="Width of each synthetic transaction vector.")
-    parser.add_argument("--num-classes", type=int, default=32, help="Number of synthetic classification targets.")
+    parser.add_argument("--transactions", type=positive_int_arg, default=100_000, help="Total synthetic transactions to sample.")
+    parser.add_argument("--feature-dim", type=positive_int_arg, default=128, help="Width of each synthetic transaction vector.")
+    parser.add_argument("--num-classes", type=positive_int_arg, default=32, help="Number of synthetic classification targets.")
     parser.add_argument(
         "--dataset-mode",
         choices=["generated", "materialized"],
         default="generated",
         help="Generate each sample on demand or precompute tensors once to reduce DataLoader noise.",
     )
-    parser.add_argument("--batch-size", type=int, default=512, help="Batch size for the benchmark dataloader.")
-    parser.add_argument("--grad-accum", type=int, default=2, help="Gradient accumulation factor.")
-    parser.add_argument("--workers", type=int, default=4, help="Number of dataloader worker processes.")
-    parser.add_argument("--prefetch-factor", type=int, default=4, help="Prefetch factor passed to the dataloader.")
+    parser.add_argument("--batch-size", type=positive_int_arg, default=512, help="Batch size for the benchmark dataloader.")
+    parser.add_argument("--grad-accum", type=positive_int_arg, default=2, help="Gradient accumulation factor.")
+    parser.add_argument("--workers", type=non_negative_int_arg, default=4, help="Number of dataloader worker processes.")
+    parser.add_argument("--prefetch-factor", type=positive_int_arg, default=4, help="Prefetch factor passed to the dataloader.")
     parser.add_argument("--device", type=str, default="auto", help="Device override (auto/cuda/mps/cpu).")
-    parser.add_argument("--steps", type=int, default=200, help="Number of training steps per run.")
-    parser.add_argument("--log-interval", type=int, default=0, help="Step log interval; 0 disables step logs.")
+    parser.add_argument("--steps", type=positive_int_arg, default=200, help="Number of training steps per run.")
+    parser.add_argument("--log-interval", type=non_negative_int_arg, default=0, help="Step log interval; 0 disables step logs.")
     parser.add_argument(
         "--no-compile",
         dest="compile",
@@ -280,12 +316,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--warmup-steps",
-        type=int,
+        type=non_negative_int_arg,
         default=0,
         help="Measure the first N steps separately and exclude them from steady-state throughput.",
     )
-    parser.add_argument("--runs", type=int, default=3, help="How many repeated runs to execute.")
-    parser.add_argument("--learning-rate", type=float, default=3e-4, help="Learning rate for the synthetic model.")
+    parser.add_argument("--runs", type=positive_int_arg, default=3, help="How many repeated runs to execute.")
+    parser.add_argument("--learning-rate", type=positive_float_arg, default=3e-4, help="Learning rate for the synthetic model.")
     parser.add_argument("--seed", type=int, default=1234, help="Base random seed for synthetic data.")
     parser.add_argument("--collect-profile", action="store_true", help="Collect train-loop phase timings.")
     parser.add_argument("--profile-sync", action="store_true", help="Synchronize accelerator around profiled phases.")
@@ -295,10 +331,10 @@ def parse_args() -> argparse.Namespace:
         action="store_false",
         help="Skip p50/p95/p99/std samples and collect phase totals only.",
     )
-    parser.add_argument("--profile-window", type=int, default=512, help="Per-phase sample window size.")
+    parser.add_argument("--profile-window", type=positive_int_arg, default=512, help="Per-phase sample window size.")
     parser.add_argument("--profile-model", action="store_true", help="Collect module-level forward/backward drilldowns.")
-    parser.add_argument("--profile-model-depth", type=int, default=1, help="Exact module depth to profile.")
-    parser.add_argument("--profile-model-max-modules", type=int, default=64, help="Maximum modules to hook.")
+    parser.add_argument("--profile-model-depth", type=non_negative_int_arg, default=1, help="Exact module depth to profile.")
+    parser.add_argument("--profile-model-max-modules", type=positive_int_arg, default=64, help="Maximum modules to hook.")
     parser.add_argument(
         "--profile-model-include",
         type=str,
@@ -317,7 +353,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional path to dump aggregate benchmark stats as JSON.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    try:
+        validate_benchmark_args(args)
+    except ValueError as exc:
+        parser.error(str(exc))
+    return args
 
 
 def main() -> None:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import argparse
 import sys
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -10,9 +12,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.bench_parallel_transactions import (
     SyntheticTransactionDataset,
+    non_negative_int_arg,
+    positive_float_arg,
+    positive_int_arg,
     run_once,
     summarize_metric,
     summarize_results,
+    validate_benchmark_args,
 )
 
 
@@ -141,6 +147,29 @@ def test_summarize_results_handles_empty_input() -> None:
     assert summary["best_end_to_end"] is None
     assert summary["mean_wall_time_s"] == pytest.approx(0.0)
     assert summary["stddev_wall_time_s"] == pytest.approx(0.0)
+
+
+def test_benchmark_arg_types_reject_empty_or_invalid_runs() -> None:
+    assert positive_int_arg("1") == 1
+    assert non_negative_int_arg("0") == 0
+    assert positive_float_arg("0.25") == pytest.approx(0.25)
+
+    for parser in (positive_int_arg, positive_float_arg):
+        with pytest.raises(argparse.ArgumentTypeError):
+            parser("0")
+    with pytest.raises(argparse.ArgumentTypeError):
+        non_negative_int_arg("-1")
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_int_arg("1.5")
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_float_arg("nan")
+
+
+def test_validate_benchmark_args_rejects_warmup_larger_than_steps() -> None:
+    with pytest.raises(ValueError, match="warmup-steps"):
+        validate_benchmark_args(Namespace(warmup_steps=3, steps=2))
+
+    validate_benchmark_args(Namespace(warmup_steps=2, steps=2))
 
 
 def test_transaction_benchmark_records_run_seed() -> None:
