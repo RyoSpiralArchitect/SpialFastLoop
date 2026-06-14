@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from argparse import Namespace
 from pathlib import Path
@@ -103,6 +104,22 @@ def test_summarize_metric_reports_distribution() -> None:
     assert stats["min"] == pytest.approx(100.0)
     assert stats["max"] == pytest.approx(300.0)
     assert stats["stddev"] == pytest.approx(100.0)
+
+
+def test_summarize_metric_skips_non_finite_values() -> None:
+    rows = [
+        {"samples_per_sec": 100.0},
+        {"samples_per_sec": float("nan")},
+        {"samples_per_sec": float("inf")},
+    ]
+
+    stats = summarize_metric(rows, "samples_per_sec")
+
+    assert stats["mean"] == pytest.approx(100.0)
+    assert stats["min"] == pytest.approx(100.0)
+    assert stats["max"] == pytest.approx(100.0)
+    assert stats["sample_count"] == pytest.approx(1.0)
+    assert stats["non_finite_count"] == pytest.approx(2.0)
 
 
 def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
@@ -220,6 +237,42 @@ def test_summarize_results_ignores_missing_rows_for_profile_aggregates() -> None
     assert summary["mean_profile_forward_backward_pct"] == pytest.approx(60.0)
     assert summary["min_profile_forward_backward_pct"] == pytest.approx(60.0)
     assert summary["stddev_profile_forward_backward_pct"] == pytest.approx(0.0)
+    assert summary["sample_count_profile_forward_backward_pct"] == pytest.approx(1.0)
+
+
+def test_summarize_results_skips_non_finite_profile_values() -> None:
+    rows = [
+        {
+            "run": 0,
+            "seed": 10,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "profile_forward_backward_pct": float("nan"),
+        },
+        {
+            "run": 1,
+            "seed": 11,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 120.0,
+            "samples_per_sec": 95.0,
+            "steady_samples_per_sec": 120.0,
+            "wall_time_s": 0.9,
+            "setup_time_s": 0.20,
+            "profile_forward_backward_pct": 60.0,
+        },
+    ]
+
+    summary = summarize_results(rows)
+
+    assert summary["profiled_runs"] == 2
+    assert summary["mean_profile_forward_backward_pct"] == pytest.approx(60.0)
+    assert summary["sample_count_profile_forward_backward_pct"] == pytest.approx(1.0)
+    assert summary["non_finite_count_profile_forward_backward_pct"] == pytest.approx(1.0)
+    json.dumps(summary, allow_nan=False)
 
 
 def test_benchmark_arg_types_reject_empty_or_invalid_runs() -> None:

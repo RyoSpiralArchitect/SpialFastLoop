@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -225,6 +226,47 @@ def test_summarize_rows_ignores_missing_rows_for_profile_aggregates() -> None:
     assert group["mean_profile_forward_backward_pct"] == pytest.approx(60.0)
     assert group["min_profile_forward_backward_pct"] == pytest.approx(60.0)
     assert group["stddev_profile_forward_backward_pct"] == pytest.approx(0.0)
+    assert group["sample_count_profile_forward_backward_pct"] == pytest.approx(1.0)
+
+
+def test_summarize_rows_skips_non_finite_profile_values() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+            "profile_forward_backward_pct": float("inf"),
+        },
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 120.0,
+            "samples_per_sec": 95.0,
+            "steady_samples_per_sec": 120.0,
+            "end_to_end_wall_time_s": 0.9,
+            "setup_time_s": 0.20,
+            "wall_time_s": 0.70,
+            "dataset_materialized_bytes": 0,
+            "profile_forward_backward_pct": 60.0,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert group["profiled_runs"] == 2
+    assert group["mean_profile_forward_backward_pct"] == pytest.approx(60.0)
+    assert group["sample_count_profile_forward_backward_pct"] == pytest.approx(1.0)
+    assert group["non_finite_count_profile_forward_backward_pct"] == pytest.approx(1.0)
+    json.dumps(summary, allow_nan=False)
 
 
 def test_summarize_rows_handles_empty_input() -> None:

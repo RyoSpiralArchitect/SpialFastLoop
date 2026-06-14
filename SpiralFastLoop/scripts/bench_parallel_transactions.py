@@ -113,21 +113,40 @@ def count_profiled_rows(rows: list[dict]) -> int:
 
 def summarize_metric(rows: list[dict], field: str, *, missing_as_zero: bool = True) -> dict[str, float]:
     values = []
+    non_finite_count = 0
     for row in rows:
         if field in row:
-            values.append(float(row[field]))
+            try:
+                value = float(row[field])
+            except (TypeError, ValueError):
+                non_finite_count += 1
+                continue
+            if not math.isfinite(value):
+                non_finite_count += 1
+                continue
+            values.append(value)
         elif missing_as_zero:
             values.append(0.0)
+    result: dict[str, float] = {}
     if not values:
-        return {"mean": 0.0, "min": 0.0, "max": 0.0, "stddev": 0.0}
+        result.update({"mean": 0.0, "min": 0.0, "max": 0.0, "stddev": 0.0})
+        if non_finite_count > 0:
+            result["sample_count"] = 0.0
+            result["non_finite_count"] = float(non_finite_count)
+        return result
     mean = sum(values) / len(values)
     variance = sum((value - mean) ** 2 for value in values) / len(values)
-    return {
+    result.update({
         "mean": mean,
         "min": min(values),
         "max": max(values),
         "stddev": math.sqrt(variance),
-    }
+    })
+    if len(values) != len(rows) or non_finite_count > 0:
+        result["sample_count"] = float(len(values))
+    if non_finite_count > 0:
+        result["non_finite_count"] = float(non_finite_count)
+    return result
 
 
 def summarize_results(rows: list[dict]) -> dict:
