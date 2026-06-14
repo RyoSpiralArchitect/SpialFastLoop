@@ -15,6 +15,12 @@ from torch.utils.data import DataLoader, Dataset
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer, recommended_dataloader
+from scripts.bench_parallel_transactions import (
+    non_negative_int_arg,
+    positive_float_arg,
+    positive_int_arg,
+    validate_benchmark_args,
+)
 from scripts.json_utils import dumps_json
 
 
@@ -93,19 +99,24 @@ def plain_loop(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Compare a plain PyTorch loop with SpiralFastLoop.")
-    parser.add_argument("--samples", type=int, default=50_000)
-    parser.add_argument("--feature-dim", type=int, default=128)
-    parser.add_argument("--classes", type=int, default=10)
-    parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--steps", type=int, default=200)
-    parser.add_argument("--warmup-steps", type=int, default=0)
-    parser.add_argument("--workers", type=int, default=2)
-    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--samples", type=positive_int_arg, default=50_000)
+    parser.add_argument("--feature-dim", type=positive_int_arg, default=128)
+    parser.add_argument("--classes", type=positive_int_arg, default=10)
+    parser.add_argument("--batch-size", type=positive_int_arg, default=256)
+    parser.add_argument("--steps", type=positive_int_arg, default=200)
+    parser.add_argument("--warmup-steps", type=non_negative_int_arg, default=0)
+    parser.add_argument("--workers", type=non_negative_int_arg, default=2)
+    parser.add_argument("--learning-rate", type=positive_float_arg, default=3e-4)
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda", "mps"])
-    parser.add_argument("--log-interval", type=int, default=0)
+    parser.add_argument("--log-interval", type=non_negative_int_arg, default=0)
     parser.add_argument("--no-compile", dest="compile", action="store_false")
     parser.add_argument("--collect-profile", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    try:
+        validate_benchmark_args(args)
+    except ValueError as exc:
+        parser.error(str(exc))
+    return args
 
 
 def main() -> None:
