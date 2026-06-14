@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any, Optional, Tuple, cast
 
 import torch
 
+from ..utils import _positive_int_setting
+
 if TYPE_CHECKING:
     class _LogitsProcessorBase:
         pass
@@ -48,10 +50,27 @@ __all__ = [
 
 
 def _validate_fraction(name: str, value: float) -> float:
-    value = float(value)
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite value in [0, 1].")
+    try:
+        value = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite value in [0, 1].") from exc
     if not math.isfinite(value) or value < 0.0 or value > 1.0:
         raise ValueError(f"{name} must be a finite value in [0, 1].")
     return value
+
+
+def _validate_finite_float(name: str, value: float) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be finite.")
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite.") from exc
+    if not math.isfinite(normalized):
+        raise ValueError(f"{name} must be finite.")
+    return normalized
 
 
 def _validate_window(start_frac: float, end_frac: float) -> tuple[float, float]:
@@ -60,6 +79,14 @@ def _validate_window(start_frac: float, end_frac: float) -> tuple[float, float]:
     if start >= end:
         raise ValueError("start_frac must be less than end_frac.")
     return start, end
+
+
+def _validate_middle(middle: Any) -> tuple[float, float]:
+    try:
+        start_frac, end_frac = middle
+    except (TypeError, ValueError) as exc:
+        raise ValueError("middle must contain exactly two fractions.") from exc
+    return _validate_window(start_frac, end_frac)
 
 
 def _require_transformers() -> None:
@@ -83,14 +110,10 @@ class AntiTopKMiddle(_LogitsProcessorBase):
         alpha: float = 10.0,
     ) -> None:
         start, end = _validate_window(start_frac, end_frac)
-        if topk <= 0:
-            raise ValueError("topk must be a positive integer.")
-        if not math.isfinite(float(alpha)):
-            raise ValueError("alpha must be finite.")
         self.sf: float = start
         self.ef: float = end
-        self.topk: int = int(topk)
-        self.alpha: float = float(alpha)
+        self.topk: int = _positive_int_setting(topk, "topk")
+        self.alpha: float = _validate_finite_float("alpha", alpha)
         self.step: int = 0
         self.max_steps: Optional[int] = None
 
@@ -120,9 +143,7 @@ class CoherenceTailBoost(_LogitsProcessorBase):
         tiny_tokenizer: Optional[Any] = None,
     ) -> None:
         self.sf: float = _validate_fraction("start_frac", start_frac)
-        if not math.isfinite(float(mu)):
-            raise ValueError("mu must be finite.")
-        self.mu: float = float(mu)
+        self.mu: float = _validate_finite_float("mu", mu)
         self.tiny: Optional[Any] = tiny_model
         self.step: int = 0
         self.max_steps: Optional[int] = None
@@ -191,6 +212,8 @@ def surprise_repair_generate(
     **genkw: Any,
 ) -> str:
     _require_transformers()
+    max_new_tokens = _positive_int_setting(max_new_tokens, "max_new_tokens")
+    middle_start, middle_end = _validate_middle(middle)
     tok: Any = AutoTokenizer.from_pretrained(main_name)
     main: Any = AutoModelForCausalLM.from_pretrained(main_name, device_map="auto").eval()
 
@@ -200,9 +223,14 @@ def surprise_repair_generate(
         tiny_tok = AutoTokenizer.from_pretrained(tiny_name)
         tiny = AutoModelForCausalLM.from_pretrained(tiny_name, device_map="auto").eval()
 
-    anti = AntiTopKMiddle(start_frac=middle[0], end_frac=middle[1], topk=topk, alpha=alpha)
+    anti = AntiTopKMiddle(
+        start_frac=middle_start,
+        end_frac=middle_end,
+        topk=topk,
+        alpha=alpha,
+    )
     coh = CoherenceTailBoost(
-        start_frac=middle[1],
+        start_frac=middle_end,
         mu=mu,
         tiny_model=tiny,
         primary_tokenizer=tok,
