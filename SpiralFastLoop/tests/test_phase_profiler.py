@@ -107,8 +107,44 @@ def test_train_one_epoch_splits_warmup_and_steady_metrics() -> None:
     assert metrics["reported_samples_per_sec"] == metrics["steady_samples_per_sec"]
     assert metrics["compile_init_time_s"] == 0.0
     assert metrics["compile_fallback_reason"] == "cpu_device"
+    assert metrics["scheduler_step_failures"] == 0
+    assert metrics["scheduler_last_error"] == ""
     assert metrics["warmup_avg_loss"] > 0.0
     assert metrics["steady_avg_loss"] > 0.0
+
+
+def test_train_one_epoch_records_scheduler_step_failures() -> None:
+    class FailingScheduler:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def step(self) -> None:
+            self.calls += 1
+            raise RuntimeError("scheduler boom")
+
+    inputs = torch.randn(8, 4)
+    targets = torch.randint(0, 3, (8,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=4, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    scheduler = FailingScheduler()
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        scheduler=scheduler,
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
+
+    metrics = trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), steps=2)
+
+    assert metrics["steps"] == 2
+    assert metrics["optimizer_steps"] == 2
+    assert scheduler.calls == 2
+    assert metrics["scheduler_step_failures"] == 2
+    assert metrics["scheduler_last_error"] == "RuntimeError: scheduler boom"
 
 
 def test_train_one_epoch_can_disable_step_logs_and_compile(capsys) -> None:

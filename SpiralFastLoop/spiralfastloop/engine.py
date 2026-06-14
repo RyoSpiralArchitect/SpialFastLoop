@@ -34,6 +34,15 @@ from .logging_utils import MetricsLogger
 recommended_dataloader = dataloader_from_dataset
 
 
+def _format_exception_reason(exc: Exception, limit: int = 200) -> str:
+    message = str(exc).strip()
+    if len(message) > limit:
+        message = f"{message[:limit - 3]}..."
+    if message:
+        return f"{type(exc).__name__}: {message}"
+    return type(exc).__name__
+
+
 def _configure_cuda_backends(
     enable_tf32: bool,
     cudnn_benchmark: bool,
@@ -488,6 +497,8 @@ class FastTrainer:
         steady_items = 0
         step_idx = 0
         optimizer_steps = 0
+        scheduler_step_failures = 0
+        scheduler_last_error = ""
         warmup_recorded_steps = 0
         steady_recorded_steps = 0
         warmup_optimizer_steps = 0
@@ -684,10 +695,10 @@ class FastTrainer:
                     if self.scheduler is not None:
                         profiler.start_detail("optimizer", "scheduler.step")
                         try:
-                            try:
-                                self.scheduler.step()
-                            except Exception:
-                                pass
+                            self.scheduler.step()
+                        except Exception as exc:
+                            scheduler_step_failures += 1
+                            scheduler_last_error = _format_exception_reason(exc)
                         finally:
                             profiler.stop_detail("optimizer", "scheduler.step")
                     optimizer_steps += 1
@@ -802,6 +813,8 @@ class FastTrainer:
             metrics["steady_avg_loss"] = 0.0
         metrics["steps"] = step_idx
         metrics["optimizer_steps"] = optimizer_steps
+        metrics["scheduler_step_failures"] = scheduler_step_failures
+        metrics["scheduler_last_error"] = scheduler_last_error
         metrics["samples"] = total_items
         warmup_summary = warmup_meter.summary()
         steady_summary = steady_meter.summary()
