@@ -234,6 +234,117 @@ def test_fast_trainer_rejects_invalid_boolean_settings(
         FastTrainer(model, optimizer, **kwargs)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize("model_value", [None, True, 1, object()])
+def test_fast_trainer_rejects_invalid_models(model_value: object) -> None:
+    _loader, model, optimizer = _make_supervised_components()
+
+    with pytest.raises(ValueError, match="model"):
+        FastTrainer(
+            model_value,  # type: ignore[arg-type]
+            optimizer,
+            device="cpu",
+            use_amp=False,
+            use_compile=False,
+        )
+
+
+@pytest.mark.parametrize("optimizer_value", [None, True, 1, object()])
+def test_fast_trainer_rejects_invalid_optimizers(optimizer_value: object) -> None:
+    _loader, model, _optimizer = _make_supervised_components()
+
+    with pytest.raises(ValueError, match="optimizer"):
+        FastTrainer(
+            model,
+            optimizer_value,  # type: ignore[arg-type]
+            device="cpu",
+            use_amp=False,
+            use_compile=False,
+        )
+
+
+@pytest.mark.parametrize(
+    ("trainer_kwargs", "match"),
+    [
+        ({"device": True}, "device"),
+        ({"device": 1}, "device"),
+        ({"device": ""}, "device"),
+        ({"device": "   "}, "device"),
+        ({"scheduler": object()}, "scheduler"),
+        ({"scheduler": type("BadScheduler", (), {"step": object()})()}, "scheduler"),
+        ({"trigger_hook": True}, "trigger_hook"),
+        ({"trigger_hook": object()}, "trigger_hook"),
+        ({"logger": object()}, "logger"),
+        ({"logger": type("BadLogger", (), {"log_metrics": object()})()}, "logger"),
+        ({"distributed_backend": True}, "distributed_backend"),
+        ({"distributed_backend": ""}, "distributed_backend"),
+        ({"ddp_kwargs": True}, "ddp_kwargs"),
+        ({"ddp_kwargs": [("find_unused_parameters", True)]}, "ddp_kwargs"),
+        ({"ddp_kwargs": {1: True}}, "ddp_kwargs"),
+        ({"ddp_kwargs": {"": True}}, "ddp_kwargs"),
+    ],
+)
+def test_fast_trainer_rejects_invalid_public_objects(
+    trainer_kwargs: dict[str, object],
+    match: str,
+) -> None:
+    _loader, model, optimizer = _make_supervised_components()
+
+    with pytest.raises(ValueError, match=match):
+        FastTrainer(
+            model,
+            optimizer,
+            use_amp=False,
+            use_compile=False,
+            **trainer_kwargs,
+        )
+
+
+def test_fast_trainer_accepts_duck_typed_logger_scheduler_and_trigger() -> None:
+    _loader, model, optimizer = _make_supervised_components()
+
+    class Scheduler:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def step(self) -> None:
+            self.calls += 1
+
+    class Logger:
+        def __init__(self) -> None:
+            self.rows: list[tuple[str, dict[str, object]]] = []
+
+        def log_metrics(
+            self,
+            stage: str,
+            metrics: dict[str, object],
+            **_: object,
+        ) -> None:
+            self.rows.append((stage, metrics))
+
+    def trigger(_ctx: dict[str, object]) -> None:
+        return None
+
+    scheduler = Scheduler()
+    logger = Logger()
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        scheduler=scheduler,
+        trigger_hook=trigger,
+        logger=logger,
+        ddp_kwargs={"find_unused_parameters": False},
+        device=" cpu ",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
+
+    assert trainer.scheduler is scheduler
+    assert trainer.trigger_hook is trigger
+    assert trainer.logger is logger
+    assert trainer.device == "cpu"
+
+
 @pytest.mark.parametrize(
     ("train_kwargs", "match"),
     [

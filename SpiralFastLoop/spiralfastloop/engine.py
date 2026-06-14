@@ -20,9 +20,12 @@ from .utils import (
     PhaseProfiler,
     ThroughputMeter,
     _bool_setting,
+    _device_setting,
+    _module_setting,
     _non_negative_finite_float_setting,
     _non_negative_int_setting,
     _optional_bool_setting,
+    _optional_non_empty_string_setting,
     _optional_positive_int_setting,
     _positive_int_setting,
     autocast_ctx,
@@ -421,6 +424,52 @@ class TriggerResult:
     extra_targets: Any = None
     weights: Optional[torch.Tensor] = None  # shape [B_total] or None
 
+
+def _optimizer_setting(optimizer: Any) -> torch.optim.Optimizer:
+    if not isinstance(optimizer, torch.optim.Optimizer):
+        raise ValueError("optimizer must be a torch.optim.Optimizer")
+    return optimizer
+
+
+def _optional_scheduler_setting(scheduler: Any) -> Any:
+    if scheduler is None:
+        return None
+    step = getattr(scheduler, "step", None)
+    if not callable(step):
+        raise ValueError("scheduler must provide a callable step() method")
+    return scheduler
+
+
+def _optional_trigger_hook_setting(trigger_hook: Any) -> Optional[Callable[[Dict[str, Any]], Optional[TriggerResult]]]:
+    if trigger_hook is None:
+        return None
+    if not callable(trigger_hook):
+        raise ValueError("trigger_hook must be callable")
+    return cast(Callable[[Dict[str, Any]], Optional[TriggerResult]], trigger_hook)
+
+
+def _optional_logger_setting(logger: Any) -> Optional[MetricsLogger]:
+    if logger is None:
+        return None
+    log_metrics = getattr(logger, "log_metrics", None)
+    if not callable(log_metrics):
+        raise ValueError("logger must provide a callable log_metrics() method")
+    return cast(MetricsLogger, logger)
+
+
+def _optional_ddp_kwargs_setting(ddp_kwargs: Any) -> Dict[str, Any]:
+    if ddp_kwargs is None:
+        return {}
+    if not isinstance(ddp_kwargs, Mapping):
+        raise ValueError("ddp_kwargs must be a mapping or None")
+    normalized: Dict[str, Any] = {}
+    for key, value in ddp_kwargs.items():
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("ddp_kwargs keys must be non-empty strings")
+        normalized[key.strip()] = value
+    return normalized
+
+
 class FastTrainer:
     """
     A fast, practical PyTorch training loop with:
@@ -460,6 +509,17 @@ class FastTrainer:
         enable_math_sdp: Optional[bool] = False,
         meter_fast_mode: bool = False,
     ) -> None:
+        model_value = _module_setting(model)
+        optimizer_value = _optimizer_setting(optimizer)
+        scheduler_value = _optional_scheduler_setting(scheduler)
+        trigger_hook_value = _optional_trigger_hook_setting(trigger_hook)
+        logger_value = _optional_logger_setting(logger)
+        ddp_kwargs_value = _optional_ddp_kwargs_setting(ddp_kwargs)
+        device_value = None if device is None else _device_setting(device)
+        distributed_backend_value = _optional_non_empty_string_setting(
+            distributed_backend,
+            "distributed_backend",
+        )
         distributed_value = _optional_bool_setting(distributed, "distributed")
         channels_last_value = _bool_setting(channels_last, "channels_last")
         use_compile_value = _bool_setting(use_compile, "use_compile")
@@ -479,27 +539,27 @@ class FastTrainer:
         meter_fast_mode_value = _bool_setting(meter_fast_mode, "meter_fast_mode")
 
         if distributed_value is True:
-            self.dist_ctx = init_distributed(backend=distributed_backend)
+            self.dist_ctx = init_distributed(backend=distributed_backend_value)
         else:
             self.dist_ctx = get_distributed_context()
-        base_device = device or get_best_device()
+        base_device = device_value or get_best_device()
         if self.dist_ctx.world_size > 1 and base_device.startswith("cuda"):
             torch.cuda.set_device(self.dist_ctx.local_rank)
             self.device = f"cuda:{self.dist_ctx.local_rank}"
         else:
             self.device = base_device
         amp_enabled, amp_dtype, use_scaler = get_amp_policy(self.device, use_amp)
-        self.model = model.to(self.device)
+        self.model = model_value.to(self.device)
         self.model = maybe_channels_last(self.model, channels_last=channels_last_value)
-        self.optimizer = optimizer
-        self.scheduler = scheduler
+        self.optimizer = optimizer_value
+        self.scheduler = scheduler_value
         self.grad_accum = _positive_int_setting(grad_accum, "grad_accum")
         self.clip_grad_norm = (
             None if clip_grad_norm is None else _non_negative_finite_float_setting(clip_grad_norm, "clip_grad_norm")
         )
         self.log_interval = _non_negative_int_setting(log_interval, "log_interval")
-        self.trigger_hook = trigger_hook
-        self.logger = logger
+        self.trigger_hook = trigger_hook_value
+        self.logger = logger_value
         self.log_on_rank0 = log_on_rank0_value
         self.meter_fast_mode = meter_fast_mode_value
         self.compile_requested = use_compile_value
@@ -531,16 +591,15 @@ class FastTrainer:
         # DDP wrap if requested and initialized
         self.using_ddp = False
         if self.dist_ctx.world_size > 1:
-            ddp_kwargs = ddp_kwargs or {}
             if self.device.startswith("cuda"):
                 self.model = DistributedDataParallel(
                     self.model,
                     device_ids=[self.dist_ctx.local_rank],
                     output_device=self.dist_ctx.local_rank,
-                    **ddp_kwargs,
+                    **ddp_kwargs_value,
                 )
             else:
-                self.model = DistributedDataParallel(self.model, **ddp_kwargs)
+                self.model = DistributedDataParallel(self.model, **ddp_kwargs_value)
             self.using_ddp = True
 
         # CUDA fast matmul precision
