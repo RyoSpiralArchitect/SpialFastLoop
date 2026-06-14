@@ -472,7 +472,7 @@ class ThroughputMeter:
             record_on_exception: bool,
         ) -> None:
             self._meter = meter
-            self._batch_size = batch_size
+            self._batch_size = _positive_int_setting(batch_size, "batch_size")
             self._record_on_exception = record_on_exception
             self._start: Optional[float] = None
 
@@ -513,9 +513,7 @@ class ThroughputMeter:
         if smoothing is not None:
             if not (0.0 < smoothing <= 1.0):
                 raise ValueError("smoothing must be in the interval (0, 1].")
-        window_int = int(window)
-        if window_int < 0:
-            raise ValueError("window must be non-negative.")
+        window_int = _non_negative_int_setting(window, "window")
         self._track_distribution = bool(track_distribution)
         self._track_window = bool(track_window)
         self._fast_mode = bool(fast_mode)
@@ -557,14 +555,8 @@ class ThroughputMeter:
         self.record(elapsed, batch_size)
 
     def record(self, duration_s: float, batch_size: int) -> None:
-        if duration_s < 0.0:
-            raise ValueError("Duration must be non-negative.")
-        if not math.isfinite(duration_s):
-            raise ValueError("Duration must be finite.")
-        batch_size_int = int(batch_size)
-        if batch_size_int <= 0:
-            raise ValueError("batch_size must be a positive integer.")
-        duration = float(duration_s)
+        duration = _non_negative_finite_float_setting(duration_s, "duration_s")
+        batch_size_int = _positive_int_setting(batch_size, "batch_size")
 
         self.samples += batch_size_int
         self._accumulate_total_time(duration)

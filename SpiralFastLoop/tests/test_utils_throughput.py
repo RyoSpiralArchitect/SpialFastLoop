@@ -83,6 +83,22 @@ def test_throughput_meter_rejects_invalid_inputs():
         meter.record(0.1, -5)
 
 
+@pytest.mark.parametrize("batch_size", [1.5, "2", True])
+def test_throughput_meter_rejects_non_integral_batch_sizes(batch_size):
+    meter = ThroughputMeter()
+
+    with pytest.raises(ValueError, match="batch_size"):
+        meter.record(0.1, batch_size)
+    with pytest.raises(ValueError, match="batch_size"):
+        meter.time_batch(batch_size)
+
+
+@pytest.mark.parametrize("window", [-1, 1.5, "2", True])
+def test_throughput_meter_rejects_invalid_window_values(window):
+    with pytest.raises(ValueError, match="window"):
+        ThroughputMeter(window=window)
+
+
 def test_throughput_meter_reset_clears_state():
     meter = ThroughputMeter()
     meter.record(0.1, 8)
