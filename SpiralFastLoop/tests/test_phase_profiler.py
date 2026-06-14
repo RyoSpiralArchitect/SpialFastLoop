@@ -120,6 +120,55 @@ def _assert_train_failure_metrics(
     return metrics
 
 
+def _assert_eval_failure_metrics(
+    logger: _CapturingLogger,
+    *,
+    stage: str,
+    last_error: str,
+) -> dict[str, object]:
+    metrics = _single_error_metrics(logger, "eval")
+    assert metrics["steps"] == 1
+    assert metrics["measured_steps"] == 0
+    assert metrics["samples"] == 0
+    assert metrics["eval_failed"] is True
+    assert metrics["eval_failure_stage"] == stage
+    assert metrics["eval_failure_last_error"] == last_error
+    return metrics
+
+
+def _assert_predict_failure_metrics(
+    logger: _CapturingLogger,
+    *,
+    stage: str,
+    last_error: str,
+) -> dict[str, object]:
+    metrics = _single_error_metrics(logger, "predict")
+    assert metrics["steps"] == 1
+    assert metrics["measured_steps"] == 0
+    assert metrics["samples"] == 0
+    assert metrics["predict_failed"] is True
+    assert metrics["predict_failure_stage"] == stage
+    assert metrics["predict_failure_last_error"] == last_error
+    return metrics
+
+
+def _fail_first_meter_record(monkeypatch: pytest.MonkeyPatch, message: str) -> None:
+    original_meter = engine.ThroughputMeter
+    meters: list[object] = []
+
+    class FailingRecordMeter(original_meter):  # type: ignore[misc, valid-type]
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)
+            meters.append(self)
+
+        def record(self, duration: float, batch_size: int) -> None:
+            if self is meters[0]:
+                raise RuntimeError(message)
+            super().record(duration, batch_size)
+
+    monkeypatch.setattr(engine, "ThroughputMeter", FailingRecordMeter)
+
+
 @pytest.mark.parametrize(
     ("batch", "reason", "match"),
     [
@@ -1006,6 +1055,87 @@ def test_evaluate_cleans_profile_phase_when_loader_fails(
     assert metrics["eval_failure_last_error"] == "RuntimeError: loader boom"
 
 
+def test_evaluate_logs_transfer_failures_before_reraising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_to_device(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("eval transfer boom")
+
+    monkeypatch.setattr(engine, "to_device", fail_to_device)
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    logger = _CapturingLogger()
+    loader, _optimizer, trainer = _make_logged_cpu_trainer(logger)
+
+    with pytest.raises(RuntimeError, match="eval transfer boom"):
+        trainer.evaluate(loader, nn.CrossEntropyLoss(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    metrics = _assert_eval_failure_metrics(
+        logger,
+        stage="transfer",
+        last_error="RuntimeError: eval transfer boom",
+    )
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "data_wait" in phases
+    assert "transfer" in phases
+
+
+def test_evaluate_logs_loss_failures_before_reraising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingCriterion(nn.Module):
+        def forward(self, _outputs: torch.Tensor, _targets: torch.Tensor) -> torch.Tensor:
+            raise RuntimeError("eval loss boom")
+
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    logger = _CapturingLogger()
+    loader, _optimizer, trainer = _make_logged_cpu_trainer(logger)
+
+    with pytest.raises(RuntimeError, match="eval loss boom"):
+        trainer.evaluate(loader, FailingCriterion(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    metrics = _assert_eval_failure_metrics(
+        logger,
+        stage="loss",
+        last_error="RuntimeError: eval loss boom",
+    )
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "forward" in phases
+    assert "loss" in phases
+
+
+def test_evaluate_logs_metrics_failures_before_reraising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fail_first_meter_record(monkeypatch, "eval metrics boom")
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    logger = _CapturingLogger()
+    loader, _optimizer, trainer = _make_logged_cpu_trainer(logger)
+
+    with pytest.raises(RuntimeError, match="eval metrics boom"):
+        trainer.evaluate(loader, nn.CrossEntropyLoss(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    metrics = _assert_eval_failure_metrics(
+        logger,
+        stage="metrics",
+        last_error="RuntimeError: eval metrics boom",
+    )
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "loss" in phases
+    assert "metrics" in phases
+
+
 def test_evaluate_reports_scalar_tensor_inputs_as_unmeasured() -> None:
     class ScalarTensorDataset(torch.utils.data.Dataset[torch.Tensor]):
         def __len__(self) -> int:
@@ -1211,6 +1341,87 @@ def test_predict_cleans_profile_phase_when_loader_fails(
     assert metrics["predict_failed"] is True
     assert metrics["predict_failure_stage"] == "data_wait"
     assert metrics["predict_failure_last_error"] == "RuntimeError: loader boom"
+
+
+def test_predict_logs_transfer_failures_before_reraising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_to_device(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("predict transfer boom")
+
+    monkeypatch.setattr(engine, "to_device", fail_to_device)
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    logger = _CapturingLogger()
+    loader, _optimizer, trainer = _make_logged_cpu_trainer(logger)
+
+    with pytest.raises(RuntimeError, match="predict transfer boom"):
+        trainer.predict(loader, steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    metrics = _assert_predict_failure_metrics(
+        logger,
+        stage="transfer",
+        last_error="RuntimeError: predict transfer boom",
+    )
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "data_wait" in phases
+    assert "transfer" in phases
+
+
+def test_predict_logs_collect_output_failures_before_reraising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_detach_to_cpu(_outputs: object) -> None:
+        raise RuntimeError("collect boom")
+
+    monkeypatch.setattr(engine, "_detach_to_cpu", fail_detach_to_cpu)
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    logger = _CapturingLogger()
+    loader, _optimizer, trainer = _make_logged_cpu_trainer(logger)
+
+    with pytest.raises(RuntimeError, match="collect boom"):
+        trainer.predict(loader, steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    metrics = _assert_predict_failure_metrics(
+        logger,
+        stage="collect_output",
+        last_error="RuntimeError: collect boom",
+    )
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "forward" in phases
+    assert "collect_output" in phases
+
+
+def test_predict_logs_metrics_failures_before_reraising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fail_first_meter_record(monkeypatch, "predict metrics boom")
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    logger = _CapturingLogger()
+    loader, _optimizer, trainer = _make_logged_cpu_trainer(logger)
+
+    with pytest.raises(RuntimeError, match="predict metrics boom"):
+        trainer.predict(loader, steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    metrics = _assert_predict_failure_metrics(
+        logger,
+        stage="metrics",
+        last_error="RuntimeError: predict metrics boom",
+    )
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "collect_output" in phases
+    assert "metrics" in phases
 
 
 def test_predict_reports_unmeasured_steps_when_batch_size_is_unknown() -> None:
@@ -1651,20 +1862,7 @@ def test_train_one_epoch_logs_optimizer_failures_before_reraising(
 def test_train_one_epoch_logs_metrics_failures_before_reraising(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    original_meter = engine.ThroughputMeter
-    meters: list[object] = []
-
-    class FailingRecordMeter(original_meter):  # type: ignore[misc, valid-type]
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            super().__init__(*args, **kwargs)
-            meters.append(self)
-
-        def record(self, duration: float, batch_size: int) -> None:
-            if self is meters[0]:
-                raise RuntimeError("metrics meter boom")
-            super().record(duration, batch_size)
-
-    monkeypatch.setattr(engine, "ThroughputMeter", FailingRecordMeter)
+    _fail_first_meter_record(monkeypatch, "metrics meter boom")
     profilers = _capture_engine_phase_profilers(monkeypatch)
     inputs = torch.randn(2, 4)
     targets = torch.randint(0, 3, (2,))
