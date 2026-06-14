@@ -16,6 +16,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer
 from spiralfastloop.utils import dataloader_from_dataset, get_best_device
+from scripts.bench_parallel_transactions import (
+    non_negative_int_arg,
+    positive_float_arg,
+    positive_int_arg,
+    validate_benchmark_args,
+)
 from scripts.json_utils import dumps_json
 
 
@@ -114,36 +120,47 @@ def _print_summary(metrics: dict[str, Any], topk: int) -> None:
             print(f"  {row['name']}: {row.get('pct_of_parent', 0.0):.1f}% avg={row.get('avg_ms', 0.0):.2f}ms")
 
 
+def validate_resnet_profile_args(args: argparse.Namespace) -> None:
+    validate_benchmark_args(args)
+    if args.dataset == "fake" and int(args.dataset_size) < int(args.batch_size):
+        raise ValueError("dataset-size must be at least batch-size when using --dataset fake.")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", choices=["fake", "cifar10"], default="fake")
     parser.add_argument("--data-root", default="./data")
     parser.add_argument("--download", action="store_true")
-    parser.add_argument("--dataset-size", type=int, default=4096)
-    parser.add_argument("--image-size", type=int, default=32)
-    parser.add_argument("--num-classes", type=int, default=10)
+    parser.add_argument("--dataset-size", type=positive_int_arg, default=4096)
+    parser.add_argument("--image-size", type=positive_int_arg, default=32)
+    parser.add_argument("--num-classes", type=positive_int_arg, default=10)
     parser.add_argument("--device", default="auto", choices=["auto", "cuda", "mps", "cpu"])
-    parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--grad-accum", type=int, default=2)
-    parser.add_argument("--workers", type=int, default=2)
-    parser.add_argument("--prefetch-factor", type=int, default=2)
-    parser.add_argument("--steps", type=int, default=12)
-    parser.add_argument("--warmup-steps", type=int, default=0)
+    parser.add_argument("--batch-size", type=positive_int_arg, default=256)
+    parser.add_argument("--grad-accum", type=positive_int_arg, default=2)
+    parser.add_argument("--workers", type=non_negative_int_arg, default=2)
+    parser.add_argument("--prefetch-factor", type=positive_int_arg, default=2)
+    parser.add_argument("--steps", type=positive_int_arg, default=12)
+    parser.add_argument("--warmup-steps", type=non_negative_int_arg, default=0)
     parser.add_argument(
         "--no-compile",
         dest="compile",
         action="store_false",
         help="Disable torch.compile for lower cold-start cost.",
     )
-    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--learning-rate", type=positive_float_arg, default=3e-4)
     parser.add_argument("--profile-sync", action="store_true")
-    parser.add_argument("--profile-window", type=int, default=256)
-    parser.add_argument("--profile-model-depth", type=int, default=2)
-    parser.add_argument("--profile-model-max-modules", type=int, default=16)
+    parser.add_argument("--profile-window", type=positive_int_arg, default=256)
+    parser.add_argument("--profile-model-depth", type=positive_int_arg, default=2)
+    parser.add_argument("--profile-model-max-modules", type=positive_int_arg, default=16)
     parser.add_argument("--profile-model-include", default="layer1,layer4")
-    parser.add_argument("--topk", type=int, default=6)
+    parser.add_argument("--topk", type=positive_int_arg, default=6)
     parser.add_argument("--json-out", default=None)
-    return parser.parse_args()
+    args = parser.parse_args()
+    try:
+        validate_resnet_profile_args(args)
+    except ValueError as exc:
+        parser.error(str(exc))
+    return args
 
 
 def main() -> None:
