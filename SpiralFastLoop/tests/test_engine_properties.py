@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from pathlib import Path
 import sys
 from types import SimpleNamespace
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -36,7 +37,7 @@ if HAVE_HYPOTHESIS:
         return rest.map(lambda dims: torch.randn((batch_dim, *dims), dtype=torch.float32))
 
     @st.composite
-    def batch_structure(draw, depth: int = 0, batch_dim: int | None = None):
+    def batch_structure(draw, depth: int = 0, batch_dim: Optional[int] = None):
         if batch_dim is None:
             batch_dim = draw(st.integers(min_value=1, max_value=4))
         if depth >= MAX_DEPTH:

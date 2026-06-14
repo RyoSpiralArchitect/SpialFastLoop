@@ -4,7 +4,7 @@ import math
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable, Optional, Tuple
 
 import pytest
 import torch
@@ -31,7 +31,7 @@ if str(_FIXTURES_DIR) not in sys.path:
 from fixtures import RoundingRegressionCase
 
 
-def _make_provider(outputs: Tuple[torch.Tensor, torch.Tensor] | None = None):
+def _make_provider(outputs: Optional[Tuple[torch.Tensor, torch.Tensor]] = None):
     calls: Dict[str, list[int]] = {"requested": []}
 
     def provider(k: int, device: str, ctx):

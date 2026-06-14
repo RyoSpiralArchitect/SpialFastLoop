@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, cast
+from typing import Any, Callable, Dict, Optional, Union, cast
 
 import fnmatch
 import time
@@ -420,7 +420,7 @@ class FastTrainer:
         *,
         depth: int = 1,
         max_modules: int = 64,
-        include: Optional[str | Sequence[str]] = None,
+        include: Optional[Union[str, Sequence[str]]] = None,
     ) -> _ProfileHookInstallResult:
         if not profiler.enabled:
             return _ProfileHookInstallResult(handles=[])
@@ -535,7 +535,7 @@ class FastTrainer:
         profile_model: bool = False,
         profile_model_depth: int = 1,
         profile_model_max_modules: int = 64,
-        profile_model_include: Optional[str | Sequence[str]] = None,
+        profile_model_include: Optional[Union[str, Sequence[str]]] = None,
         warmup_steps: int = 0,
     ) -> Dict[str, Any]:
         """
@@ -1215,7 +1215,7 @@ class FastTrainer:
         profile_distribution: bool = True,
         profile_window: int = 512,
         return_metrics: bool = False,
-    ) -> list[Any] | tuple[list[Any], Dict[str, Any]]:
+    ) -> Union[list[Any], tuple[list[Any], Dict[str, Any]]]:
         """Run inference and collect outputs on CPU.
 
         When ``return_metrics`` or ``collect_profile`` is true, returns

@@ -9,6 +9,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -257,8 +258,8 @@ class SyntheticTransactionDataset(Dataset):
         self.classes = classes
         self.seed = seed
         self.materialized = bool(materialized)
-        self._features: torch.Tensor | None = None
-        self._targets: torch.Tensor | None = None
+        self._features: Optional[torch.Tensor] = None
+        self._targets: Optional[torch.Tensor] = None
         if self.materialized:
             generator = torch.Generator()
             generator.manual_seed(seed)
