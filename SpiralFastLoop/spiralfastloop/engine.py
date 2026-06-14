@@ -47,6 +47,9 @@ _PROFILE_PHASE_METRIC_NAMES = (
     "inject_transfer",
     "backward",
     "optimizer",
+    "user_metrics",
+    "postprocess",
+    "collect_output",
     "metrics",
 )
 
@@ -211,6 +214,13 @@ def _infer_batch_size(batch: Any) -> int:
     if batch is None:
         raise ValueError("Cannot infer batch size from None input.")
     raise TypeError("Unsupported batch structure for inferring batch size.")
+
+
+def _try_infer_batch_size(batch: Any) -> Optional[int]:
+    try:
+        return _infer_batch_size(batch)
+    except (TypeError, ValueError):
+        return None
 
 
 def _ensure_loss_vector(loss_tensor: torch.Tensor) -> torch.Tensor:
@@ -1046,14 +1056,26 @@ class FastTrainer:
         metrics_fn: Optional[Callable[[Any, Any, Any], Dict[str, Any]]] = None,
         steps: Optional[int] = None,
         epoch: Optional[int] = None,
+        collect_profile: bool = False,
+        profile_sync: bool = False,
+        profile_distribution: bool = True,
+        profile_window: int = 512,
     ) -> Dict[str, Any]:
         """Run a validation/evaluation loop without gradient updates."""
         step_limit = _optional_positive_int_setting(steps, "steps")
+        profile_window_size = _positive_int_setting(profile_window, "profile_window")
         self.model.eval()
         sampler = getattr(loader, "sampler", None)
         if isinstance(sampler, DistributedSampler) and epoch is not None:
             sampler.set_epoch(epoch)
         meter = ThroughputMeter(fast_mode=self.meter_fast_mode)
+        profiler = PhaseProfiler(
+            enabled=collect_profile,
+            device=self.device,
+            sync=profile_sync,
+            track_distribution=profile_distribution,
+            window=profile_window_size,
+        )
         metric_dtype = torch.float32 if self.device.startswith("mps") else torch.float64
         total_loss = torch.zeros((), device=self.device, dtype=metric_dtype)
         total_weight = torch.zeros((), device=self.device, dtype=metric_dtype)
@@ -1063,11 +1085,22 @@ class FastTrainer:
         metric_weights: Dict[str, float] = {}
 
         with torch.no_grad():
-            for batch in loader:
-                if step_limit is not None and step_idx >= step_limit:
+            data_iter = iter(loader)
+            while step_limit is None or step_idx < step_limit:
+                step_started_at = time.perf_counter()
+                profiler.start("data_wait")
+                try:
+                    batch = next(data_iter)
+                except StopIteration:
+                    profiler.cancel("data_wait")
                     break
+                profiler.stop("data_wait")
                 step_idx += 1
-                batch = to_device(batch, self.device, non_blocking=True)
+                profiler.start("transfer")
+                try:
+                    batch = to_device(batch, self.device, non_blocking=True)
+                finally:
+                    profiler.stop("transfer")
                 if isinstance(batch, (list, tuple)) and len(batch) == 2:
                     inputs, targets = batch
                 elif isinstance(batch, dict) and "inputs" in batch and "targets" in batch:
@@ -1076,30 +1109,52 @@ class FastTrainer:
                     inputs, targets = batch, None
 
                 with autocast_ctx(self.device, self.amp_enabled, self.amp_dtype):
-                    outputs = self.model(inputs)
+                    profiler.start("forward")
+                    try:
+                        outputs = self.model(inputs)
+                    finally:
+                        profiler.stop("forward")
                     if criterion is not None and targets is not None:
-                        loss = criterion(outputs, targets)
-                        if isinstance(loss, torch.Tensor) and loss.ndim > 0:
-                            loss = loss.mean()
+                        profiler.start("loss")
+                        try:
+                            loss = criterion(outputs, targets)
+                            if isinstance(loss, torch.Tensor) and loss.ndim > 0:
+                                loss = loss.mean()
+                        finally:
+                            profiler.stop("loss")
                     else:
                         loss = None
                 reference = targets if targets is not None else inputs
                 batch_size = _infer_batch_size(reference)
-                meter.tick(int(batch_size))
-                total_items += int(batch_size)
+                batch_size_int = int(batch_size)
 
-                if loss is not None:
-                    loss_detached = loss.detach().to(device=total_loss.device, dtype=total_loss.dtype)
-                    weight_tensor = total_weight.new_tensor(batch_size, dtype=total_weight.dtype)
-                    total_loss += loss_detached * weight_tensor
-                    total_weight += weight_tensor
-
+                extra_metrics: Optional[Dict[str, Any]] = None
                 if metrics_fn is not None:
-                    extra = metrics_fn(outputs, targets, inputs)
-                    for key, value in extra.items():
-                        metric_value = _metric_to_float(value)
-                        metric_sums[key] = metric_sums.get(key, 0.0) + metric_value * batch_size
-                        metric_weights[key] = metric_weights.get(key, 0.0) + batch_size
+                    profiler.start("user_metrics")
+                    try:
+                        extra_metrics = metrics_fn(outputs, targets, inputs)
+                    finally:
+                        profiler.stop("user_metrics")
+
+                profiler.start("metrics")
+                try:
+                    batch_duration_s = max(0.0, time.perf_counter() - step_started_at)
+                    meter.record(batch_duration_s, batch_size_int)
+                    total_items += batch_size_int
+
+                    if loss is not None:
+                        loss_detached = loss.detach().to(device=total_loss.device, dtype=total_loss.dtype)
+                        weight_tensor = total_weight.new_tensor(batch_size_int, dtype=total_weight.dtype)
+                        total_loss += loss_detached * weight_tensor
+                        total_weight += weight_tensor
+
+                    if extra_metrics is not None:
+                        for key, value in extra_metrics.items():
+                            metric_value = _metric_to_float(value)
+                            metric_sums[key] = metric_sums.get(key, 0.0) + metric_value * batch_size_int
+                            metric_weights[key] = metric_weights.get(key, 0.0) + batch_size_int
+                finally:
+                    profiler.stop("metrics")
 
                 if self.log_interval > 0 and (step_idx % self.log_interval) == 0:
                     m = meter.summary()
@@ -1142,6 +1197,10 @@ class FastTrainer:
         for key, total in metric_sums.items():
             denom = metric_weights.get(key, 0.0)
             metrics[key] = total / denom if denom else 0.0
+        if collect_profile:
+            profile_summary = profiler.summary()
+            metrics["profile"] = profile_summary
+            _add_profile_phase_metrics(metrics, profile_summary)
         self._log_metrics("eval", metrics, epoch=epoch, mode="epoch")
         return metrics
 
@@ -1151,18 +1210,50 @@ class FastTrainer:
         *,
         steps: Optional[int] = None,
         postprocess: Optional[Callable[[Any], Any]] = None,
-    ) -> list[Any]:
-        """Run inference and collect outputs on CPU."""
+        collect_profile: bool = False,
+        profile_sync: bool = False,
+        profile_distribution: bool = True,
+        profile_window: int = 512,
+        return_metrics: bool = False,
+    ) -> list[Any] | tuple[list[Any], Dict[str, Any]]:
+        """Run inference and collect outputs on CPU.
+
+        When ``return_metrics`` or ``collect_profile`` is true, returns
+        ``(predictions, metrics)``. The default return value remains the
+        prediction list for backward compatibility.
+        """
         step_limit = _optional_positive_int_setting(steps, "steps")
+        profile_window_size = _positive_int_setting(profile_window, "profile_window")
+        metrics_requested = bool(return_metrics or collect_profile)
         self.model.eval()
         outputs_list: list[Any] = []
+        meter = ThroughputMeter(fast_mode=self.meter_fast_mode)
+        profiler = PhaseProfiler(
+            enabled=collect_profile,
+            device=self.device,
+            sync=profile_sync,
+            track_distribution=profile_distribution,
+            window=profile_window_size,
+        )
+        total_items = 0
         step_idx = 0
         with torch.no_grad():
-            for batch in loader:
-                if step_limit is not None and step_idx >= step_limit:
+            data_iter = iter(loader)
+            while step_limit is None or step_idx < step_limit:
+                step_started_at = time.perf_counter()
+                profiler.start("data_wait")
+                try:
+                    batch = next(data_iter)
+                except StopIteration:
+                    profiler.cancel("data_wait")
                     break
+                profiler.stop("data_wait")
                 step_idx += 1
-                batch = to_device(batch, self.device, non_blocking=True)
+                profiler.start("transfer")
+                try:
+                    batch = to_device(batch, self.device, non_blocking=True)
+                finally:
+                    profiler.stop("transfer")
                 if isinstance(batch, (list, tuple)) and len(batch) == 2:
                     inputs = batch[0]
                 elif isinstance(batch, dict) and "inputs" in batch:
@@ -1170,8 +1261,44 @@ class FastTrainer:
                 else:
                     inputs = batch
                 with autocast_ctx(self.device, self.amp_enabled, self.amp_dtype):
-                    outputs = self.model(inputs)
+                    profiler.start("forward")
+                    try:
+                        outputs = self.model(inputs)
+                    finally:
+                        profiler.stop("forward")
                 if postprocess is not None:
-                    outputs = postprocess(outputs)
-                outputs_list.append(_detach_to_cpu(outputs))
-        return outputs_list
+                    profiler.start("postprocess")
+                    try:
+                        outputs = postprocess(outputs)
+                    finally:
+                        profiler.stop("postprocess")
+                batch_size = _try_infer_batch_size(inputs) if metrics_requested else None
+                profiler.start("collect_output")
+                try:
+                    outputs_list.append(_detach_to_cpu(outputs))
+                finally:
+                    profiler.stop("collect_output")
+                if metrics_requested:
+                    profiler.start("metrics")
+                    try:
+                        if batch_size is not None:
+                            batch_size_int = int(batch_size)
+                            batch_duration_s = max(0.0, time.perf_counter() - step_started_at)
+                            meter.record(batch_duration_s, batch_size_int)
+                            total_items += batch_size_int
+                    finally:
+                        profiler.stop("metrics")
+        if not metrics_requested:
+            return outputs_list
+        metrics: Dict[str, Any] = dict(meter.summary())
+        metrics["steps"] = step_idx
+        metrics["samples"] = total_items
+        metrics["device"] = self.device
+        metrics["world_size"] = self.dist_ctx.world_size
+        metrics["rank"] = self.dist_ctx.rank
+        if collect_profile:
+            profile_summary = profiler.summary()
+            metrics["profile"] = profile_summary
+            _add_profile_phase_metrics(metrics, profile_summary)
+        self._log_metrics("predict", metrics, mode="epoch")
+        return outputs_list, metrics

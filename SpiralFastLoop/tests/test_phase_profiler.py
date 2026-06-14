@@ -96,6 +96,10 @@ def test_eval_and_predict_reject_invalid_step_limits() -> None:
         trainer.evaluate(loader, nn.CrossEntropyLoss(), steps=1.5)
     with pytest.raises(ValueError, match="steps"):
         trainer.predict(loader, steps="2")
+    with pytest.raises(ValueError, match="profile_window"):
+        trainer.evaluate(loader, nn.CrossEntropyLoss(), profile_window=0)
+    with pytest.raises(ValueError, match="profile_window"):
+        trainer.predict(loader, profile_window=0, return_metrics=True)
 
 
 def test_predict_detaches_nested_outputs_to_cpu() -> None:
@@ -143,6 +147,67 @@ def test_predict_detaches_nested_outputs_to_cpu() -> None:
         assert isinstance(tensor, torch.Tensor)
         assert tensor.device.type == "cpu"
         assert tensor.requires_grad is False
+
+
+def test_evaluate_collects_phase_profile_and_user_metrics() -> None:
+    inputs = torch.randn(8, 4)
+    targets = torch.randint(0, 3, (8,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=4, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    def metrics_fn(outputs: torch.Tensor, batch_targets: torch.Tensor, _inputs: torch.Tensor) -> dict[str, torch.Tensor]:
+        predictions = outputs.argmax(dim=1)
+        return {"accuracy": (predictions == batch_targets).float().mean()}
+
+    metrics = trainer.evaluate(
+        loader,
+        nn.CrossEntropyLoss(),
+        metrics_fn=metrics_fn,
+        steps=2,
+        collect_profile=True,
+    )
+
+    profile = metrics["profile"]
+    phases = profile["phases"]
+    assert metrics["steps"] == 2
+    assert metrics["samples"] == 8
+    assert 0.0 <= metrics["accuracy"] <= 1.0
+    for phase_name in ("data_wait", "transfer", "forward", "loss", "user_metrics", "metrics"):
+        assert phase_name in phases
+        assert metrics[f"profile_{phase_name}_time_s"] == pytest.approx(phases[phase_name]["total_s"])
+        assert metrics[f"profile_{phase_name}_pct"] == pytest.approx(phases[phase_name]["pct"])
+        assert metrics[f"profile_{phase_name}_avg_ms"] == pytest.approx(phases[phase_name]["avg_ms"])
+
+
+def test_predict_can_return_metrics_and_phase_profile() -> None:
+    inputs = torch.randn(6, 4)
+    targets = torch.zeros(6)
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=3, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 2))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    def postprocess(outputs: torch.Tensor) -> torch.Tensor:
+        return outputs.softmax(dim=1)
+
+    predictions, metrics = trainer.predict(
+        loader,
+        steps=2,
+        postprocess=postprocess,
+        collect_profile=True,
+    )
+
+    profile = metrics["profile"]
+    phases = profile["phases"]
+    assert len(predictions) == 2
+    assert metrics["steps"] == 2
+    assert metrics["samples"] == 6
+    for phase_name in ("data_wait", "transfer", "forward", "postprocess", "collect_output", "metrics"):
+        assert phase_name in phases
+        assert metrics[f"profile_{phase_name}_time_s"] == pytest.approx(phases[phase_name]["total_s"])
+        assert metrics[f"profile_{phase_name}_pct"] == pytest.approx(phases[phase_name]["pct"])
 
 
 def test_train_one_epoch_collects_phase_and_model_profile() -> None:
