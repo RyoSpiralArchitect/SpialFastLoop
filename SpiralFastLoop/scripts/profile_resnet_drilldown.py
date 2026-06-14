@@ -129,7 +129,9 @@ def _print_summary(metrics: dict[str, Any], topk: int) -> None:
 
 def validate_resnet_profile_args(args: argparse.Namespace) -> None:
     validate_benchmark_args(args)
-    if args.dataset == "fake" and int(args.dataset_size) < int(args.batch_size):
+    dataset_size = _positive_int_setting(args.dataset_size, "dataset_size")
+    batch_size = _positive_int_setting(args.batch_size, "batch_size")
+    if args.dataset == "fake" and dataset_size < batch_size:
         raise ValueError("dataset-size must be at least batch-size when using --dataset fake.")
 
 

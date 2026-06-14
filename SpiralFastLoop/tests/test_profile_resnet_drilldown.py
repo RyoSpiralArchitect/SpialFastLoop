@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,49 @@ def test_build_fake_dataset_rejects_invalid_shape_values(
 ) -> None:
     with pytest.raises(ValueError):
         drilldown._build_fake_dataset(size, image_size, classes)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("dataset_size", "batch_size", "match"),
+    [
+        (0, 1, "dataset_size"),
+        (1.5, 1, "dataset_size"),
+        ("2", 1, "dataset_size"),
+        (True, 1, "dataset_size"),
+        (4, 0, "batch_size"),
+        (4, 1.5, "batch_size"),
+        (4, "2", "batch_size"),
+        (4, True, "batch_size"),
+    ],
+)
+def test_validate_resnet_profile_args_rejects_invalid_direct_sizes(
+    dataset_size: object,
+    batch_size: object,
+    match: str,
+) -> None:
+    args = Namespace(
+        dataset="fake",
+        dataset_size=dataset_size,
+        batch_size=batch_size,
+        steps=1,
+        warmup_steps=0,
+    )
+
+    with pytest.raises(ValueError, match=match):
+        drilldown.validate_resnet_profile_args(args)
+
+
+def test_validate_resnet_profile_args_rejects_empty_fake_batches() -> None:
+    args = Namespace(
+        dataset="fake",
+        dataset_size=4,
+        batch_size=8,
+        steps=1,
+        warmup_steps=0,
+    )
+
+    with pytest.raises(ValueError, match="dataset-size"):
+        drilldown.validate_resnet_profile_args(args)
 
 
 def test_resnet_drilldown_parse_args_accepts_valid_fake_run(

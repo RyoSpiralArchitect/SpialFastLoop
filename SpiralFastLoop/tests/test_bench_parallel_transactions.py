@@ -444,6 +444,28 @@ def test_validate_benchmark_args_rejects_warmup_larger_than_steps() -> None:
     validate_benchmark_args(Namespace(warmup_steps=2, steps=2))
 
 
+@pytest.mark.parametrize(
+    ("steps", "warmup_steps", "match"),
+    [
+        (0, 0, "steps"),
+        (1.5, 0, "steps"),
+        ("2", 0, "steps"),
+        (True, 0, "steps"),
+        (2, -1, "warmup_steps"),
+        (2, 0.5, "warmup_steps"),
+        (2, "1", "warmup_steps"),
+        (2, True, "warmup_steps"),
+    ],
+)
+def test_validate_benchmark_args_rejects_invalid_direct_values(
+    steps: object,
+    warmup_steps: object,
+    match: str,
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        validate_benchmark_args(Namespace(warmup_steps=warmup_steps, steps=steps))
+
+
 def test_parse_args_rejects_zero_profile_model_depth(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "argv", ["bench_parallel_transactions.py", "--profile-model-depth", "0"])
 

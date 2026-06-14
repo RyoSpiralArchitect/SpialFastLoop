@@ -18,7 +18,11 @@ from torch.utils.data import Dataset
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer
-from spiralfastloop.utils import dataloader_from_dataset
+from spiralfastloop.utils import (
+    _non_negative_int_setting,
+    _positive_int_setting,
+    dataloader_from_dataset,
+)
 from scripts.json_utils import dump_json, dumps_json
 
 BASE_SUMMARY_FIELDS = (
@@ -279,7 +283,9 @@ def positive_float_arg(raw: str) -> float:
 
 
 def validate_benchmark_args(args: argparse.Namespace) -> None:
-    if int(args.warmup_steps) > int(args.steps):
+    steps = _positive_int_setting(args.steps, "steps")
+    warmup_steps = _non_negative_int_setting(args.warmup_steps, "warmup_steps")
+    if warmup_steps > steps:
         raise ValueError("warmup-steps must be less than or equal to steps")
 
 
