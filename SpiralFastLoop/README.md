@@ -12,8 +12,9 @@ rewriting a project around a heavyweight framework.
 - AMP policy helpers for accelerator-specific dtype choices
 - Gradient accumulation with low-overhead metrics
 - Optional `torch.compile` with `use_compile=False` for short smoke runs
-- Phase profiling for data wait, transfer, forward, loss, backward, optimizer,
-  and selected module drilldowns
+- Phase profiling for train, evaluate, and predict loops, including data wait,
+  transfer, forward, loss, postprocess, metrics, optimizer, and selected module
+  drilldowns
 - Trigger hooks for per-sample-loss driven hard-sample injection
 
 ## Install
@@ -68,6 +69,30 @@ metrics = trainer.train_one_epoch(
 print(metrics["profile"]["top_phases"][:3])
 print(metrics["profile"]["phase_breakdowns"]["forward"]["top_children"][:3])
 print(metrics["profile"]["phase_events"]["backward_grad_ready"]["top_children"][:3])
+```
+
+Evaluation uses the same lightweight phase profiler:
+
+```python
+eval_metrics = trainer.evaluate(
+    loader,
+    criterion,
+    steps=50,
+    collect_profile=True,
+)
+print(eval_metrics["profile"]["top_phases"][:3])
+```
+
+Prediction keeps the default list return value. Ask for metrics explicitly when
+you want inference timings:
+
+```python
+predictions, pred_metrics = trainer.predict(
+    loader,
+    steps=50,
+    collect_profile=True,
+)
+print(pred_metrics["profile"]["top_phases"][:3])
 ```
 
 Benchmark scripts default to `--log-interval 0` to avoid extra synchronization
