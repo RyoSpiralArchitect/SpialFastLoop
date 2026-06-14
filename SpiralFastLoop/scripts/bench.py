@@ -109,14 +109,43 @@ def plain_loop(
     *,
     epochs: int = 1,
     steps: Optional[int] = None,
+    grad_accum: int = 1,
 ) -> dict[str, float]:
     epochs = _positive_int_setting(epochs, "epochs")
     step_limit = _optional_positive_int_setting(steps, "steps")
+    grad_accum = _positive_int_setting(grad_accum, "grad_accum")
     model.to(device).train()
+    optimizer.zero_grad(set_to_none=True)
     start = time.perf_counter()
     step_count = 0
     samples = 0
     loss_acc = 0.0
+    pending_accum_steps = 0
+    optimizer_steps = 0
+    partial_optimizer_steps = 0
+    grad_accum_tail_steps = 0
+
+    def rescale_accumulated_gradients(factor: float) -> None:
+        if factor == 1.0:
+            return
+        for parameter in model.parameters():
+            if parameter.grad is not None:
+                parameter.grad.detach().mul_(factor)
+
+    def run_optimizer_step(accumulated_steps: int) -> None:
+        nonlocal optimizer_steps
+        nonlocal partial_optimizer_steps
+        nonlocal grad_accum_tail_steps
+        if accumulated_steps <= 0:
+            return
+        if accumulated_steps < grad_accum:
+            partial_optimizer_steps += 1
+            grad_accum_tail_steps = accumulated_steps
+            rescale_accumulated_gradients(grad_accum / accumulated_steps)
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+        optimizer_steps += 1
+
     for _ in range(epochs):
         for inputs, targets in loader:
             if step_limit is not None and step_count >= step_limit:
@@ -125,14 +154,20 @@ def plain_loop(
             targets = targets.to(device, non_blocking=True)
             logits = model(inputs)
             loss = criterion(logits, targets)
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad(set_to_none=True)
+            (loss / grad_accum).backward()
             step_count += 1
             samples += int(inputs.shape[0])
             loss_acc += float(loss.detach().cpu())
+            pending_accum_steps += 1
+            reached_accum_boundary = pending_accum_steps >= grad_accum
+            reached_requested_steps = step_limit is not None and step_count >= step_limit
+            if reached_accum_boundary or reached_requested_steps:
+                run_optimizer_step(pending_accum_steps)
+                pending_accum_steps = 0
         if step_limit is not None and step_count >= step_limit:
             break
+    if pending_accum_steps > 0:
+        run_optimizer_step(pending_accum_steps)
     elapsed = time.perf_counter() - start
     return {
         "samples_per_sec": samples / max(1e-9, elapsed),
@@ -140,6 +175,10 @@ def plain_loop(
         "elapsed_sec": elapsed,
         "steps": step_count,
         "samples": samples,
+        "optimizer_steps": optimizer_steps,
+        "grad_accum": grad_accum,
+        "partial_optimizer_steps": partial_optimizer_steps,
+        "grad_accum_tail_steps": grad_accum_tail_steps,
     }
 
 
@@ -151,6 +190,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=positive_int_arg, default=256)
     parser.add_argument("--steps", type=positive_int_arg, default=200)
     parser.add_argument("--warmup-steps", type=non_negative_int_arg, default=0)
+    parser.add_argument("--grad-accum", type=positive_int_arg, default=2)
     parser.add_argument("--workers", type=non_negative_int_arg, default=2)
     parser.add_argument("--learning-rate", type=positive_float_arg, default=3e-4)
     parser.add_argument("--device", type=device_arg, default="auto")
@@ -187,6 +227,7 @@ def main() -> None:
         device,
         epochs=1,
         steps=args.steps,
+        grad_accum=args.grad_accum,
     )
 
     loader = recommended_dataloader(
@@ -203,7 +244,7 @@ def main() -> None:
         optimizer,
         device=str(device),
         use_compile=args.compile,
-        grad_accum=2,
+        grad_accum=args.grad_accum,
         channels_last=False,
         log_interval=args.log_interval,
     )

@@ -144,6 +144,24 @@ def test_plain_loop_rejects_invalid_direct_steps(steps: object) -> None:
         )
 
 
+@pytest.mark.parametrize("grad_accum", [0, -1, 1.5, True, "2"])
+def test_plain_loop_rejects_invalid_direct_grad_accum(grad_accum: object) -> None:
+    dataset = TensorDataset(torch.randn(2, 2), torch.tensor([0, 1]))
+    loader = DataLoader(dataset, batch_size=1)
+    model = nn.Linear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+    with pytest.raises(ValueError, match="grad_accum"):
+        bench.plain_loop(
+            loader,
+            model,
+            optimizer,
+            nn.CrossEntropyLoss(),
+            torch.device("cpu"),
+            grad_accum=grad_accum,  # type: ignore[arg-type]
+        )
+
+
 def test_plain_loop_respects_step_limit_and_reports_counts() -> None:
     dataset = TensorDataset(torch.randn(4, 2), torch.tensor([0, 1, 0, 1]))
     loader = DataLoader(dataset, batch_size=1, shuffle=False)
@@ -161,7 +179,35 @@ def test_plain_loop_respects_step_limit_and_reports_counts() -> None:
 
     assert metrics["steps"] == 2
     assert metrics["samples"] == 2
+    assert metrics["optimizer_steps"] == 2
+    assert metrics["grad_accum"] == 1
+    assert metrics["partial_optimizer_steps"] == 0
+    assert metrics["grad_accum_tail_steps"] == 0
     assert metrics["samples_per_sec"] > 0.0
+
+
+def test_plain_loop_flushes_partial_grad_accumulation() -> None:
+    dataset = TensorDataset(torch.randn(4, 2), torch.tensor([0, 1, 0, 1]))
+    loader = DataLoader(dataset, batch_size=1, shuffle=False)
+    model = nn.Linear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+    metrics = bench.plain_loop(
+        loader,
+        model,
+        optimizer,
+        nn.CrossEntropyLoss(),
+        torch.device("cpu"),
+        steps=3,
+        grad_accum=2,
+    )
+
+    assert metrics["steps"] == 3
+    assert metrics["samples"] == 3
+    assert metrics["optimizer_steps"] == 2
+    assert metrics["grad_accum"] == 2
+    assert metrics["partial_optimizer_steps"] == 1
+    assert metrics["grad_accum_tail_steps"] == 1
 
 
 def test_bench_parse_args_accepts_valid_minimal_run(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -182,6 +228,8 @@ def test_bench_parse_args_accepts_valid_minimal_run(monkeypatch: pytest.MonkeyPa
             "1",
             "--warmup-steps",
             "1",
+            "--grad-accum",
+            "1",
             "--workers",
             "0",
             "--learning-rate",
@@ -196,6 +244,7 @@ def test_bench_parse_args_accepts_valid_minimal_run(monkeypatch: pytest.MonkeyPa
     assert args.samples == 8
     assert args.steps == 1
     assert args.warmup_steps == 1
+    assert args.grad_accum == 1
     assert args.workers == 0
     assert args.learning_rate == pytest.approx(0.001)
 
@@ -209,6 +258,7 @@ def test_bench_parse_args_accepts_valid_minimal_run(monkeypatch: pytest.MonkeyPa
         ["bench.py", "--batch-size", "1.5"],
         ["bench.py", "--steps", "0"],
         ["bench.py", "--warmup-steps", "-1"],
+        ["bench.py", "--grad-accum", "0"],
         ["bench.py", "--workers", "-1"],
         ["bench.py", "--learning-rate", "nan"],
         ["bench.py", "--device", "gpu"],
