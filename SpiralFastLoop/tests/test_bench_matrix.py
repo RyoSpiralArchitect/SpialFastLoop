@@ -24,15 +24,21 @@ def test_parse_csv_choices_trims_and_validates_values() -> None:
         "generated",
         "materialized",
     ]
+    assert _parse_csv_choices("generated,,", {"generated"}, name="modes") == ["generated"]
 
     with pytest.raises(ValueError):
         _parse_csv_choices("", {"generated"}, name="modes")
     with pytest.raises(ValueError):
         _parse_csv_choices("generated,other", {"generated"}, name="modes")
+    with pytest.raises(ValueError, match="comma-separated string"):
+        _parse_csv_choices(True, {"generated"}, name="modes")
+    with pytest.raises(ValueError, match="duplicate"):
+        _parse_csv_choices("generated,generated", {"generated"}, name="modes")
 
 
 def test_parse_worker_counts_rejects_empty_or_negative_values() -> None:
     assert _parse_worker_counts("0, 2") == [0, 2]
+    assert _parse_worker_counts("0,,") == [0]
 
     with pytest.raises(ValueError):
         _parse_worker_counts("")
@@ -40,6 +46,10 @@ def test_parse_worker_counts_rejects_empty_or_negative_values() -> None:
         _parse_worker_counts("-1")
     with pytest.raises(ValueError):
         _parse_worker_counts("cpu")
+    with pytest.raises(ValueError, match="comma-separated string"):
+        _parse_worker_counts(None)
+    with pytest.raises(ValueError, match="duplicate"):
+        _parse_worker_counts("0,0")
 
 
 def test_compile_requested_maps_modes() -> None:

@@ -30,17 +30,23 @@ from bench_parallel_transactions import (
 from json_utils import dump_json
 
 
-def _parse_csv_choices(raw: str, allowed: set[str], *, name: str) -> list[str]:
+def _parse_csv_choices(raw: object, allowed: set[str], *, name: str) -> list[str]:
+    if not isinstance(raw, str):
+        raise ValueError(f"{name} must be a comma-separated string")
     values = [item.strip() for item in raw.split(",") if item.strip()]
     if not values:
         raise ValueError(f"{name} must include at least one value")
     invalid = sorted(set(values) - allowed)
     if invalid:
         raise ValueError(f"{name} includes unsupported values: {', '.join(invalid)}")
+    if len(set(values)) != len(values):
+        raise ValueError(f"{name} must not include duplicate values")
     return values
 
 
-def _parse_worker_counts(raw: str) -> list[int]:
+def _parse_worker_counts(raw: object) -> list[int]:
+    if not isinstance(raw, str):
+        raise ValueError("worker counts must be a comma-separated string")
     values = []
     for item in raw.split(","):
         text = item.strip()
@@ -53,6 +59,8 @@ def _parse_worker_counts(raw: str) -> list[int]:
         values.append(value)
     if not values:
         raise ValueError("worker counts must include at least one value")
+    if len(set(values)) != len(values):
+        raise ValueError("worker counts must not include duplicate values")
     return values
 
 
