@@ -277,6 +277,9 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_loss_pct": 4.0,
             "profile_loss_reduce_pct": 1.0,
             "profile_backward_pct": 25.0,
+            "profile_user_metrics_pct": 2.0,
+            "profile_postprocess_pct": 4.0,
+            "profile_collect_output_pct": 1.0,
             "profile_metrics_pct": 0.5,
         },
         {
@@ -297,6 +300,9 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_loss_pct": 8.0,
             "profile_loss_reduce_pct": 3.0,
             "profile_backward_pct": 40.0,
+            "profile_user_metrics_pct": 6.0,
+            "profile_postprocess_pct": 8.0,
+            "profile_collect_output_pct": 3.0,
             "profile_metrics_pct": 1.5,
             "cuda_current_mem_bytes": 1024,
             "cuda_max_mem_bytes": 2048,
@@ -343,6 +349,9 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["mean_profile_forward_backward_pct"] == pytest.approx(50.0)
     assert generated["mean_profile_loss_pct"] == pytest.approx(6.0)
     assert generated["mean_profile_loss_reduce_pct"] == pytest.approx(2.0)
+    assert generated["mean_profile_user_metrics_pct"] == pytest.approx(4.0)
+    assert generated["mean_profile_postprocess_pct"] == pytest.approx(6.0)
+    assert generated["mean_profile_collect_output_pct"] == pytest.approx(2.0)
     assert generated["mean_profile_metrics_pct"] == pytest.approx(1.0)
     assert generated["max_profile_backward_pct"] == pytest.approx(40.0)
     assert generated["mean_cuda_current_mem_bytes"] == pytest.approx(1024.0)

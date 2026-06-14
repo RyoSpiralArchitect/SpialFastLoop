@@ -174,7 +174,9 @@ python scripts/bench_matrix.py \
   --summary-out reports/bench_matrix_summary.json
 ```
 Matrix summaries include per-config means, min/max values, stddev, best steady
-throughput, and best end-to-end configuration.
+throughput, and best end-to-end configuration. Profile summaries preserve phase
+fields such as `user_metrics`, `postprocess`, and `collect_output` when a run
+emits them.
 
 ## License
 
