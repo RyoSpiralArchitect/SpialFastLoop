@@ -181,6 +181,19 @@ def test_summarize_metric_skips_bool_values() -> None:
     assert stats["non_finite_count"] == pytest.approx(1.0)
 
 
+def test_summarize_metric_skips_numeric_strings() -> None:
+    rows = [
+        {"samples_per_sec": 100.0},
+        {"samples_per_sec": "300.0"},
+    ]
+
+    stats = summarize_metric(rows, "samples_per_sec")
+
+    assert stats["mean"] == pytest.approx(100.0)
+    assert stats["sample_count"] == pytest.approx(1.0)
+    assert stats["non_finite_count"] == pytest.approx(1.0)
+
+
 def test_dump_json_converts_non_finite_values_to_null() -> None:
     buffer = io.StringIO()
 
@@ -513,6 +526,7 @@ def test_summarize_results_omits_non_finite_best_run_fields() -> None:
             "end_to_end_wall_time_s": 1.25,
             "p99_s": True,
             "steps": "many",
+            "optimizer_steps": "2",
             "profile_forward_backward_pct": float("nan"),
             "profile_backward_pct": float("inf"),
         },
@@ -535,6 +549,7 @@ def test_summarize_results_omits_non_finite_best_run_fields() -> None:
     assert summary["best_reported"]["run"] == 0
     assert "p99_s" not in summary["best_reported"]
     assert "steps" not in summary["best_reported"]
+    assert "optimizer_steps" not in summary["best_reported"]
     assert "profile_forward_backward_pct" not in summary["best_reported"]
     assert "profile_backward_pct" not in summary["best_reported"]
     json.dumps(summary, allow_nan=False)
@@ -561,6 +576,17 @@ def test_best_finite_row_requires_positive_sample_count() -> None:
 def test_best_finite_row_rejects_bool_rank_values() -> None:
     rows = [
         {"run": 0, "mean_score": True},
+        {"run": 1, "mean_score": 0.5},
+    ]
+
+    best = _best_finite_row(rows, "mean_score", prefer_high=True)
+
+    assert best == rows[1]
+
+
+def test_best_finite_row_rejects_numeric_string_rank_values() -> None:
+    rows = [
+        {"run": 0, "mean_score": "300.0"},
         {"run": 1, "mean_score": 0.5},
     ]
 

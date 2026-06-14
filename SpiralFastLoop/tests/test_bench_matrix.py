@@ -144,7 +144,7 @@ def test_format_summary_row_marks_unmeasured_base_fields() -> None:
     assert "e2e=0.00s" not in formatted
 
 
-def test_measured_summary_value_rejects_bool_values() -> None:
+def test_measured_summary_value_rejects_bool_and_string_values() -> None:
     assert _measured_summary_value(
         {"mean_reported_samples_per_sec": True},
         "mean_reported_samples_per_sec",
@@ -153,6 +153,17 @@ def test_measured_summary_value_rejects_bool_values() -> None:
         {
             "mean_reported_samples_per_sec": 100.0,
             "sample_count_reported_samples_per_sec": True,
+        },
+        "mean_reported_samples_per_sec",
+    ) is None
+    assert _measured_summary_value(
+        {"mean_reported_samples_per_sec": "100.0"},
+        "mean_reported_samples_per_sec",
+    ) is None
+    assert _measured_summary_value(
+        {
+            "mean_reported_samples_per_sec": 100.0,
+            "sample_count_reported_samples_per_sec": "1",
         },
         "mean_reported_samples_per_sec",
     ) is None

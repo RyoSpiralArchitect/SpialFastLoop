@@ -220,7 +220,7 @@ def _summary_row(row: dict) -> dict:
 
 
 def _finite_summary_value(raw: object) -> Optional[float]:
-    if isinstance(raw, bool):
+    if isinstance(raw, (bool, str)):
         return None
     try:
         value = float(raw)
