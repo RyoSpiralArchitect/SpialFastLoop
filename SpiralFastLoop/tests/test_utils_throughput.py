@@ -8,7 +8,12 @@ from torch.utils.data import TensorDataset
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from spiralfastloop.utils import ThroughputMeter, dataloader_from_dataset
+from spiralfastloop.utils import (
+    ThroughputMeter,
+    _PSquareQuantile,
+    dataloader_from_dataset,
+    safe_compile,
+)
 
 
 def _percentile(values, percentile):
@@ -195,6 +200,38 @@ def test_throughput_meter_time_batch_context_records_and_handles_exceptions():
     assert summary["min_batch_s"] == pytest.approx(0.02, rel=1e-9)
     assert summary["max_batch_s"] == pytest.approx(0.05, rel=1e-9)
     assert summary["window_batches"] == pytest.approx(2)
+
+
+def test_p_square_quantile_reports_inconsistent_state() -> None:
+    quantile = _PSquareQuantile(0.5)
+    quantile._q = [0.1, 0.2, 0.3, 0.4, 0.5]
+    quantile._n = None
+    quantile._np = [1.0, 2.0, 3.0, 4.0, 5.0]
+    quantile._dn = [0.0, 0.25, 0.5, 0.75, 1.0]
+
+    with pytest.raises(RuntimeError, match="state is inconsistent"):
+        quantile.add(0.6)
+
+
+def test_p_square_quantile_update_requires_initialized_state() -> None:
+    quantile = _PSquareQuantile(0.5)
+
+    with pytest.raises(RuntimeError, match="not initialized"):
+        quantile._linear_update(2, 1)
+
+
+def test_safe_compile_rejects_non_module_compile_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = torch.nn.Linear(1, 1)
+
+    def fake_compile(_: torch.nn.Module, mode: str) -> object:
+        return object()
+
+    monkeypatch.setattr(torch, "compile", fake_compile, raising=False)
+
+    compiled, did_compile = safe_compile(model)
+
+    assert compiled is model
+    assert did_compile is False
 
 
 def test_dataloader_from_dataset_allows_zero_workers() -> None:

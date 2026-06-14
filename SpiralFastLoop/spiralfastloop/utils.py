@@ -263,16 +263,29 @@ class _PSquareQuantile:
         self._np: Optional[list[float]] = None
         self._dn: Optional[list[float]] = None
 
-    def add(self, value: float) -> None:
-        if not math.isfinite(value):
-            return
-
+    def _state(self) -> Optional[tuple[list[float], list[int], list[float], list[float]]]:
         q_values = self._q
         positions = self._n
         desired = self._np
         increments = self._dn
-
+        if q_values is None and positions is None and desired is None and increments is None:
+            return None
         if q_values is None or positions is None or desired is None or increments is None:
+            raise RuntimeError("P² quantile estimator state is inconsistent.")
+        return q_values, positions, desired, increments
+
+    def _initialized_state(self) -> tuple[list[float], list[int], list[float], list[float]]:
+        state = self._state()
+        if state is None:
+            raise RuntimeError("P² quantile estimator is not initialized.")
+        return state
+
+    def add(self, value: float) -> None:
+        if not math.isfinite(value):
+            return
+
+        state = self._state()
+        if state is None:
             initial = self._initial
             initial.append(float(value))
             if len(initial) == 5:
@@ -290,8 +303,7 @@ class _PSquareQuantile:
                 increments = [0.0, q / 2.0, q, (1.0 + q) / 2.0, 1.0]
                 self._q, self._n, self._np, self._dn = q_values, positions, desired, increments
             return
-
-        assert positions is not None and desired is not None and increments is not None
+        q_values, positions, desired, increments = state
 
         if value < q_values[0]:
             q_values[0] = float(value)
@@ -336,9 +348,7 @@ class _PSquareQuantile:
         return float(ordered[index])
 
     def _parabolic_update(self, idx: int, step: int) -> float:
-        assert self._q is not None and self._n is not None
-        q_values = self._q
-        positions = self._n
+        q_values, positions, _, _ = self._initialized_state()
         numerator = step * (
             (positions[idx] - positions[idx - 1] + step) * (q_values[idx + 1] - q_values[idx]) / (positions[idx + 1] - positions[idx])
             + (positions[idx + 1] - positions[idx] - step) * (q_values[idx] - q_values[idx - 1]) / (positions[idx] - positions[idx - 1])
@@ -349,9 +359,7 @@ class _PSquareQuantile:
         return q_values[idx] + numerator / denominator
 
     def _linear_update(self, idx: int, step: int) -> float:
-        assert self._q is not None and self._n is not None
-        q_values = self._q
-        positions = self._n
+        q_values, positions, _, _ = self._initialized_state()
         neighbour = idx + step
         denominator = positions[neighbour] - positions[idx]
         if denominator == 0:
@@ -970,7 +978,8 @@ def safe_compile(model: nn.Module, mode: str = "reduce-overhead") -> Tuple[nn.Mo
         return model, False
     try:
         m = compile_fn(model, mode=mode)
-        assert isinstance(m, nn.Module)
-        return m, True
+        if isinstance(m, nn.Module):
+            return m, True
+        return model, False
     except Exception:
         return model, False
