@@ -235,3 +235,30 @@ def test_dataloader_from_dataset_applies_seed_to_shuffle_order() -> None:
 
     assert first == second
     assert first != different_seed
+
+
+def test_dataloader_from_dataset_seed_works_with_mps_default_device() -> None:
+    if not hasattr(torch, "set_default_device"):
+        pytest.skip("torch.set_default_device is not available")
+    if not torch.backends.mps.is_available():
+        pytest.skip("MPS is not available")
+    dataset = TensorDataset(
+        torch.arange(16, device="cpu").float().unsqueeze(1),
+        torch.arange(16, device="cpu"),
+    )
+    previous_device = torch.get_default_device() if hasattr(torch, "get_default_device") else "cpu"
+    torch.set_default_device("mps")
+    try:
+        loader = dataloader_from_dataset(
+            dataset,
+            batch_size=4,
+            device="cpu",
+            num_workers=0,
+            shuffle=True,
+            seed=7,
+        )
+        order = [int(value) for _, targets in loader for value in targets]
+    finally:
+        torch.set_default_device(previous_device)
+
+    assert sorted(order) == list(range(16))

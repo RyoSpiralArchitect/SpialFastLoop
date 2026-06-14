@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import time
 from dataclasses import dataclass
@@ -19,6 +20,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from spiralfastloop import FastTrainer
 from spiralfastloop.utils import dataloader_from_dataset
 
+SUMMARY_FIELDS = (
+    "reported_samples_per_sec",
+    "samples_per_sec",
+    "steady_samples_per_sec",
+    "end_to_end_wall_time_s",
+    "setup_time_s",
+    "wall_time_s",
+    "cold_start_time_s",
+)
+
+BEST_RUN_FIELDS = (
+    "run",
+    "seed",
+    "dataset_mode",
+    "reported_samples_per_sec",
+    "samples_per_sec",
+    "steady_samples_per_sec",
+    "end_to_end_wall_time_s",
+    "setup_time_s",
+    "wall_time_s",
+)
+
 
 @dataclass
 class BenchmarkResult:
@@ -30,6 +53,55 @@ class BenchmarkResult:
         payload = {"wall_time_s": self.wall_time_s, "run": self.run_index}
         payload.update(self.trainer_metrics)
         return payload
+
+
+def _summary_row(row: dict) -> dict:
+    normalized = dict(row)
+    normalized.setdefault(
+        "reported_samples_per_sec",
+        normalized.get("steady_samples_per_sec", normalized.get("samples_per_sec", 0.0)),
+    )
+    normalized.setdefault("end_to_end_wall_time_s", normalized.get("wall_time_s", 0.0))
+    return normalized
+
+
+def _compact_run(row: dict) -> dict:
+    return {field: row[field] for field in BEST_RUN_FIELDS if field in row}
+
+
+def summarize_metric(rows: list[dict], field: str) -> dict[str, float]:
+    values = [float(row.get(field, 0.0)) for row in rows]
+    if not values:
+        return {"mean": 0.0, "min": 0.0, "max": 0.0, "stddev": 0.0}
+    mean = sum(values) / len(values)
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    return {
+        "mean": mean,
+        "min": min(values),
+        "max": max(values),
+        "stddev": math.sqrt(variance),
+    }
+
+
+def summarize_results(rows: list[dict]) -> dict:
+    summary_rows = [_summary_row(row) for row in rows]
+    summary: dict = {
+        "runs": len(summary_rows),
+        "best_reported": None,
+        "best_end_to_end": None,
+    }
+    for field in SUMMARY_FIELDS:
+        for stat_name, value in summarize_metric(summary_rows, field).items():
+            summary[f"{stat_name}_{field}"] = value
+
+    if summary_rows:
+        summary["best_reported"] = _compact_run(
+            max(summary_rows, key=lambda row: row["reported_samples_per_sec"])
+        )
+        summary["best_end_to_end"] = _compact_run(
+            min(summary_rows, key=lambda row: row["end_to_end_wall_time_s"])
+        )
+    return summary
 
 
 class SyntheticTransactionDataset(Dataset):
@@ -60,8 +132,8 @@ class SyntheticTransactionDataset(Dataset):
         if self.materialized:
             generator = torch.Generator()
             generator.manual_seed(seed)
-            self._features = torch.randn(size, features, generator=generator)
-            self._targets = torch.randint(0, classes, (size,), generator=generator)
+            self._features = torch.randn(size, features, generator=generator, device="cpu")
+            self._targets = torch.randint(0, classes, (size,), generator=generator, device="cpu")
 
     def __len__(self) -> int:
         return self.size
@@ -87,8 +159,8 @@ class SyntheticTransactionDataset(Dataset):
             return features[index], targets[index]
         generator = torch.Generator()
         generator.manual_seed(self.seed + index)
-        features = torch.randn(self.features, generator=generator)
-        target = torch.randint(0, self.classes, (1,), generator=generator).squeeze(0)
+        features = torch.randn(self.features, generator=generator, device="cpu")
+        target = torch.randint(0, self.classes, (1,), generator=generator, device="cpu").squeeze(0)
         return features, target
 
 
@@ -239,6 +311,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional path to dump the benchmark results as JSON for dashboards.",
     )
+    parser.add_argument(
+        "--summary-out",
+        type=str,
+        default=None,
+        help="Optional path to dump aggregate benchmark stats as JSON.",
+    )
     return parser.parse_args()
 
 
@@ -302,33 +380,23 @@ def main() -> None:
                 )
                 print(f"  optimizer: {top_optimizer}")
 
+    payload = [result.as_dict() for result in results]
+    aggregate = summarize_results(payload)
+
     if args.json_out:
-        payload = [result.as_dict() for result in results]
         out_path = Path(args.json_out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("w") as handle:
             json.dump(payload, handle, indent=2)
         print(f"Wrote results to {out_path}")
 
-    aggregate = {
-        "runs": args.runs,
-        "mean_wall_time_s": sum(r.wall_time_s for r in results) / max(1, len(results)),
-        "mean_setup_time_s": sum(r.trainer_metrics.get("setup_time_s", 0.0) for r in results)
-        / max(1, len(results)),
-        "mean_end_to_end_wall_time_s": sum(r.trainer_metrics.get("end_to_end_wall_time_s", 0.0) for r in results)
-        / max(1, len(results)),
-        "mean_samples_per_sec": sum(r.trainer_metrics.get("samples_per_sec", 0.0) for r in results)
-        / max(1, len(results)),
-        "mean_reported_samples_per_sec": sum(
-            r.trainer_metrics.get("reported_samples_per_sec", r.trainer_metrics.get("samples_per_sec", 0.0))
-            for r in results
-        )
-        / max(1, len(results)),
-        "mean_steady_samples_per_sec": sum(r.trainer_metrics.get("steady_samples_per_sec", 0.0) for r in results)
-        / max(1, len(results)),
-        "mean_cold_start_time_s": sum(r.trainer_metrics.get("cold_start_time_s", 0.0) for r in results)
-        / max(1, len(results)),
-    }
+    if args.summary_out:
+        out_path = Path(args.summary_out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with out_path.open("w") as handle:
+            json.dump(aggregate, handle, indent=2)
+        print(f"Wrote aggregate summary to {out_path}")
+
     print("Aggregate:", json.dumps(aggregate, indent=2))
 
 

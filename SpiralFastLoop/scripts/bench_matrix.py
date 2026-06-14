@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from bench_parallel_transactions import run_once
+from bench_parallel_transactions import run_once, summarize_metric
 
 SUMMARY_FIELDS = (
     "reported_samples_per_sec",
@@ -57,12 +57,6 @@ def _compile_requested(mode: str) -> bool:
     raise ValueError(f"unsupported compile mode: {mode}")
 
 
-def _mean(rows: list[dict], field: str) -> float:
-    if not rows:
-        return 0.0
-    return sum(float(row.get(field, 0.0)) for row in rows) / len(rows)
-
-
 def _group_key(row: dict) -> tuple[str, str, int]:
     return (
         str(row["matrix_dataset_mode"]),
@@ -89,7 +83,8 @@ def summarize_rows(rows: list[dict]) -> dict:
             ),
         }
         for field in SUMMARY_FIELDS:
-            summary[f"mean_{field}"] = _mean(group_rows, field)
+            for stat_name, value in summarize_metric(group_rows, field).items():
+                summary[f"{stat_name}_{field}"] = value
         summaries.append(summary)
 
     best_reported = None

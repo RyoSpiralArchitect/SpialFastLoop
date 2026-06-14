@@ -160,6 +160,24 @@ def to_device(obj: Any, device: str, non_blocking: bool = True) -> Any:
         return mapping_type(converted_mapping)
     return obj
 
+
+def _torch_default_device() -> Any:
+    get_default_device = getattr(torch, "get_default_device", None)
+    if get_default_device is None:
+        return "cpu"
+    return get_default_device()
+
+
+def _seeded_dataloader_generator(seed: int) -> torch.Generator:
+    default_device = _torch_default_device()
+    try:
+        generator = torch.Generator(device=default_device)
+    except (RuntimeError, TypeError):
+        generator = torch.Generator()
+    generator.manual_seed(int(seed))
+    return generator
+
+
 def dataloader_from_dataset(
     dataset: Dataset[Any],
     batch_size: int,
@@ -199,8 +217,7 @@ def dataloader_from_dataset(
                 drop_last=drop_last,
             )
             shuffle = False
-    generator = torch.Generator()
-    generator.manual_seed(int(seed))
+    generator = _seeded_dataloader_generator(seed)
     loader_kwargs: Dict[str, Any] = {
         "batch_size": batch_size,
         "generator": generator,

@@ -97,7 +97,11 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["dataset_mode"] == "generated"
     assert generated["runs"] == 2
     assert generated["mean_reported_samples_per_sec"] == pytest.approx(200.0)
+    assert generated["min_reported_samples_per_sec"] == pytest.approx(100.0)
+    assert generated["max_reported_samples_per_sec"] == pytest.approx(300.0)
+    assert generated["stddev_reported_samples_per_sec"] == pytest.approx(100.0)
     assert generated["mean_end_to_end_wall_time_s"] == pytest.approx(2.0)
+    assert generated["stddev_end_to_end_wall_time_s"] == pytest.approx(1.0)
 
 
 def test_summarize_rows_handles_empty_input() -> None:

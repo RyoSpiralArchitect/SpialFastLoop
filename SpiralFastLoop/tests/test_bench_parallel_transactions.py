@@ -3,11 +3,17 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.bench_parallel_transactions import SyntheticTransactionDataset, run_once
+from scripts.bench_parallel_transactions import (
+    SyntheticTransactionDataset,
+    run_once,
+    summarize_metric,
+    summarize_results,
+)
 
 
 def test_materialized_transaction_dataset_matches_shape_and_is_stable() -> None:
@@ -34,18 +40,34 @@ def test_generated_transaction_dataset_is_index_deterministic() -> None:
     assert dataset.materialized_bytes == 0
 
 
+def test_transaction_dataset_ignores_global_default_device() -> None:
+    if not hasattr(torch, "set_default_device"):
+        pytest.skip("torch.set_default_device is not available")
+    previous_device = torch.get_default_device() if hasattr(torch, "get_default_device") else "cpu"
+    torch.set_default_device("meta")
+    try:
+        materialized = SyntheticTransactionDataset(4, 2, 2, seed=123, materialized=True)
+        generated = SyntheticTransactionDataset(4, 2, 2, seed=123, materialized=False)
+
+        materialized_features, materialized_target = materialized[0]
+        generated_features, generated_target = generated[0]
+
+        assert materialized_features.device.type == "cpu"
+        assert materialized_target.device.type == "cpu"
+        assert generated_features.device.type == "cpu"
+        assert generated_target.device.type == "cpu"
+    finally:
+        torch.set_default_device(previous_device)
+
+
 def test_transaction_dataset_rejects_invalid_shapes() -> None:
     for kwargs in (
         {"size": -1, "features": 4, "classes": 3},
         {"size": 8, "features": 0, "classes": 3},
         {"size": 8, "features": 4, "classes": 0},
     ):
-        try:
+        with pytest.raises(ValueError):
             SyntheticTransactionDataset(**kwargs)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError(f"expected ValueError for {kwargs}")
 
 
 def test_transaction_dataset_bounds_indices_consistently() -> None:
@@ -58,12 +80,67 @@ def test_transaction_dataset_bounds_indices_consistently() -> None:
     assert torch.equal(last_target, direct_target)
 
     for index in (-9, 8):
-        try:
+        with pytest.raises(IndexError):
             dataset[index]
-        except IndexError:
-            pass
-        else:
-            raise AssertionError(f"expected IndexError for {index}")
+
+
+def test_summarize_metric_reports_distribution() -> None:
+    rows = [
+        {"samples_per_sec": 100.0},
+        {"samples_per_sec": 300.0},
+    ]
+
+    stats = summarize_metric(rows, "samples_per_sec")
+
+    assert stats["mean"] == pytest.approx(200.0)
+    assert stats["min"] == pytest.approx(100.0)
+    assert stats["max"] == pytest.approx(300.0)
+    assert stats["stddev"] == pytest.approx(100.0)
+
+
+def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
+    rows = [
+        {
+            "run": 0,
+            "seed": 10,
+            "dataset_mode": "generated",
+            "samples_per_sec": 90.0,
+            "steady_samples_per_sec": 110.0,
+            "wall_time_s": 2.0,
+            "setup_time_s": 1.0,
+        },
+        {
+            "run": 1,
+            "seed": 11,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 200.0,
+            "samples_per_sec": 160.0,
+            "steady_samples_per_sec": 200.0,
+            "wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "end_to_end_wall_time_s": 1.25,
+        },
+    ]
+
+    summary = summarize_results(rows)
+
+    assert summary["runs"] == 2
+    assert summary["mean_reported_samples_per_sec"] == pytest.approx(155.0)
+    assert summary["min_end_to_end_wall_time_s"] == pytest.approx(1.25)
+    assert summary["max_end_to_end_wall_time_s"] == pytest.approx(2.0)
+    assert summary["stddev_wall_time_s"] == pytest.approx(0.5)
+    assert summary["best_reported"]["run"] == 1
+    assert summary["best_end_to_end"]["run"] == 1
+
+
+def test_summarize_results_handles_empty_input() -> None:
+    summary = summarize_results([])
+
+    assert summary["runs"] == 0
+    assert summary["best_reported"] is None
+    assert summary["best_end_to_end"] is None
+    assert summary["mean_wall_time_s"] == pytest.approx(0.0)
+    assert summary["stddev_wall_time_s"] == pytest.approx(0.0)
 
 
 def test_transaction_benchmark_records_run_seed() -> None:
