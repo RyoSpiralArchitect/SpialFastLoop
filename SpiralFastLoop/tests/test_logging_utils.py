@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 
+import pytest
 import torch
 
 from spiralfastloop.logging_utils import MetricsLogger
@@ -35,3 +36,50 @@ def test_metrics_logger_writes_strict_jsonl_for_non_finite_metrics(tmp_path) -> 
     assert payload["vector"] == [1.0, None]
     assert payload["nested"] == {"score": None}
     assert payload["step"] == 1
+
+
+@pytest.mark.parametrize("step", [-1, 1.5, "2", True])
+def test_metrics_logger_rejects_invalid_step_values(step: object) -> None:
+    logger = logging.getLogger("spiralfastloop.test.invalid_step")
+    logger.handlers.clear()
+    logger.addHandler(logging.NullHandler())
+    logger.propagate = False
+    metrics_logger = MetricsLogger(logger=logger)
+
+    with pytest.raises(ValueError, match="step"):
+        metrics_logger.log_metrics(
+            "train",
+            {"loss": 1.0},
+            step=step,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize("epoch", [-1, 1.5, "2", True])
+def test_metrics_logger_rejects_invalid_epoch_values(epoch: object) -> None:
+    logger = logging.getLogger("spiralfastloop.test.invalid_epoch")
+    logger.handlers.clear()
+    logger.addHandler(logging.NullHandler())
+    logger.propagate = False
+    metrics_logger = MetricsLogger(logger=logger)
+
+    with pytest.raises(ValueError, match="epoch"):
+        metrics_logger.log_metrics(
+            "train",
+            {"loss": 1.0},
+            epoch=epoch,  # type: ignore[arg-type]
+        )
+
+
+def test_metrics_logger_keeps_non_negative_step_and_epoch_in_jsonl(tmp_path) -> None:
+    logger = logging.getLogger("spiralfastloop.test.step_epoch_jsonl")
+    logger.handlers.clear()
+    logger.addHandler(logging.NullHandler())
+    logger.propagate = False
+    jsonl_path = tmp_path / "metrics.jsonl"
+    metrics_logger = MetricsLogger(logger=logger, jsonl_path=str(jsonl_path))
+
+    metrics_logger.log_metrics("train", {"loss": 1.0}, step=0, epoch=0)
+
+    payload = json.loads(jsonl_path.read_text(encoding="utf-8"))
+    assert payload["step"] == 0
+    assert payload["epoch"] == 0

@@ -14,6 +14,8 @@ from typing import Any, Dict, Optional
 
 import torch
 
+from .utils import _non_negative_int_setting
+
 __all__ = ["MetricsLogger", "default_logger"]
 
 
@@ -116,9 +118,11 @@ class MetricsLogger:
             **normalized,
         }
         if step is not None:
-            payload["step"] = int(step)
+            step = _non_negative_int_setting(step, "step")
+            payload["step"] = step
         if epoch is not None:
-            payload["epoch"] = int(epoch)
+            epoch = _non_negative_int_setting(epoch, "epoch")
+            payload["epoch"] = epoch
 
         if self.logger is not None:
             summary = ", ".join(f"{k}={v}" for k, v in normalized.items())
