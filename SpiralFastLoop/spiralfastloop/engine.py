@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, Optional, cast
 
 import fnmatch
 import math
+import operator
 import time
 import torch
 import torch.nn as nn
@@ -199,7 +200,7 @@ def _int_setting(value: Any, name: str) -> int:
     if isinstance(value, bool):
         raise ValueError(f"{name} must be an integer")
     try:
-        return int(value)
+        return operator.index(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be an integer") from exc
 

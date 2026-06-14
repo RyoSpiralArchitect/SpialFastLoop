@@ -30,7 +30,11 @@ def _make_supervised_components() -> tuple[
     [
         ({"grad_accum": 0}, "grad_accum"),
         ({"grad_accum": -1}, "grad_accum"),
+        ({"grad_accum": 1.5}, "grad_accum"),
+        ({"grad_accum": "2"}, "grad_accum"),
+        ({"grad_accum": True}, "grad_accum"),
         ({"log_interval": -1}, "log_interval"),
+        ({"log_interval": 1.5}, "log_interval"),
         ({"clip_grad_norm": -0.1}, "clip_grad_norm"),
         ({"clip_grad_norm": float("nan")}, "clip_grad_norm"),
     ],
@@ -57,9 +61,14 @@ def test_fast_trainer_rejects_invalid_numeric_settings(
     [
         ({"steps": 0}, "steps"),
         ({"steps": -1}, "steps"),
+        ({"steps": 1.5}, "steps"),
+        ({"steps": "2"}, "steps"),
+        ({"steps": True}, "steps"),
         ({"warmup_steps": -1}, "warmup_steps"),
+        ({"warmup_steps": 0.5}, "warmup_steps"),
         ({"steps": 1, "warmup_steps": 2}, "warmup_steps"),
         ({"profile_window": 0}, "profile_window"),
+        ({"profile_window": 8.5}, "profile_window"),
         ({"profile_model_depth": 0}, "profile_model_depth"),
         ({"profile_model_max_modules": 0}, "profile_model_max_modules"),
     ],
@@ -83,6 +92,10 @@ def test_eval_and_predict_reject_invalid_step_limits() -> None:
         trainer.evaluate(loader, nn.CrossEntropyLoss(), steps=0)
     with pytest.raises(ValueError, match="steps"):
         trainer.predict(loader, steps=-1)
+    with pytest.raises(ValueError, match="steps"):
+        trainer.evaluate(loader, nn.CrossEntropyLoss(), steps=1.5)
+    with pytest.raises(ValueError, match="steps"):
+        trainer.predict(loader, steps="2")
 
 
 def test_train_one_epoch_collects_phase_and_model_profile() -> None:
