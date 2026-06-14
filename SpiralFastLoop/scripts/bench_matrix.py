@@ -141,7 +141,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-profile-distribution", dest="profile_distribution", action="store_false")
     parser.add_argument("--profile-window", type=positive_int_arg, default=512)
     parser.add_argument("--profile-model", action="store_true")
-    parser.add_argument("--profile-model-depth", type=non_negative_int_arg, default=1)
+    parser.add_argument("--profile-model-depth", type=positive_int_arg, default=1)
     parser.add_argument("--profile-model-max-modules", type=positive_int_arg, default=64)
     parser.add_argument("--profile-model-include", type=str, default=None)
     parser.add_argument("--json-out", type=str, default=None)

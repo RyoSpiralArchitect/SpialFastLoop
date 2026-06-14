@@ -333,7 +333,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--profile-window", type=positive_int_arg, default=512, help="Per-phase sample window size.")
     parser.add_argument("--profile-model", action="store_true", help="Collect module-level forward/backward drilldowns.")
-    parser.add_argument("--profile-model-depth", type=non_negative_int_arg, default=1, help="Exact module depth to profile.")
+    parser.add_argument("--profile-model-depth", type=positive_int_arg, default=1, help="Exact module depth to profile.")
     parser.add_argument("--profile-model-max-modules", type=positive_int_arg, default=64, help="Maximum modules to hook.")
     parser.add_argument(
         "--profile-model-include",

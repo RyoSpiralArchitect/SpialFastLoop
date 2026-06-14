@@ -37,6 +37,19 @@ from .logging_utils import MetricsLogger
 
 recommended_dataloader = dataloader_from_dataset
 
+_PROFILE_PHASE_METRIC_NAMES = (
+    "data_wait",
+    "transfer",
+    "forward",
+    "loss",
+    "loss_reduce",
+    "trigger",
+    "inject_transfer",
+    "backward",
+    "optimizer",
+    "metrics",
+)
+
 
 def _format_exception_reason(exc: Exception, limit: int = 200) -> str:
     message = str(exc).strip()
@@ -45,6 +58,31 @@ def _format_exception_reason(exc: Exception, limit: int = 200) -> str:
     if message:
         return f"{type(exc).__name__}: {message}"
     return type(exc).__name__
+
+
+def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, Any]) -> None:
+    """Expose common phase timers as flat metrics for benchmark tables."""
+    metrics["profile_total_s"] = float(profile.get("profile_total_s", 0.0))
+    phases = profile.get("phases", {})
+    if not isinstance(phases, Mapping):
+        return
+
+    forward_backward_time_s = 0.0
+    forward_backward_pct = 0.0
+    for phase_name in _PROFILE_PHASE_METRIC_NAMES:
+        row = phases.get(phase_name)
+        if not isinstance(row, Mapping):
+            continue
+        time_s = float(row.get("total_s", 0.0))
+        pct = float(row.get("pct", 0.0))
+        metrics[f"profile_{phase_name}_time_s"] = time_s
+        metrics[f"profile_{phase_name}_pct"] = pct
+        metrics[f"profile_{phase_name}_avg_ms"] = float(row.get("avg_ms", 0.0))
+        if phase_name in {"forward", "backward"}:
+            forward_backward_time_s += time_s
+            forward_backward_pct += pct
+    metrics["profile_forward_backward_time_s"] = forward_backward_time_s
+    metrics["profile_forward_backward_pct"] = forward_backward_pct
 
 
 @dataclass
@@ -975,7 +1013,9 @@ class FastTrainer:
         metrics["world_size"] = self.dist_ctx.world_size
         metrics["rank"] = self.dist_ctx.rank
         if collect_profile:
-            metrics["profile"] = profiler.summary()
+            profile_summary = profiler.summary()
+            metrics["profile"] = profile_summary
+            _add_profile_phase_metrics(metrics, profile_summary)
         self._log_metrics("train", metrics, epoch=epoch, mode="epoch")
         return metrics
 

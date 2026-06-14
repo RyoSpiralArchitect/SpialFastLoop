@@ -11,6 +11,7 @@ from scripts.bench_matrix import (
     _compile_requested,
     _parse_csv_choices,
     _parse_worker_counts,
+    parse_args,
     summarize_rows,
 )
 
@@ -44,6 +45,15 @@ def test_compile_requested_maps_modes() -> None:
 
     with pytest.raises(ValueError):
         _compile_requested("sometimes")
+
+
+def test_parse_args_rejects_zero_profile_model_depth(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["bench_matrix.py", "--profile-model-depth", "0"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        parse_args()
+
+    assert exc_info.value.code == 2
 
 
 def test_summarize_rows_groups_configs_and_ranks_best() -> None:

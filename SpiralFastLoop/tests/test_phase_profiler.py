@@ -181,6 +181,19 @@ def test_train_one_epoch_collects_phase_and_model_profile() -> None:
     assert "optimizer" in phases
     assert "p99_ms" in phases["forward"]
     assert "std_ms" in phases["forward"]
+    assert metrics["profile_total_s"] == pytest.approx(profile["profile_total_s"])
+    assert metrics["profile_forward_time_s"] == pytest.approx(phases["forward"]["total_s"])
+    assert metrics["profile_forward_pct"] == pytest.approx(phases["forward"]["pct"])
+    assert metrics["profile_forward_avg_ms"] == pytest.approx(phases["forward"]["avg_ms"])
+    assert metrics["profile_backward_time_s"] == pytest.approx(phases["backward"]["total_s"])
+    assert metrics["profile_backward_pct"] == pytest.approx(phases["backward"]["pct"])
+    assert metrics["profile_optimizer_time_s"] == pytest.approx(phases["optimizer"]["total_s"])
+    assert metrics["profile_forward_backward_time_s"] == pytest.approx(
+        phases["forward"]["total_s"] + phases["backward"]["total_s"]
+    )
+    assert metrics["profile_forward_backward_pct"] == pytest.approx(
+        phases["forward"]["pct"] + phases["backward"]["pct"]
+    )
 
     forward_children = profile["phase_breakdowns"]["forward"]["top_children"]
     assert forward_children

@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.bench_parallel_transactions import (
     SyntheticTransactionDataset,
     non_negative_int_arg,
+    parse_args,
     positive_float_arg,
     positive_int_arg,
     run_once,
@@ -170,6 +171,15 @@ def test_validate_benchmark_args_rejects_warmup_larger_than_steps() -> None:
         validate_benchmark_args(Namespace(warmup_steps=3, steps=2))
 
     validate_benchmark_args(Namespace(warmup_steps=2, steps=2))
+
+
+def test_parse_args_rejects_zero_profile_model_depth(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["bench_parallel_transactions.py", "--profile-model-depth", "0"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        parse_args()
+
+    assert exc_info.value.code == 2
 
 
 def test_transaction_benchmark_records_run_seed() -> None:
