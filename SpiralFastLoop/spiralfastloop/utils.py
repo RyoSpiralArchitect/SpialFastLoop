@@ -199,8 +199,11 @@ def dataloader_from_dataset(
                 drop_last=drop_last,
             )
             shuffle = False
+    generator = torch.Generator()
+    generator.manual_seed(int(seed))
     loader_kwargs: Dict[str, Any] = {
         "batch_size": batch_size,
+        "generator": generator,
         "shuffle": shuffle,
         "sampler": sampler,
         "num_workers": workers,

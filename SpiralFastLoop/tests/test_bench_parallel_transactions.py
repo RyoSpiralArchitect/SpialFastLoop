@@ -7,7 +7,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.bench_parallel_transactions import SyntheticTransactionDataset
+from scripts.bench_parallel_transactions import SyntheticTransactionDataset, run_once
 
 
 def test_materialized_transaction_dataset_matches_shape_and_is_stable() -> None:
@@ -64,3 +64,36 @@ def test_transaction_dataset_bounds_indices_consistently() -> None:
             pass
         else:
             raise AssertionError(f"expected IndexError for {index}")
+
+
+def test_transaction_benchmark_records_run_seed() -> None:
+    class Args:
+        transactions = 64
+        feature_dim = 8
+        num_classes = 3
+        seed = 100
+        dataset_mode = "materialized"
+        batch_size = 16
+        device = "cpu"
+        workers = 0
+        prefetch_factor = 2
+        learning_rate = 3e-4
+        compile = False
+        grad_accum = 2
+        log_interval = 0
+        steps = 2
+        collect_profile = False
+        profile_sync = False
+        profile_distribution = True
+        profile_window = 16
+        profile_model = False
+        profile_model_depth = 1
+        profile_model_max_modules = 8
+        profile_model_include = None
+        warmup_steps = 0
+
+    result = run_once(Args, 3).as_dict()
+
+    assert result["seed"] == 103
+    assert result["dataset_mode"] == "materialized"
+    assert result["dataset_materialized_bytes"] == (64 * 8 * 4) + (64 * 8)

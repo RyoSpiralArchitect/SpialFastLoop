@@ -213,3 +213,25 @@ def test_dataloader_from_dataset_allows_zero_workers() -> None:
 
     assert first_inputs.shape == (4, 2)
     assert first_targets.shape == (4,)
+
+
+def test_dataloader_from_dataset_applies_seed_to_shuffle_order() -> None:
+    dataset = TensorDataset(torch.arange(16).float().unsqueeze(1), torch.arange(16))
+
+    def order_for(seed: int) -> list[int]:
+        loader = dataloader_from_dataset(
+            dataset,
+            batch_size=4,
+            device="cpu",
+            num_workers=0,
+            shuffle=True,
+            seed=seed,
+        )
+        return [int(value) for _, targets in loader for value in targets]
+
+    first = order_for(7)
+    second = order_for(7)
+    different_seed = order_for(8)
+
+    assert first == second
+    assert first != different_seed

@@ -104,13 +104,18 @@ def build_model(features: int, classes: int) -> nn.Module:
 
 
 def run_once(args, run_index: int) -> BenchmarkResult:
+    run_seed = int(args.seed) + int(run_index)
+    torch.manual_seed(run_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(run_seed)
+
     setup_start = time.perf_counter()
     dataset_start = time.perf_counter()
     dataset = SyntheticTransactionDataset(
         size=args.transactions,
         features=args.feature_dim,
         classes=args.num_classes,
-        seed=args.seed + run_index,
+        seed=run_seed,
         materialized=args.dataset_mode == "materialized",
     )
     dataset_setup_time_s = time.perf_counter() - dataset_start
@@ -123,6 +128,7 @@ def run_once(args, run_index: int) -> BenchmarkResult:
         num_workers=args.workers,
         prefetch_factor=args.prefetch_factor,
         persistent=args.workers > 0,
+        seed=run_seed,
         shuffle=True,
     )
     loader_setup_time_s = time.perf_counter() - loader_start
@@ -171,6 +177,7 @@ def run_once(args, run_index: int) -> BenchmarkResult:
         "end_to_end_wall_time_s": setup_time_s + wall,
         "transactions": args.transactions,
         "dataset_mode": args.dataset_mode,
+        "seed": run_seed,
     })
     return BenchmarkResult(wall_time_s=wall, trainer_metrics=metrics, run_index=run_index)
 

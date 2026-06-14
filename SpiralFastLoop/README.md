@@ -90,6 +90,14 @@ The transactional benchmark reports training-only `wall_time_s`, separate
 `setup_time_s`, combined `end_to_end_wall_time_s`, and
 `dataset_materialized_bytes` so materialized-data runs remain transparent.
 
+```bash
+python scripts/bench_matrix.py \
+  --device cpu --steps 16 --runs 1 --worker-counts 0 \
+  --dataset-modes generated,materialized \
+  --compile-modes no-compile \
+  --json-out reports/bench_matrix.json
+```
+
 ## License
 
 Apache-2.0. See `LICENSE`.
