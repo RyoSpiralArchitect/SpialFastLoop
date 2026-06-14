@@ -6,26 +6,39 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Optional, Tuple, cast
 
 import torch
 
+if TYPE_CHECKING:
+    class _LogitsProcessorBase:
+        pass
+else:
+    try:
+        from transformers import LogitsProcessor as _LogitsProcessorBase
+    except ImportError:  # pragma: no cover - exercised when optional extras are absent
+        class _LogitsProcessorBase:
+            """Fallback base class so lightweight processors remain importable."""
+
+            pass
+
+AutoModelForCausalLM: Any
+AutoTokenizer: Any
+LogitsProcessorList: Any
 try:
     from transformers import (
-        AutoModelForCausalLM,
-        AutoTokenizer,
-        LogitsProcessor,
-        LogitsProcessorList,
+        AutoModelForCausalLM as _AutoModelForCausalLM,
+        AutoTokenizer as _AutoTokenizer,
+        LogitsProcessorList as _LogitsProcessorList,
     )
 except ImportError:  # pragma: no cover - exercised when optional extras are absent
-    AutoModelForCausalLM = None  # type: ignore[assignment,misc]
-    AutoTokenizer = None  # type: ignore[assignment,misc]
-    LogitsProcessorList = None  # type: ignore[assignment,misc]
-
-    class LogitsProcessor:  # type: ignore[no-redef]
-        """Fallback base class so lightweight processors remain importable."""
-
-        pass
+    AutoModelForCausalLM = None
+    AutoTokenizer = None
+    LogitsProcessorList = None
+else:
+    AutoModelForCausalLM = _AutoModelForCausalLM
+    AutoTokenizer = _AutoTokenizer
+    LogitsProcessorList = _LogitsProcessorList
 
 __all__ = [
     "AntiTopKMiddle",
@@ -57,7 +70,7 @@ def _require_transformers() -> None:
         )
 
 
-class AntiTopKMiddle(LogitsProcessor):
+class AntiTopKMiddle(_LogitsProcessorBase):
     """
     In the middle span of generation, apply a strong penalty to the current top-K tokens
     (i.e., "what would most naturally come next") to inject surprise.
@@ -94,7 +107,7 @@ class AntiTopKMiddle(LogitsProcessor):
             scores.scatter_(dim=-1, index=idx, src=vals - self.alpha)
         return scores
 
-class CoherenceTailBoost(LogitsProcessor):
+class CoherenceTailBoost(_LogitsProcessorBase):
     """
     In the tail region, lightly boost coherence via a tiny LM's logits (optional).
     """
