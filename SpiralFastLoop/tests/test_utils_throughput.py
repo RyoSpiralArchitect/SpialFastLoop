@@ -75,6 +75,32 @@ def test_throughput_meter_allows_custom_time_source():
     assert summary["samples_per_sec"] > 0.0
 
 
+@pytest.mark.parametrize("time_fn", [True, 1, "clock", object()])
+def test_throughput_meter_rejects_invalid_time_sources(time_fn: object):
+    with pytest.raises(ValueError, match="time_fn"):
+        ThroughputMeter(time_fn=time_fn)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("timestamp", [float("nan"), float("inf"), True, "1.0", b"1.0", object()])
+def test_throughput_meter_rejects_invalid_initial_time_values(timestamp: object):
+    with pytest.raises(ValueError, match="time_fn"):
+        ThroughputMeter(time_fn=lambda: timestamp)  # type: ignore[arg-type, return-value]
+
+
+@pytest.mark.parametrize("timestamp", [float("nan"), float("-inf"), True, "1.0", object()])
+def test_throughput_meter_tick_rejects_invalid_time_values_without_mutating_state(timestamp: object):
+    values = iter([0.0, timestamp])
+    meter = ThroughputMeter(time_fn=lambda: next(values))  # type: ignore[arg-type, return-value]
+    summary_before = meter.summary()
+    last_before = meter.last
+
+    with pytest.raises(ValueError, match="time_fn"):
+        meter.tick(batch_size=4)
+
+    assert meter.last == last_before
+    assert meter.summary() == summary_before
+
+
 def test_throughput_meter_rejects_invalid_inputs():
     meter = ThroughputMeter()
 
@@ -96,6 +122,14 @@ def test_throughput_meter_rejects_non_integral_batch_sizes(batch_size):
         meter.record(0.1, batch_size)
     with pytest.raises(ValueError, match="batch_size"):
         meter.time_batch(batch_size)
+
+
+@pytest.mark.parametrize("record_on_exception", [1, "false", None])
+def test_throughput_meter_time_batch_rejects_invalid_record_on_exception(record_on_exception: object):
+    meter = ThroughputMeter()
+
+    with pytest.raises(ValueError, match="record_on_exception"):
+        meter.time_batch(4, record_on_exception=record_on_exception)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("window", [-1, 1.5, "2", True])
@@ -246,6 +280,20 @@ def test_throughput_meter_time_batch_context_records_and_handles_exceptions():
     assert summary["min_batch_s"] == pytest.approx(0.02, rel=1e-9)
     assert summary["max_batch_s"] == pytest.approx(0.05, rel=1e-9)
     assert summary["window_batches"] == pytest.approx(2)
+
+
+def test_throughput_meter_time_batch_rejects_invalid_exit_time_without_mutating_state():
+    values = iter([0.0, 0.0, "bad"])
+    meter = ThroughputMeter(time_fn=lambda: next(values))  # type: ignore[arg-type, return-value]
+    summary_before = meter.summary()
+    last_before = meter.last
+
+    with pytest.raises(ValueError, match="time_fn"):
+        with meter.time_batch(4):
+            pass
+
+    assert meter.last == last_before
+    assert meter.summary() == summary_before
 
 
 def test_p_square_quantile_reports_inconsistent_state() -> None:

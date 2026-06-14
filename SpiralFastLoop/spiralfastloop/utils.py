@@ -173,6 +173,18 @@ def _profile_name_setting(value: Any, name: str) -> str:
     return value.strip()
 
 
+def _time_value_setting(value: Any, name: str) -> float:
+    if isinstance(value, (bool, str, bytes, bytearray)):
+        raise ValueError(f"{name} must return a finite number")
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must return a finite number") from exc
+    if not math.isfinite(normalized):
+        raise ValueError(f"{name} must return a finite number")
+    return normalized
+
+
 def get_amp_policy(device: str, use_amp: AmpSetting = "auto") -> Tuple[bool, torch.dtype, bool]:
     """
     Decide AMP usage, dtype, and whether GradScaler should be used.
@@ -512,11 +524,11 @@ class ThroughputMeter:
         ) -> None:
             self._meter = meter
             self._batch_size = _positive_int_setting(batch_size, "batch_size")
-            self._record_on_exception = record_on_exception
+            self._record_on_exception = _bool_setting(record_on_exception, "record_on_exception")
             self._start: Optional[float] = None
 
         def __enter__(self) -> "ThroughputMeter._BatchTimer":
-            self._start = self._meter._time_fn()
+            self._start = self._meter._now()
             return self
 
         def __exit__(
@@ -525,7 +537,7 @@ class ThroughputMeter:
             exc: Optional[BaseException],
             tb: Any,
         ) -> Literal[False]:
-            end = self._meter._time_fn()
+            end = self._meter._now()
             self._meter.last = end
             if self._start is None:
                 return False
@@ -565,7 +577,12 @@ class ThroughputMeter:
         self._track_distribution = track_distribution_value
         self._track_window = track_window_value
         self._fast_mode = fast_mode_value
-        self._time_fn: Callable[[], float] = time_fn or time.perf_counter
+        if time_fn is None:
+            self._time_fn = time.perf_counter
+        elif callable(time_fn):
+            self._time_fn = time_fn
+        else:
+            raise ValueError("time_fn must be callable")
         self._smoothing = smoothing_value
         self._window_limit = window_int if self._track_window else 0
         self._window_records: deque[tuple[float, int]] = deque()
@@ -576,7 +593,7 @@ class ThroughputMeter:
 
     def reset(self) -> None:
         """Clear the meter's accumulated state while keeping the time source."""
-        self.last = self._time_fn()
+        self.last = self._now()
         self.samples = 0
         self._total_time = 0.0
         self._time_correction = 0.0
@@ -597,7 +614,7 @@ class ThroughputMeter:
         self._best_time_per_sample: Optional[float] = None
 
     def tick(self, batch_size: int) -> None:
-        now = self._time_fn()
+        now = self._now()
         elapsed = max(0.0, now - self.last)
         self.last = now
         self.record(elapsed, batch_size)
@@ -754,6 +771,9 @@ class ThroughputMeter:
     @property
     def total_time(self) -> float:
         return self._total_time
+
+    def _now(self) -> float:
+        return _time_value_setting(self._time_fn(), "time_fn")
 
 
 def synchronize_device(device: str) -> None:
