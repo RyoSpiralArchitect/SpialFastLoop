@@ -43,6 +43,14 @@ def _format_exception_reason(exc: Exception, limit: int = 200) -> str:
     return type(exc).__name__
 
 
+@dataclass
+class _ProfileHookInstallResult:
+    handles: list[Any]
+    modules_selected: int = 0
+    hook_failures: int = 0
+    last_error: str = ""
+
+
 def _configure_cuda_backends(
     enable_tf32: bool,
     cudnn_benchmark: bool,
@@ -333,9 +341,9 @@ class FastTrainer:
         depth: int = 1,
         max_modules: int = 64,
         include: Optional[str | Sequence[str]] = None,
-    ) -> list[Any]:
+    ) -> _ProfileHookInstallResult:
         if not profiler.enabled:
-            return []
+            return _ProfileHookInstallResult(handles=[])
         root = getattr(self.model, "module", self.model)
         root = getattr(root, "_orig_mod", root)
         max_depth = max(1, int(depth))
@@ -366,6 +374,13 @@ class FastTrainer:
                 break
 
         handles: list[Any] = []
+        hook_failures = 0
+        hook_last_error = ""
+
+        def record_hook_failure(exc: Exception) -> None:
+            nonlocal hook_failures, hook_last_error
+            hook_failures += 1
+            hook_last_error = _format_exception_reason(exc)
 
         def disable_dynamo_if_available(hook: Callable[..., Any]) -> Callable[..., Any]:
             try:
@@ -396,11 +411,20 @@ class FastTrainer:
         seen_params = set()
         for name, module in selected:
             label = f"model.{name}"
+            pre_handle: Any = None
             try:
-                handles.append(module.register_forward_pre_hook(disable_dynamo_if_available(forward_pre(label))))
-                handles.append(module.register_forward_hook(disable_dynamo_if_available(forward_post(label))))
-            except Exception:
-                pass
+                pre_handle = module.register_forward_pre_hook(disable_dynamo_if_available(forward_pre(label)))
+                post_handle = module.register_forward_hook(disable_dynamo_if_available(forward_post(label)))
+            except Exception as exc:
+                record_hook_failure(exc)
+                if pre_handle is not None:
+                    try:
+                        pre_handle.remove()
+                    except Exception:
+                        pass
+            else:
+                handles.append(pre_handle)
+                handles.append(post_handle)
             for param in module.parameters(recurse=True):
                 param_id = id(param)
                 if param_id in seen_params or not param.requires_grad:
@@ -408,9 +432,14 @@ class FastTrainer:
                 seen_params.add(param_id)
                 try:
                     handles.append(param.register_hook(grad_ready(label)))
-                except Exception:
-                    pass
-        return handles
+                except Exception as exc:
+                    record_hook_failure(exc)
+        return _ProfileHookInstallResult(
+            handles=handles,
+            modules_selected=len(selected),
+            hook_failures=hook_failures,
+            last_error=hook_last_error,
+        )
 
     def train_one_epoch(
         self,
@@ -449,12 +478,27 @@ class FastTrainer:
             track_distribution=profile_distribution,
             window=profile_window,
         )
-        profile_hook_handles = self._install_profile_model_hooks(
-            profiler,
-            depth=profile_model_depth,
-            max_modules=profile_model_max_modules,
-            include=profile_model_include,
-        ) if (collect_profile and profile_model) else []
+        profile_model_enabled = bool(collect_profile and profile_model)
+        if profile_model_enabled:
+            profile_hook_result = self._install_profile_model_hooks(
+                profiler,
+                depth=profile_model_depth,
+                max_modules=profile_model_max_modules,
+                include=profile_model_include,
+            )
+        else:
+            profile_hook_result = _ProfileHookInstallResult(handles=[])
+        if not profile_model:
+            profile_model_status = "not_requested"
+        elif not collect_profile:
+            profile_model_status = "collect_profile_disabled"
+        elif profile_hook_result.modules_selected == 0:
+            profile_model_status = "no_matching_modules"
+        elif profile_hook_result.hook_failures > 0:
+            profile_model_status = "hook_failures"
+        else:
+            profile_model_status = "ok"
+        profile_hook_handles = profile_hook_result.handles
 
         # Detect if criterion supports reduction='none'
         supports_per_sample = False
@@ -839,6 +883,13 @@ class FastTrainer:
         metrics["compiled"] = self.compiled
         metrics["compile_init_time_s"] = self.compile_init_time_s
         metrics["compile_fallback_reason"] = self.compile_fallback_reason
+        metrics["profile_model_requested"] = bool(profile_model)
+        metrics["profile_model_enabled"] = profile_model_enabled
+        metrics["profile_model_status"] = profile_model_status
+        metrics["profile_model_modules_selected"] = profile_hook_result.modules_selected
+        metrics["profile_model_hook_count"] = len(profile_hook_result.handles)
+        metrics["profile_model_hook_failures"] = profile_hook_result.hook_failures
+        metrics["profile_model_hook_last_error"] = profile_hook_result.last_error
         metrics["device"] = self.device
         metrics["world_size"] = self.dist_ctx.world_size
         metrics["rank"] = self.dist_ctx.rank

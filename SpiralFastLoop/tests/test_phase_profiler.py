@@ -33,6 +33,13 @@ def test_train_one_epoch_collects_phase_and_model_profile() -> None:
     assert metrics["steps"] == 2
     assert "p99_s" in metrics
     assert "std_batch_s" in metrics
+    assert metrics["profile_model_requested"] is True
+    assert metrics["profile_model_enabled"] is True
+    assert metrics["profile_model_status"] == "ok"
+    assert metrics["profile_model_modules_selected"] == 2
+    assert metrics["profile_model_hook_count"] >= 4
+    assert metrics["profile_model_hook_failures"] == 0
+    assert metrics["profile_model_hook_last_error"] == ""
     assert "data_wait" in phases
     assert "forward" in phases
     assert "loss" in phases
@@ -109,6 +116,13 @@ def test_train_one_epoch_splits_warmup_and_steady_metrics() -> None:
     assert metrics["compile_fallback_reason"] == "cpu_device"
     assert metrics["scheduler_step_failures"] == 0
     assert metrics["scheduler_last_error"] == ""
+    assert metrics["profile_model_requested"] is False
+    assert metrics["profile_model_enabled"] is False
+    assert metrics["profile_model_status"] == "not_requested"
+    assert metrics["profile_model_modules_selected"] == 0
+    assert metrics["profile_model_hook_count"] == 0
+    assert metrics["profile_model_hook_failures"] == 0
+    assert metrics["profile_model_hook_last_error"] == ""
     assert metrics["warmup_avg_loss"] > 0.0
     assert metrics["steady_avg_loss"] > 0.0
 
@@ -145,6 +159,64 @@ def test_train_one_epoch_records_scheduler_step_failures() -> None:
     assert scheduler.calls == 2
     assert metrics["scheduler_step_failures"] == 2
     assert metrics["scheduler_last_error"] == "RuntimeError: scheduler boom"
+
+
+def test_train_one_epoch_reports_profile_model_hook_failures() -> None:
+    class ForwardHookFailingLinear(nn.Linear):
+        def register_forward_hook(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            raise RuntimeError("forward hook boom")
+
+    inputs = torch.randn(4, 4)
+    targets = torch.randint(0, 3, (4,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=4, shuffle=False)
+    model = nn.Sequential(ForwardHookFailingLinear(4, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, log_interval=999)
+
+    metrics = trainer.train_one_epoch(
+        loader,
+        nn.CrossEntropyLoss(),
+        steps=1,
+        collect_profile=True,
+        profile_model=True,
+        profile_model_include="0",
+    )
+
+    assert metrics["profile_model_requested"] is True
+    assert metrics["profile_model_enabled"] is True
+    assert metrics["profile_model_status"] == "hook_failures"
+    assert metrics["profile_model_modules_selected"] == 1
+    assert metrics["profile_model_hook_count"] == 2
+    assert metrics["profile_model_hook_failures"] == 1
+    assert metrics["profile_model_hook_last_error"] == "RuntimeError: forward hook boom"
+    assert not model[0]._forward_pre_hooks
+    assert not model[0]._forward_hooks
+
+
+def test_train_one_epoch_reports_profile_model_include_misses() -> None:
+    inputs = torch.randn(4, 4)
+    targets = torch.randint(0, 3, (4,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=4, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, log_interval=999)
+
+    metrics = trainer.train_one_epoch(
+        loader,
+        nn.CrossEntropyLoss(),
+        steps=1,
+        collect_profile=True,
+        profile_model=True,
+        profile_model_include="missing.*",
+    )
+
+    assert metrics["profile_model_requested"] is True
+    assert metrics["profile_model_enabled"] is True
+    assert metrics["profile_model_status"] == "no_matching_modules"
+    assert metrics["profile_model_modules_selected"] == 0
+    assert metrics["profile_model_hook_count"] == 0
+    assert metrics["profile_model_hook_failures"] == 0
+    assert metrics["profile_model_hook_last_error"] == ""
 
 
 def test_train_one_epoch_can_disable_step_logs_and_compile(capsys) -> None:
@@ -219,10 +291,14 @@ def test_model_profile_hooks_look_through_compiled_wrapper() -> None:
     trainer.model = CompiledLike(model)
     profiler = PhaseProfiler(enabled=True)
 
-    handles = trainer._install_profile_model_hooks(profiler, include="0,2")
+    result = trainer._install_profile_model_hooks(profiler, include="0,2")
+    handles = result.handles
 
     try:
         assert handles
+        assert result.modules_selected == 2
+        assert result.hook_failures == 0
+        assert result.last_error == ""
         assert model[0]._forward_pre_hooks
         assert model[2]._forward_hooks
     finally:
