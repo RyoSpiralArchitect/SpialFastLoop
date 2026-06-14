@@ -1923,8 +1923,14 @@ class FastTrainer:
         postprocess_calls = 0
         postprocess_failures = 0
         postprocess_last_error = ""
+        predict_failure_logged = False
 
-        def build_predict_metrics(*, failed: bool = False, failure_stage: str = "") -> Dict[str, Any]:
+        def build_predict_metrics(
+            *,
+            failed: bool = False,
+            failure_stage: str = "",
+            failure_last_error: str = "",
+        ) -> Dict[str, Any]:
             metrics: Dict[str, Any] = dict(meter.summary())
             metrics.update(_collect_device_memory_metrics(self.device))
             metrics["steps"] = step_idx
@@ -1944,11 +1950,30 @@ class FastTrainer:
             metrics["postprocess_last_error"] = postprocess_last_error
             metrics["predict_failed"] = failed
             metrics["predict_failure_stage"] = failure_stage
+            metrics["predict_failure_last_error"] = failure_last_error
             if collect_profile_value:
                 profile_summary = profiler.summary()
                 metrics["profile"] = profile_summary
                 _add_profile_phase_metrics(metrics, profile_summary)
             return metrics
+
+        def log_predict_failure(stage: str, exc: Exception) -> None:
+            nonlocal predict_failure_logged
+            if predict_failure_logged or not metrics_requested:
+                return
+            predict_failure_logged = True
+            try:
+                self._log_metrics(
+                    "predict",
+                    build_predict_metrics(
+                        failed=True,
+                        failure_stage=stage,
+                        failure_last_error=_format_exception_reason(exc),
+                    ),
+                    mode="error",
+                )
+            except Exception:
+                pass
 
         with torch.no_grad():
             data_iter = iter(loader)
@@ -1960,17 +1985,24 @@ class FastTrainer:
                 except StopIteration:
                     profiler.cancel("data_wait")
                     break
-                except Exception:
+                except Exception as exc:
                     profiler.cancel("data_wait")
+                    log_predict_failure("data_wait", exc)
                     raise
                 else:
                     profiler.stop("data_wait")
                 step_idx += 1
                 profiler.start("transfer")
+                transfer_error: Optional[Exception] = None
                 try:
                     batch = to_device(batch, self.device, non_blocking=True)
+                except Exception as exc:
+                    transfer_error = exc
+                    raise
                 finally:
                     profiler.stop("transfer")
+                    if transfer_error is not None:
+                        log_predict_failure("transfer", transfer_error)
                 if isinstance(batch, (list, tuple)) and len(batch) == 2:
                     inputs = batch[0]
                 elif isinstance(batch, dict) and "inputs" in batch:
@@ -1979,43 +2011,48 @@ class FastTrainer:
                     inputs = batch
                 with autocast_ctx(self.device, self.amp_enabled, self.amp_dtype):
                     profiler.start("forward")
+                    forward_error: Optional[Exception] = None
                     try:
                         outputs = self.model(inputs)
+                    except Exception as exc:
+                        forward_error = exc
+                        raise
                     finally:
                         profiler.stop("forward")
+                        if forward_error is not None:
+                            log_predict_failure("forward", forward_error)
                 if postprocess_value is not None:
                     profiler.start("postprocess")
+                    postprocess_error: Optional[Exception] = None
                     try:
                         postprocess_calls += 1
                         outputs = postprocess_value(outputs)
                     except Exception as exc:
+                        postprocess_error = exc
                         postprocess_failures += 1
                         postprocess_last_error = _format_exception_reason(exc)
-                        if metrics_requested:
-                            try:
-                                self._log_metrics(
-                                    "predict",
-                                    build_predict_metrics(
-                                        failed=True,
-                                        failure_stage="postprocess",
-                                    ),
-                                    mode="error",
-                                )
-                            except Exception:
-                                pass
                         raise
                     finally:
                         profiler.stop("postprocess")
+                        if postprocess_error is not None:
+                            log_predict_failure("postprocess", postprocess_error)
                 batch_size, batch_size_failure_reason = (
                     _try_infer_batch_size_with_reason(inputs) if metrics_requested else (None, "")
                 )
                 profiler.start("collect_output")
+                collect_output_error: Optional[Exception] = None
                 try:
                     outputs_list.append(_detach_to_cpu(outputs))
+                except Exception as exc:
+                    collect_output_error = exc
+                    raise
                 finally:
                     profiler.stop("collect_output")
+                    if collect_output_error is not None:
+                        log_predict_failure("collect_output", collect_output_error)
                 if metrics_requested:
                     profiler.start("metrics")
+                    metrics_error: Optional[Exception] = None
                     try:
                         if batch_size is not None:
                             batch_size_int = int(batch_size)
@@ -2026,8 +2063,13 @@ class FastTrainer:
                         else:
                             batch_size_inference_failures += 1
                             _record_batch_size_failure(batch_size_failure_counts, batch_size_failure_reason)
+                    except Exception as exc:
+                        metrics_error = exc
+                        raise
                     finally:
                         profiler.stop("metrics")
+                        if metrics_error is not None:
+                            log_predict_failure("metrics", metrics_error)
         if not metrics_requested:
             return outputs_list
         metrics = build_predict_metrics()

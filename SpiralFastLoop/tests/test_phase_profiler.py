@@ -1031,6 +1031,7 @@ def test_predict_can_return_metrics_and_phase_profile() -> None:
     assert metrics["postprocess_last_error"] == ""
     assert metrics["predict_failed"] is False
     assert metrics["predict_failure_stage"] == ""
+    assert metrics["predict_failure_last_error"] == ""
     for phase_name in ("data_wait", "transfer", "forward", "postprocess", "collect_output", "metrics"):
         assert phase_name in phases
         assert metrics[f"profile_{phase_name}_time_s"] == pytest.approx(phases[phase_name]["total_s"])
@@ -1087,6 +1088,67 @@ def test_predict_logs_postprocess_failures_before_reraising() -> None:
     assert metrics["postprocess_last_error"] == "RuntimeError: postprocess boom"
     assert metrics["predict_failed"] is True
     assert metrics["predict_failure_stage"] == "postprocess"
+    assert metrics["predict_failure_last_error"] == "RuntimeError: postprocess boom"
+
+
+def test_predict_logs_forward_failures_before_reraising() -> None:
+    class CapturingLogger:
+        def __init__(self) -> None:
+            self.rows: list[tuple[str, dict[str, object], str]] = []
+
+        def log_metrics(
+            self,
+            stage: str,
+            metrics: dict[str, object],
+            *,
+            mode: str = "step",
+            **_: object,
+        ) -> None:
+            self.rows.append((stage, metrics, mode))
+
+    class FailingModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.proj = nn.Linear(4, 2)
+
+        def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+            raise RuntimeError("predict forward boom")
+
+    inputs = torch.randn(2, 4)
+    targets = torch.zeros(2)
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
+    model = FailingModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    logger = CapturingLogger()
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        logger=logger,
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
+
+    with pytest.raises(RuntimeError, match="predict forward boom"):
+        trainer.predict(loader, steps=1, collect_profile=True)
+
+    assert len(logger.rows) == 1
+    stage, metrics, mode = logger.rows[0]
+    assert stage == "predict"
+    assert mode == "error"
+    assert metrics["steps"] == 1
+    assert metrics["measured_steps"] == 0
+    assert metrics["samples"] == 0
+    assert metrics["predict_failed"] is True
+    assert metrics["predict_failure_stage"] == "forward"
+    assert metrics["predict_failure_last_error"] == "RuntimeError: predict forward boom"
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "data_wait" in phases
+    assert "transfer" in phases
+    assert "forward" in phases
 
 
 def test_predict_cleans_profile_phase_when_loader_fails(
