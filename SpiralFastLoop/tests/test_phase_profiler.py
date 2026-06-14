@@ -1269,6 +1269,38 @@ def test_train_one_epoch_cleans_profile_phase_when_forward_fails(
     assert profilers[0]._starts == {}
 
 
+def test_train_one_epoch_cleans_model_profile_detail_when_module_forward_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingLinear(nn.Linear):
+        def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+            raise RuntimeError("module forward boom")
+
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    inputs = torch.randn(2, 4)
+    targets = torch.randint(0, 3, (2,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
+    model = nn.Sequential(FailingLinear(4, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    with pytest.raises(RuntimeError, match="module forward boom"):
+        trainer.train_one_epoch(
+            loader,
+            nn.CrossEntropyLoss(),
+            steps=1,
+            collect_profile=True,
+            profile_model=True,
+            profile_model_include="0",
+        )
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    assert profilers[0]._detail_starts == {}
+    assert not model[0]._forward_pre_hooks
+    assert not model[0]._forward_hooks
+
+
 def test_train_one_epoch_cleans_profile_phase_when_loss_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

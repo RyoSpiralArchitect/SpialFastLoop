@@ -812,6 +812,12 @@ class FastTrainer:
                 profiler.stop_detail("forward", label)
             return hook
 
+        def register_forward_post_hook(module: nn.Module, hook: Callable[..., Any]) -> Any:
+            try:
+                return module.register_forward_hook(hook, always_call=True)
+            except TypeError:
+                return module.register_forward_hook(hook)
+
         def grad_ready(label: str) -> Callable[[torch.Tensor], torch.Tensor]:
             def hook(grad: torch.Tensor) -> torch.Tensor:
                 profiler.record_event_since_start("backward", "backward_grad_ready", label)
@@ -824,7 +830,10 @@ class FastTrainer:
             pre_handle: Any = None
             try:
                 pre_handle = module.register_forward_pre_hook(disable_dynamo_if_available(forward_pre(label)))
-                post_handle = module.register_forward_hook(disable_dynamo_if_available(forward_post(label)))
+                post_handle = register_forward_post_hook(
+                    module,
+                    disable_dynamo_if_available(forward_post(label)),
+                )
             except Exception as exc:
                 record_hook_failure(exc)
                 if pre_handle is not None:
