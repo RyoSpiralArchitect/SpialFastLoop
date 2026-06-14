@@ -43,6 +43,29 @@ def test_collector_tracks_events_and_summary(tmp_path):
     assert rows[0]["context"] == "buffer"
 
 
+def test_collector_export_csv_creates_parent_dirs_and_accepts_pathlike(tmp_path):
+    collector = NormalizationMetricsCollector(history_limit=2)
+    collector.record(1.0, 0.0, context="正規化", timestamp=1.0)
+    out_path = tmp_path / "artifacts" / "normalization" / "events.csv"
+
+    collector.export_csv(out_path)
+
+    with out_path.open("r", newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[0]["context"] == "正規化"
+
+
+@pytest.mark.parametrize("path", [None, True, 1, "", b"events.csv"])
+def test_collector_export_csv_rejects_invalid_paths(tmp_path, path: object):
+    collector = NormalizationMetricsCollector(history_limit=2)
+    collector.record(1.0, 0.0, context="buffer", timestamp=1.0)
+
+    with pytest.raises(ValueError, match="path"):
+        collector.export_csv(path)  # type: ignore[arg-type]
+
+    assert list(tmp_path.rglob("*.csv")) == []
+
+
 @pytest.mark.parametrize(
     "kwargs, field",
     [
@@ -55,6 +78,8 @@ def test_collector_tracks_events_and_summary(tmp_path):
         ({"before": 1.0, "after": True}, "after"),
         ({"before": 1.0, "after": 0.0, "timestamp": float("nan")}, "timestamp"),
         ({"before": 1.0, "after": 0.0, "timestamp": True}, "timestamp"),
+        ({"before": 1.0, "after": 0.0, "context": True}, "context"),
+        ({"before": 1.0, "after": 0.0, "context": object()}, "context"),
     ],
 )
 def test_collector_rejects_invalid_events_before_mutating_state(kwargs, field):

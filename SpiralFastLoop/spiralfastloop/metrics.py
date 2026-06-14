@@ -3,12 +3,30 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional
 import csv
+import os
 import time
+from dataclasses import dataclass
+from typing import Any, Dict, Iterable, List, Optional, Union
 
 from .utils import _finite_float_setting, _non_negative_int_setting
+
+PathSetting = Union[str, os.PathLike[str]]
+
+
+def _path_setting(path: Any, name: str) -> str:
+    if not isinstance(path, (str, os.PathLike)):
+        raise ValueError(f"{name} must be a path string")
+    normalized = os.fspath(path)
+    if not isinstance(normalized, str) or normalized == "":
+        raise ValueError(f"{name} must be a non-empty path string")
+    return normalized
+
+
+def _optional_context_setting(context: Any) -> Optional[str]:
+    if context is None or isinstance(context, str):
+        return context
+    raise ValueError("context must be a string or None")
 
 
 @dataclass
@@ -64,6 +82,7 @@ class NormalizationMetricsCollector:
 
         before_value = _finite_float_setting(before, "before")
         after_value = _finite_float_setting(after, "after")
+        context_value = _optional_context_setting(context)
         timestamp_value: Optional[float] = None
         if timestamp is not None:
             timestamp_value = _finite_float_setting(timestamp, "timestamp")
@@ -83,7 +102,7 @@ class NormalizationMetricsCollector:
             timestamp=timestamp_value,
             before=before_value,
             after=after_value,
-            context=context,
+            context=context_value,
         )
         self._history.append(event)
         if len(self._history) > self.history_limit:
@@ -139,11 +158,15 @@ class NormalizationMetricsCollector:
             lines.append(f"Contexts seen  : {unique_contexts}")
         return "\n".join(lines)
 
-    def export_csv(self, path: str) -> None:
+    def export_csv(self, path: PathSetting) -> None:
         """Persist the rolling history to a CSV file for dashboards."""
 
+        normalized_path = _path_setting(path, "path")
+        directory = os.path.dirname(normalized_path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
         fieldnames = ["timestamp", "before", "after", "abs_before", "abs_after", "zeroed", "context"]
-        with open(path, "w", newline="") as handle:
+        with open(normalized_path, "w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=fieldnames)
             writer.writeheader()
             for row in self.to_timeseries():
