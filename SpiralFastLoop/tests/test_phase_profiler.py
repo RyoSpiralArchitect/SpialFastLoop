@@ -320,11 +320,59 @@ def test_evaluate_collects_phase_profile_and_user_metrics() -> None:
     assert metrics["steps"] == 2
     assert metrics["samples"] == 8
     assert 0.0 <= metrics["accuracy"] <= 1.0
+    assert metrics["user_metric_valid_count"] == 2
+    assert metrics["user_metric_invalid_count"] == 0
+    assert metrics["user_metric_non_finite_count"] == 0
+    assert metrics["user_metric_skipped_count"] == 0
     for phase_name in ("data_wait", "transfer", "forward", "loss", "user_metrics", "metrics"):
         assert phase_name in phases
         assert metrics[f"profile_{phase_name}_time_s"] == pytest.approx(phases[phase_name]["total_s"])
         assert metrics[f"profile_{phase_name}_pct"] == pytest.approx(phases[phase_name]["pct"])
         assert metrics[f"profile_{phase_name}_avg_ms"] == pytest.approx(phases[phase_name]["avg_ms"])
+
+
+def test_evaluate_skips_invalid_user_metrics_and_reports_counts() -> None:
+    inputs = torch.randn(8, 4)
+    targets = torch.randint(0, 3, (8,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=4, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+    calls = 0
+
+    def metrics_fn(
+        _outputs: torch.Tensor,
+        _batch_targets: torch.Tensor,
+        _inputs: torch.Tensor,
+    ) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return {
+                "accuracy": torch.tensor(0.25),
+                "bad": torch.tensor(float("nan")),
+                "invalid": object(),
+            }
+        return {
+            "accuracy": torch.tensor(0.75),
+            "bad": torch.tensor(float("inf")),
+            "invalid": "not-a-number",
+        }
+
+    metrics = trainer.evaluate(
+        loader,
+        nn.CrossEntropyLoss(),
+        metrics_fn=metrics_fn,
+        steps=2,
+    )
+
+    assert metrics["accuracy"] == pytest.approx(0.5)
+    assert "bad" not in metrics
+    assert "invalid" not in metrics
+    assert metrics["user_metric_valid_count"] == 2
+    assert metrics["user_metric_invalid_count"] == 2
+    assert metrics["user_metric_non_finite_count"] == 2
+    assert metrics["user_metric_skipped_count"] == 4
 
 
 def test_predict_can_return_metrics_and_phase_profile() -> None:

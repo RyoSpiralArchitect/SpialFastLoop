@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Union, cast
 
 import fnmatch
+import math
 import time
 import torch
 import torch.nn as nn
@@ -247,17 +248,22 @@ def _ensure_loss_vector(loss_tensor: torch.Tensor) -> torch.Tensor:
     return loss_tensor.reshape(loss_tensor.shape[0], -1).mean(dim=1)
 
 
-def _metric_to_float(value: Any) -> float:
+def _metric_to_float(value: Any) -> tuple[Optional[float], str]:
     if isinstance(value, torch.Tensor):
         if value.numel() == 0:
-            return 0.0
+            return None, "invalid"
         if value.numel() == 1:
-            return float(value.detach().cpu().item())
-        return float(value.detach().mean().cpu().item())
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
+            normalized = float(value.detach().cpu().item())
+        else:
+            normalized = float(value.detach().mean().cpu().item())
+    else:
+        try:
+            normalized = float(value)
+        except (TypeError, ValueError):
+            return None, "invalid"
+    if not math.isfinite(normalized):
+        return None, "non_finite"
+    return normalized, ""
 
 
 def _detach_to_cpu(obj: Any) -> Any:
@@ -1151,6 +1157,9 @@ class FastTrainer:
         step_idx = 0
         metric_sums: Dict[str, float] = {}
         metric_weights: Dict[str, float] = {}
+        user_metric_valid_count = 0
+        user_metric_invalid_count = 0
+        user_metric_non_finite_count = 0
 
         with torch.no_grad():
             data_iter = iter(loader)
@@ -1218,9 +1227,16 @@ class FastTrainer:
 
                     if extra_metrics is not None:
                         for key, value in extra_metrics.items():
-                            metric_value = _metric_to_float(value)
+                            metric_value, metric_error = _metric_to_float(value)
+                            if metric_value is None:
+                                if metric_error == "non_finite":
+                                    user_metric_non_finite_count += 1
+                                else:
+                                    user_metric_invalid_count += 1
+                                continue
                             metric_sums[key] = metric_sums.get(key, 0.0) + metric_value * batch_size_int
                             metric_weights[key] = metric_weights.get(key, 0.0) + batch_size_int
+                            user_metric_valid_count += 1
                 finally:
                     profiler.stop("metrics")
 
@@ -1243,6 +1259,15 @@ class FastTrainer:
             total_loss = distributed_sum(total_loss)
             total_weight = distributed_sum(total_weight)
             total_items = int(distributed_sum(torch.tensor(total_items, device=total_loss.device)).item())
+            user_metric_valid_count = int(
+                distributed_sum(torch.tensor(user_metric_valid_count, device=total_loss.device)).item()
+            )
+            user_metric_invalid_count = int(
+                distributed_sum(torch.tensor(user_metric_invalid_count, device=total_loss.device)).item()
+            )
+            user_metric_non_finite_count = int(
+                distributed_sum(torch.tensor(user_metric_non_finite_count, device=total_loss.device)).item()
+            )
             for key in list(metric_sums.keys()):
                 metric_sums[key] = float(
                     distributed_sum(torch.tensor(metric_sums[key], device=total_loss.device)).item()
@@ -1261,6 +1286,10 @@ class FastTrainer:
         metrics["device"] = self.device
         metrics["world_size"] = self.dist_ctx.world_size
         metrics["rank"] = self.dist_ctx.rank
+        metrics["user_metric_valid_count"] = user_metric_valid_count
+        metrics["user_metric_invalid_count"] = user_metric_invalid_count
+        metrics["user_metric_non_finite_count"] = user_metric_non_finite_count
+        metrics["user_metric_skipped_count"] = user_metric_invalid_count + user_metric_non_finite_count
 
         for key, total in metric_sums.items():
             denom = metric_weights.get(key, 0.0)
