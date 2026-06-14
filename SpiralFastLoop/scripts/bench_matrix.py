@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from bench_parallel_transactions import (
     BASE_SUMMARY_FIELDS,
+    _best_finite_row,
     count_profiled_rows,
     non_negative_int_arg,
     positive_float_arg,
@@ -99,8 +100,18 @@ def summarize_rows(rows: list[dict]) -> dict:
     best_reported = None
     best_end_to_end = None
     if summaries:
-        best_reported = max(summaries, key=lambda row: row["mean_reported_samples_per_sec"])
-        best_end_to_end = min(summaries, key=lambda row: row["mean_end_to_end_wall_time_s"])
+        best_reported = _best_finite_row(
+            summaries,
+            "mean_reported_samples_per_sec",
+            prefer_high=True,
+            sample_count_field="sample_count_reported_samples_per_sec",
+        )
+        best_end_to_end = _best_finite_row(
+            summaries,
+            "mean_end_to_end_wall_time_s",
+            prefer_high=False,
+            sample_count_field="sample_count_end_to_end_wall_time_s",
+        )
 
     return {
         "runs": len(rows),

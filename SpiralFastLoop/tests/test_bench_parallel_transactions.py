@@ -312,6 +312,80 @@ def test_summarize_results_skips_non_finite_profile_values() -> None:
     json.dumps(summary, allow_nan=False)
 
 
+def test_summarize_results_skips_non_finite_best_rank_values() -> None:
+    rows = [
+        {
+            "run": 0,
+            "seed": 10,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": float("nan"),
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "end_to_end_wall_time_s": float("inf"),
+        },
+        {
+            "run": 1,
+            "seed": 11,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 120.0,
+            "samples_per_sec": 95.0,
+            "steady_samples_per_sec": 120.0,
+            "wall_time_s": 0.9,
+            "setup_time_s": 0.20,
+            "end_to_end_wall_time_s": 0.9,
+        },
+    ]
+
+    summary = summarize_results(rows)
+
+    assert summary["best_reported"]["run"] == 1
+    assert summary["best_end_to_end"]["run"] == 1
+    assert summary["sample_count_reported_samples_per_sec"] == pytest.approx(1.0)
+    assert summary["non_finite_count_reported_samples_per_sec"] == pytest.approx(1.0)
+    assert summary["sample_count_end_to_end_wall_time_s"] == pytest.approx(1.0)
+    assert summary["non_finite_count_end_to_end_wall_time_s"] == pytest.approx(1.0)
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_results_omits_non_finite_best_run_fields() -> None:
+    rows = [
+        {
+            "run": 0,
+            "seed": 10,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 300.0,
+            "samples_per_sec": 280.0,
+            "steady_samples_per_sec": 300.0,
+            "wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "end_to_end_wall_time_s": 1.25,
+            "profile_forward_backward_pct": float("nan"),
+            "profile_backward_pct": float("inf"),
+        },
+        {
+            "run": 1,
+            "seed": 11,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 200.0,
+            "samples_per_sec": 180.0,
+            "steady_samples_per_sec": 200.0,
+            "wall_time_s": 0.9,
+            "setup_time_s": 0.20,
+            "end_to_end_wall_time_s": 1.10,
+            "profile_forward_backward_pct": 50.0,
+        },
+    ]
+
+    summary = summarize_results(rows)
+
+    assert summary["best_reported"]["run"] == 0
+    assert "profile_forward_backward_pct" not in summary["best_reported"]
+    assert "profile_backward_pct" not in summary["best_reported"]
+    json.dumps(summary, allow_nan=False)
+
+
 def test_benchmark_arg_types_reject_empty_or_invalid_runs() -> None:
     assert positive_int_arg("1") == 1
     assert non_negative_int_arg("0") == 0

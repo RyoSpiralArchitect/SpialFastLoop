@@ -285,6 +285,46 @@ def test_summarize_rows_skips_non_finite_profile_values() -> None:
     json.dumps(summary, allow_nan=False)
 
 
+def test_summarize_rows_skips_groups_with_no_finite_best_rank_values() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": float("nan"),
+            "samples_per_sec": float("nan"),
+            "steady_samples_per_sec": float("nan"),
+            "end_to_end_wall_time_s": float("inf"),
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+        },
+        {
+            "matrix_dataset_mode": "materialized",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 120.0,
+            "samples_per_sec": 95.0,
+            "steady_samples_per_sec": 120.0,
+            "end_to_end_wall_time_s": 0.9,
+            "setup_time_s": 0.20,
+            "wall_time_s": 0.70,
+            "dataset_materialized_bytes": 1024,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    generated = summary["groups"][0]
+
+    assert generated["sample_count_reported_samples_per_sec"] == pytest.approx(0.0)
+    assert generated["non_finite_count_reported_samples_per_sec"] == pytest.approx(1.0)
+    assert generated["sample_count_end_to_end_wall_time_s"] == pytest.approx(0.0)
+    assert generated["non_finite_count_end_to_end_wall_time_s"] == pytest.approx(1.0)
+    assert summary["best_reported"]["dataset_mode"] == "materialized"
+    assert summary["best_end_to_end"]["dataset_mode"] == "materialized"
+    json.dumps(summary, allow_nan=False)
+
+
 def test_summarize_rows_handles_empty_input() -> None:
     summary = summarize_rows([])
 

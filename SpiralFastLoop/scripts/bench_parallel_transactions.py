@@ -113,7 +113,49 @@ def _summary_row(row: dict) -> dict:
 
 
 def _compact_run(row: dict) -> dict:
-    return {field: row[field] for field in BEST_RUN_FIELDS if field in row}
+    compact = {}
+    for field in BEST_RUN_FIELDS:
+        if field not in row:
+            continue
+        value = row[field]
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if not math.isfinite(float(value)):
+                continue
+        compact[field] = value
+    return compact
+
+
+def _finite_metric_value(row: dict, field: str) -> Optional[float]:
+    try:
+        value = float(row[field])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+    return value
+
+
+def _best_finite_row(
+    rows: list[dict],
+    field: str,
+    *,
+    prefer_high: bool,
+    sample_count_field: Optional[str] = None,
+) -> Optional[dict]:
+    candidates = []
+    for row in rows:
+        if sample_count_field is not None:
+            sample_count = _finite_metric_value(row, sample_count_field)
+            if sample_count == 0.0:
+                continue
+        value = _finite_metric_value(row, field)
+        if value is None:
+            continue
+        candidates.append((value, row))
+    if not candidates:
+        return None
+    selector = max if prefer_high else min
+    return selector(candidates, key=lambda item: item[0])[1]
 
 
 def summary_fields_for_rows(rows: list[dict]) -> tuple[str, ...]:
@@ -190,12 +232,18 @@ def summarize_results(rows: list[dict]) -> dict:
             summary[f"{stat_name}_{field}"] = value
 
     if summary_rows:
-        summary["best_reported"] = _compact_run(
-            max(summary_rows, key=lambda row: row["reported_samples_per_sec"])
+        best_reported = _best_finite_row(
+            summary_rows,
+            "reported_samples_per_sec",
+            prefer_high=True,
         )
-        summary["best_end_to_end"] = _compact_run(
-            min(summary_rows, key=lambda row: row["end_to_end_wall_time_s"])
+        best_end_to_end = _best_finite_row(
+            summary_rows,
+            "end_to_end_wall_time_s",
+            prefer_high=False,
         )
+        summary["best_reported"] = _compact_run(best_reported) if best_reported is not None else None
+        summary["best_end_to_end"] = _compact_run(best_end_to_end) if best_end_to_end is not None else None
     return summary
 
 
