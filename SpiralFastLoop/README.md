@@ -117,6 +117,32 @@ Benchmark scripts default to `--log-interval 0` to avoid extra synchronization
 in timing runs. Use `--no-compile` when short MPS or CPU smoke tests are
 dominated by compile startup.
 
+## Example Smoke Runs
+
+The examples emit strict JSON so they can be used as tiny CI or notebook smoke
+runs before scaling up the benchmark size.
+
+```bash
+PYTHONNOUSERSITE=1 python3 examples/bench_synth.py \
+  --device cpu --samples 8 --feature-dim 4 --hidden-dim 8 --classes 2 \
+  --batch-size 4 --steps 1 --grad-accum 1 --workers 0 \
+  --log-interval 0 --no-compile
+```
+
+```bash
+PYTHONNOUSERSITE=1 python3 examples/train_resnet.py \
+  --dataset fake --device cpu --samples 8 --feature-dim 4 --classes 2 \
+  --batch-size 4 --steps 1 --grad-accum 1 --workers 0 \
+  --log-interval 0 --no-compile
+```
+
+Both commands print top-level `device`, `config`, and `metrics` fields; the
+ResNet example also reports the resolved `dataset`. `PYTHONNOUSERSITE=1` keeps
+local Python startup hooks from writing extra text to JSON stdout. Increase
+`--samples`, `--steps`, and model sizes for throughput runs, add
+`--collect-profile` for phase timings, or use `--dataset cifar10 --download`
+when CIFAR-10 should be fetched explicitly.
+
 ## Transactional Benchmark
 
 ```bash

@@ -93,6 +93,7 @@ def main() -> None:
     trainer = FastTrainer(
         model,
         optimizer,
+        device=device,
         grad_accum=args.grad_accum,
         log_interval=args.log_interval,
         use_compile=args.compile,
