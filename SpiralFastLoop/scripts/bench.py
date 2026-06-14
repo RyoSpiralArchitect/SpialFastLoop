@@ -16,7 +16,11 @@ from torch.utils.data import DataLoader, Dataset
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spiralfastloop import FastTrainer, recommended_dataloader
-from spiralfastloop.utils import _finite_float_setting, _positive_int_setting
+from spiralfastloop.utils import (
+    _finite_float_setting,
+    _optional_positive_int_setting,
+    _positive_int_setting,
+)
 from scripts.bench_parallel_transactions import (
     device_arg,
     non_negative_int_arg,
@@ -104,15 +108,19 @@ def plain_loop(
     device: torch.device,
     *,
     epochs: int = 1,
+    steps: Optional[int] = None,
 ) -> dict[str, float]:
     epochs = _positive_int_setting(epochs, "epochs")
+    step_limit = _optional_positive_int_setting(steps, "steps")
     model.to(device).train()
     start = time.perf_counter()
-    steps = 0
+    step_count = 0
     samples = 0
     loss_acc = 0.0
     for _ in range(epochs):
         for inputs, targets in loader:
+            if step_limit is not None and step_count >= step_limit:
+                break
             inputs = inputs.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True)
             logits = model(inputs)
@@ -120,14 +128,18 @@ def plain_loop(
             loss.backward()
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
-            steps += 1
+            step_count += 1
             samples += int(inputs.shape[0])
             loss_acc += float(loss.detach().cpu())
+        if step_limit is not None and step_count >= step_limit:
+            break
     elapsed = time.perf_counter() - start
     return {
         "samples_per_sec": samples / max(1e-9, elapsed),
-        "avg_loss_per_step": loss_acc / max(1, steps),
+        "avg_loss_per_step": loss_acc / max(1, step_count),
         "elapsed_sec": elapsed,
+        "steps": step_count,
+        "samples": samples,
     }
 
 
@@ -167,7 +179,15 @@ def main() -> None:
         fused=fused_optimizer,
     )
     criterion = nn.CrossEntropyLoss()
-    baseline = plain_loop(baseline_loader, baseline_model, baseline_optimizer, criterion, device, epochs=1)
+    baseline = plain_loop(
+        baseline_loader,
+        baseline_model,
+        baseline_optimizer,
+        criterion,
+        device,
+        epochs=1,
+        steps=args.steps,
+    )
 
     loader = recommended_dataloader(
         dataset,

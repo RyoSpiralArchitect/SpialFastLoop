@@ -126,6 +126,44 @@ def test_plain_loop_rejects_invalid_direct_epochs(epochs: object) -> None:
         )
 
 
+@pytest.mark.parametrize("steps", [0, -1, 1.5, True, "1"])
+def test_plain_loop_rejects_invalid_direct_steps(steps: object) -> None:
+    dataset = TensorDataset(torch.randn(2, 2), torch.tensor([0, 1]))
+    loader = DataLoader(dataset, batch_size=1)
+    model = nn.Linear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+    with pytest.raises(ValueError, match="steps"):
+        bench.plain_loop(
+            loader,
+            model,
+            optimizer,
+            nn.CrossEntropyLoss(),
+            torch.device("cpu"),
+            steps=steps,  # type: ignore[arg-type]
+        )
+
+
+def test_plain_loop_respects_step_limit_and_reports_counts() -> None:
+    dataset = TensorDataset(torch.randn(4, 2), torch.tensor([0, 1, 0, 1]))
+    loader = DataLoader(dataset, batch_size=1, shuffle=False)
+    model = nn.Linear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+    metrics = bench.plain_loop(
+        loader,
+        model,
+        optimizer,
+        nn.CrossEntropyLoss(),
+        torch.device("cpu"),
+        steps=2,
+    )
+
+    assert metrics["steps"] == 2
+    assert metrics["samples"] == 2
+    assert metrics["samples_per_sec"] > 0.0
+
+
 def test_bench_parse_args_accepts_valid_minimal_run(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         sys,
