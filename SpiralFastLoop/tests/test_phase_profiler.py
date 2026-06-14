@@ -639,6 +639,92 @@ def test_evaluate_skips_invalid_user_metrics_and_reports_counts() -> None:
     assert metrics["user_metric_skipped_count"] == 4
 
 
+def test_evaluate_rejects_coerced_user_metrics_and_bad_names() -> None:
+    inputs = torch.randn(4, 4)
+    targets = torch.randint(0, 3, (4,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=4, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    def metrics_fn(
+        _outputs: torch.Tensor,
+        _batch_targets: torch.Tensor,
+        _inputs: torch.Tensor,
+    ) -> dict[object, object]:
+        return {
+            "valid_int_tensor": torch.tensor([1, 3], dtype=torch.int64),
+            "valid_python_int": 2,
+            "truthy": True,
+            "numeric_string": "0.5",
+            "numeric_bytes": b"0.5",
+            "bool_tensor": torch.tensor([True, False]),
+            "complex_tensor": torch.tensor([1.0 + 0.0j]),
+            "": 1.0,
+            ("tuple", "key"): 1.0,
+        }
+
+    metrics = trainer.evaluate(
+        loader,
+        nn.CrossEntropyLoss(),
+        metrics_fn=metrics_fn,
+        steps=1,
+    )
+
+    assert metrics["valid_int_tensor"] == pytest.approx(2.0)
+    assert metrics["valid_python_int"] == pytest.approx(2.0)
+    assert "truthy" not in metrics
+    assert "numeric_string" not in metrics
+    assert "numeric_bytes" not in metrics
+    assert "bool_tensor" not in metrics
+    assert "complex_tensor" not in metrics
+    assert metrics["user_metric_valid_count"] == 2
+    assert metrics["user_metric_invalid_count"] == 7
+    assert metrics["user_metric_non_finite_count"] == 0
+    assert metrics["user_metric_skipped_count"] == 7
+
+
+def test_evaluate_reports_non_mapping_user_metrics_as_invalid() -> None:
+    inputs = torch.randn(4, 4)
+    targets = torch.randint(0, 3, (4,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=4, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=1)
+
+    def metrics_fn(
+        _outputs: torch.Tensor,
+        _batch_targets: torch.Tensor,
+        _inputs: torch.Tensor,
+    ) -> list[tuple[str, float]]:
+        return [("accuracy", 1.0)]
+
+    metrics = trainer.evaluate(
+        loader,
+        nn.CrossEntropyLoss(),
+        metrics_fn=metrics_fn,  # type: ignore[arg-type]
+        steps=1,
+    )
+
+    assert metrics["steps"] == 1
+    assert metrics["user_metric_valid_count"] == 0
+    assert metrics["user_metric_invalid_count"] == 1
+    assert metrics["user_metric_skipped_count"] == 1
+    assert "accuracy" not in metrics
+
+
+def test_evaluate_rejects_invalid_metrics_fn_before_loop() -> None:
+    loader, model, optimizer = _make_supervised_components()
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    with pytest.raises(ValueError, match="metrics_fn"):
+        trainer.evaluate(
+            loader,
+            nn.CrossEntropyLoss(),
+            metrics_fn=object(),  # type: ignore[arg-type]
+        )
+
+
 def test_evaluate_reports_scalar_tensor_inputs_as_unmeasured() -> None:
     class ScalarTensorDataset(torch.utils.data.Dataset[torch.Tensor]):
         def __len__(self) -> int:

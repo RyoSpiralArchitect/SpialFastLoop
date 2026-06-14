@@ -379,11 +379,19 @@ def _metric_to_float(value: Any) -> tuple[Optional[float], str]:
     if isinstance(value, torch.Tensor):
         if value.numel() == 0:
             return None, "invalid"
-        if value.numel() == 1:
-            normalized = float(value.detach().cpu().item())
-        else:
-            normalized = float(value.detach().mean().cpu().item())
+        detached = value.detach()
+        if detached.dtype == torch.bool or torch.is_complex(detached):
+            return None, "invalid"
+        try:
+            if detached.numel() == 1:
+                normalized = float(detached.cpu().item())
+            else:
+                normalized = float(detached.to(dtype=torch.float64).mean().cpu().item())
+        except (RuntimeError, TypeError, ValueError):
+            return None, "invalid"
     else:
+        if isinstance(value, (bool, str, bytes, bytearray)):
+            return None, "invalid"
         try:
             normalized = float(value)
         except (TypeError, ValueError):
@@ -391,6 +399,12 @@ def _metric_to_float(value: Any) -> tuple[Optional[float], str]:
     if not math.isfinite(normalized):
         return None, "non_finite"
     return normalized, ""
+
+
+def _user_metric_name(key: Any) -> Optional[str]:
+    if not isinstance(key, str) or not key.strip():
+        return None
+    return key.strip()
 
 
 def _detach_to_cpu(obj: Any) -> Any:
@@ -455,6 +469,14 @@ def _optional_logger_setting(logger: Any) -> Optional[MetricsLogger]:
     if not callable(log_metrics):
         raise ValueError("logger must provide a callable log_metrics() method")
     return cast(MetricsLogger, logger)
+
+
+def _optional_metrics_fn_setting(metrics_fn: Any) -> Optional[Callable[[Any, Any, Any], Any]]:
+    if metrics_fn is None:
+        return None
+    if not callable(metrics_fn):
+        raise ValueError("metrics_fn must be callable")
+    return cast(Callable[[Any, Any, Any], Any], metrics_fn)
 
 
 def _optional_ddp_kwargs_setting(ddp_kwargs: Any) -> Dict[str, Any]:
@@ -1280,6 +1302,7 @@ class FastTrainer:
         collect_profile_value = _bool_setting(collect_profile, "collect_profile")
         profile_sync_value = _bool_setting(profile_sync, "profile_sync")
         profile_distribution_value = _bool_setting(profile_distribution, "profile_distribution")
+        metrics_fn_value = _optional_metrics_fn_setting(metrics_fn)
         self.model.eval()
         sampler = getattr(loader, "sampler", None)
         if isinstance(sampler, DistributedSampler) and epoch is not None:
@@ -1351,11 +1374,11 @@ class FastTrainer:
                 batch_size = _try_infer_batch_size(reference)
                 batch_size_int = int(batch_size) if batch_size is not None else None
 
-                extra_metrics: Optional[Dict[str, Any]] = None
-                if metrics_fn is not None:
+                extra_metrics: Any = None
+                if metrics_fn_value is not None:
                     profiler.start("user_metrics")
                     try:
-                        extra_metrics = metrics_fn(outputs, targets, inputs)
+                        extra_metrics = metrics_fn_value(outputs, targets, inputs)
                     finally:
                         profiler.stop("user_metrics")
 
@@ -1376,20 +1399,27 @@ class FastTrainer:
                         total_weight += weight_tensor
 
                     if extra_metrics is not None:
-                        for key, value in extra_metrics.items():
-                            metric_value, metric_error = _metric_to_float(value)
-                            if metric_value is None:
-                                if metric_error == "non_finite":
-                                    user_metric_non_finite_count += 1
-                                else:
+                        if not isinstance(extra_metrics, Mapping):
+                            user_metric_invalid_count += 1
+                        else:
+                            for raw_key, value in extra_metrics.items():
+                                key = _user_metric_name(raw_key)
+                                if key is None:
                                     user_metric_invalid_count += 1
-                                continue
-                            if batch_size_int is None:
-                                user_metric_unmeasured_count += 1
-                                continue
-                            metric_sums[key] = metric_sums.get(key, 0.0) + metric_value * batch_size_int
-                            metric_weights[key] = metric_weights.get(key, 0.0) + batch_size_int
-                            user_metric_valid_count += 1
+                                    continue
+                                metric_value, metric_error = _metric_to_float(value)
+                                if metric_value is None:
+                                    if metric_error == "non_finite":
+                                        user_metric_non_finite_count += 1
+                                    else:
+                                        user_metric_invalid_count += 1
+                                    continue
+                                if batch_size_int is None:
+                                    user_metric_unmeasured_count += 1
+                                    continue
+                                metric_sums[key] = metric_sums.get(key, 0.0) + metric_value * batch_size_int
+                                metric_weights[key] = metric_weights.get(key, 0.0) + batch_size_int
+                                user_metric_valid_count += 1
                 finally:
                     profiler.stop("metrics")
 
