@@ -85,8 +85,64 @@ def test_restore_rejects_non_finite() -> None:
         acc.restore(float("nan"), 0.0)
 
 
-def test_initial_state_validation() -> None:
-    with pytest.raises(ValueError):
-        HybridCompensatedAccumulator(initial_total=float("inf"))
-    with pytest.raises(ValueError):
-        HybridCompensatedAccumulator(initial_compensation=float("nan"))
+@pytest.mark.parametrize(
+    "kwargs, field",
+    [
+        ({"unit": 0.0}, "unit"),
+        ({"unit": -0.01}, "unit"),
+        ({"unit": float("nan")}, "unit"),
+        ({"unit": float("inf")}, "unit"),
+        ({"unit": True}, "unit"),
+        ({"unit": "0.01"}, "unit"),
+        ({"initial_total": float("inf")}, "initial_total"),
+        ({"initial_total": True}, "initial_total"),
+        ({"initial_total": "1.0"}, "initial_total"),
+        ({"initial_compensation": float("nan")}, "initial_compensation"),
+        ({"initial_compensation": False}, "initial_compensation"),
+        ({"initial_compensation": "0.0"}, "initial_compensation"),
+        ({"rng": True}, "rng"),
+    ],
+)
+def test_initial_state_validation(kwargs: dict, field: str) -> None:
+    with pytest.raises(ValueError, match=field):
+        HybridCompensatedAccumulator(**kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), True, "1.0", b"1.0", object()])
+def test_add_rejects_invalid_values_before_mutating_state(value: object) -> None:
+    acc = HybridCompensatedAccumulator(unit=0.01, rng=random.Random(11))
+    acc.add(0.25)
+    snapshot = acc.snapshot()
+
+    with pytest.raises(ValueError, match="value"):
+        acc.add(value)  # type: ignore[arg-type]
+
+    assert acc.snapshot() == snapshot
+
+
+@pytest.mark.parametrize(
+    "total, compensation, field",
+    [
+        (float("nan"), 0.0, "total"),
+        (float("inf"), 0.0, "total"),
+        (True, 0.0, "total"),
+        ("0.0", 0.0, "total"),
+        (0.0, float("nan"), "compensation"),
+        (0.0, float("-inf"), "compensation"),
+        (0.0, False, "compensation"),
+        (0.0, "0.0", "compensation"),
+    ],
+)
+def test_restore_rejects_invalid_values_before_mutating_state(
+    total: object,
+    compensation: object,
+    field: str,
+) -> None:
+    acc = HybridCompensatedAccumulator(unit=0.01, rng=random.Random(12))
+    acc.add(0.25)
+    snapshot = acc.snapshot()
+
+    with pytest.raises(ValueError, match=field):
+        acc.restore(total, compensation)  # type: ignore[arg-type]
+
+    assert acc.snapshot() == snapshot
