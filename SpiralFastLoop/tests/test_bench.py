@@ -60,6 +60,54 @@ def test_adamw_rejects_invalid_direct_learning_rates(learning_rate: object) -> N
         bench.adamw(model.parameters(), learning_rate)  # type: ignore[arg-type]
 
 
+def test_adamw_defaults_fused_false_for_cpu_parameters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class DummyAdamW:
+        def __init__(self, parameters: object, *, lr: float, fused: bool) -> None:
+            captured["parameters"] = list(parameters)  # type: ignore[arg-type]
+            captured["lr"] = lr
+            captured["fused"] = fused
+
+    monkeypatch.setattr(bench.torch.optim, "AdamW", DummyAdamW)
+    model = nn.Linear(2, 2)
+
+    bench.adamw(model.parameters(), 0.01)
+
+    assert captured["fused"] is False
+    assert captured["lr"] == pytest.approx(0.01)
+    assert len(captured["parameters"]) == 2
+
+
+@pytest.mark.parametrize("fused", [True, False])
+def test_adamw_accepts_explicit_fused_setting(
+    monkeypatch: pytest.MonkeyPatch,
+    fused: bool,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class DummyAdamW:
+        def __init__(self, parameters: object, *, lr: float, fused: bool) -> None:
+            captured["fused"] = fused
+
+    monkeypatch.setattr(bench.torch.optim, "AdamW", DummyAdamW)
+    model = nn.Linear(2, 2)
+
+    bench.adamw(model.parameters(), 0.01, fused=fused)
+
+    assert captured["fused"] is fused
+
+
+@pytest.mark.parametrize("fused", [1, "true"])
+def test_adamw_rejects_invalid_explicit_fused_setting(fused: object) -> None:
+    model = nn.Linear(2, 2)
+
+    with pytest.raises(ValueError, match="fused"):
+        bench.adamw(model.parameters(), 0.01, fused=fused)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize("epochs", [0, -1, 1.5, True, "1"])
 def test_plain_loop_rejects_invalid_direct_epochs(epochs: object) -> None:
     dataset = TensorDataset(torch.randn(2, 2), torch.tensor([0, 1]))

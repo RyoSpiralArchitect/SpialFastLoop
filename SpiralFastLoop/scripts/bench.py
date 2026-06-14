@@ -7,6 +7,7 @@ import argparse
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import torch
 from torch import nn
@@ -79,9 +80,20 @@ def _positive_float_setting(value: object, name: str) -> float:
     return normalized
 
 
-def adamw(parameters, learning_rate: float) -> torch.optim.AdamW:
+def _optimizer_params_on_cuda(parameters: list[torch.Tensor]) -> bool:
+    return any(parameter.device.type == "cuda" for parameter in parameters)
+
+
+def adamw(parameters, learning_rate: float, *, fused: Optional[bool] = None) -> torch.optim.AdamW:
     learning_rate = _positive_float_setting(learning_rate, "learning_rate")
-    return torch.optim.AdamW(parameters, lr=learning_rate, fused=torch.cuda.is_available())
+    params = list(parameters)
+    if fused is None:
+        fused_value = _optimizer_params_on_cuda(params)
+    elif isinstance(fused, bool):
+        fused_value = fused
+    else:
+        raise ValueError("fused must be a boolean or None")
+    return torch.optim.AdamW(params, lr=learning_rate, fused=fused_value)
 
 
 def plain_loop(
@@ -147,8 +159,13 @@ def main() -> None:
     device = best_device(args.device)
 
     baseline_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
-    baseline_model = MLP(d=args.feature_dim, classes=args.classes)
-    baseline_optimizer = adamw(baseline_model.parameters(), args.learning_rate)
+    fused_optimizer = device.type == "cuda"
+    baseline_model = MLP(d=args.feature_dim, classes=args.classes).to(device)
+    baseline_optimizer = adamw(
+        baseline_model.parameters(),
+        args.learning_rate,
+        fused=fused_optimizer,
+    )
     criterion = nn.CrossEntropyLoss()
     baseline = plain_loop(baseline_loader, baseline_model, baseline_optimizer, criterion, device, epochs=1)
 
@@ -159,8 +176,8 @@ def main() -> None:
         num_workers=args.workers,
         persistent=args.workers > 0,
     )
-    model = MLP(d=args.feature_dim, classes=args.classes)
-    optimizer = adamw(model.parameters(), args.learning_rate)
+    model = MLP(d=args.feature_dim, classes=args.classes).to(device)
+    optimizer = adamw(model.parameters(), args.learning_rate, fused=fused_optimizer)
     trainer = FastTrainer(
         model,
         optimizer,
