@@ -103,8 +103,21 @@ def summary_fields_for_rows(rows: list[dict]) -> tuple[str, ...]:
     return BASE_SUMMARY_FIELDS + profile_fields
 
 
-def summarize_metric(rows: list[dict], field: str) -> dict[str, float]:
-    values = [float(row.get(field, 0.0)) for row in rows]
+def count_profiled_rows(rows: list[dict]) -> int:
+    return sum(
+        1
+        for row in rows
+        if any(field in row for field in PROFILE_SUMMARY_FIELDS)
+    )
+
+
+def summarize_metric(rows: list[dict], field: str, *, missing_as_zero: bool = True) -> dict[str, float]:
+    values = []
+    for row in rows:
+        if field in row:
+            values.append(float(row[field]))
+        elif missing_as_zero:
+            values.append(0.0)
     if not values:
         return {"mean": 0.0, "min": 0.0, "max": 0.0, "stddev": 0.0}
     mean = sum(values) / len(values)
@@ -124,8 +137,16 @@ def summarize_results(rows: list[dict]) -> dict:
         "best_reported": None,
         "best_end_to_end": None,
     }
+    profiled_runs = count_profiled_rows(summary_rows)
+    if profiled_runs > 0:
+        summary["profiled_runs"] = profiled_runs
     for field in summary_fields_for_rows(summary_rows):
-        for stat_name, value in summarize_metric(summary_rows, field).items():
+        missing_as_zero = field in BASE_SUMMARY_FIELDS
+        for stat_name, value in summarize_metric(
+            summary_rows,
+            field,
+            missing_as_zero=missing_as_zero,
+        ).items():
             summary[f"{stat_name}_{field}"] = value
 
     if summary_rows:

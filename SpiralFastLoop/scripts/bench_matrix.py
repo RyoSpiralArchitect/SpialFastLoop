@@ -12,6 +12,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from bench_parallel_transactions import (
+    BASE_SUMMARY_FIELDS,
+    count_profiled_rows,
     non_negative_int_arg,
     positive_float_arg,
     positive_int_arg,
@@ -81,8 +83,16 @@ def summarize_rows(rows: list[dict]) -> dict:
                 for row in group_rows
             ),
         }
+        profiled_runs = count_profiled_rows(group_rows)
+        if profiled_runs > 0:
+            summary["profiled_runs"] = profiled_runs
         for field in summary_fields_for_rows(group_rows):
-            for stat_name, value in summarize_metric(group_rows, field).items():
+            missing_as_zero = field in BASE_SUMMARY_FIELDS
+            for stat_name, value in summarize_metric(
+                group_rows,
+                field,
+                missing_as_zero=missing_as_zero,
+            ).items():
                 summary[f"{stat_name}_{field}"] = value
         summaries.append(summary)
 
@@ -103,8 +113,8 @@ def summarize_rows(rows: list[dict]) -> dict:
 
 def _format_summary_row(row: dict) -> str:
     profile_suffix = ""
-    forward_backward_pct = float(row.get("mean_profile_forward_backward_pct", 0.0))
-    if forward_backward_pct > 0.0:
+    if "mean_profile_forward_backward_pct" in row:
+        forward_backward_pct = float(row["mean_profile_forward_backward_pct"])
         profile_suffix = (
             f" fwd+bwd={forward_backward_pct:.1f}% "
             f"opt={float(row.get('mean_profile_optimizer_pct', 0.0)):.1f}%"
