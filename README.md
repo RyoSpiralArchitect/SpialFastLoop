@@ -137,7 +137,8 @@ python scripts/bench_matrix.py \
   --device cpu --steps 16 --runs 1 --worker-counts 0 \
   --dataset-modes generated,materialized \
   --compile-modes no-compile \
-  --json-out reports/bench_matrix.json
+  --json-out reports/bench_matrix.json \
+  --summary-out reports/bench_matrix_summary.json
 ```
 
 Drill into ResNet blocks:

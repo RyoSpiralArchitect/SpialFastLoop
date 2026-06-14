@@ -7,7 +7,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.bench_matrix import _compile_requested, _parse_csv_choices, _parse_worker_counts
+from scripts.bench_matrix import (
+    _compile_requested,
+    _parse_csv_choices,
+    _parse_worker_counts,
+    summarize_rows,
+)
 
 
 def test_parse_csv_choices_trims_and_validates_values() -> None:
@@ -37,3 +42,69 @@ def test_compile_requested_maps_modes() -> None:
 
     with pytest.raises(ValueError):
         _compile_requested("sometimes")
+
+
+def test_summarize_rows_groups_configs_and_ranks_best() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 3.0,
+            "setup_time_s": 1.0,
+            "wall_time_s": 2.0,
+            "cold_start_time_s": 0.5,
+            "dataset_materialized_bytes": 0,
+        },
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 300.0,
+            "samples_per_sec": 240.0,
+            "steady_samples_per_sec": 300.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "cold_start_time_s": 0.1,
+            "dataset_materialized_bytes": 0,
+        },
+        {
+            "matrix_dataset_mode": "materialized",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 250.0,
+            "samples_per_sec": 180.0,
+            "steady_samples_per_sec": 250.0,
+            "end_to_end_wall_time_s": 0.8,
+            "setup_time_s": 0.2,
+            "wall_time_s": 0.6,
+            "cold_start_time_s": 0.05,
+            "dataset_materialized_bytes": 1024,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+
+    assert summary["runs"] == 3
+    assert summary["config_count"] == 2
+    assert summary["best_reported"]["dataset_mode"] == "materialized"
+    assert summary["best_end_to_end"]["dataset_mode"] == "materialized"
+    generated = summary["groups"][0]
+    assert generated["dataset_mode"] == "generated"
+    assert generated["runs"] == 2
+    assert generated["mean_reported_samples_per_sec"] == pytest.approx(200.0)
+    assert generated["mean_end_to_end_wall_time_s"] == pytest.approx(2.0)
+
+
+def test_summarize_rows_handles_empty_input() -> None:
+    summary = summarize_rows([])
+
+    assert summary["runs"] == 0
+    assert summary["config_count"] == 0
+    assert summary["groups"] == []
+    assert summary["best_reported"] is None
+    assert summary["best_end_to_end"] is None

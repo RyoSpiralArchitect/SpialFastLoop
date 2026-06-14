@@ -13,6 +13,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from bench_parallel_transactions import run_once
 
+SUMMARY_FIELDS = (
+    "reported_samples_per_sec",
+    "samples_per_sec",
+    "steady_samples_per_sec",
+    "end_to_end_wall_time_s",
+    "setup_time_s",
+    "wall_time_s",
+    "cold_start_time_s",
+)
+
 
 def _parse_csv_choices(raw: str, allowed: set[str], *, name: str) -> list[str]:
     values = [item.strip() for item in raw.split(",") if item.strip()]
@@ -47,6 +57,64 @@ def _compile_requested(mode: str) -> bool:
     raise ValueError(f"unsupported compile mode: {mode}")
 
 
+def _mean(rows: list[dict], field: str) -> float:
+    if not rows:
+        return 0.0
+    return sum(float(row.get(field, 0.0)) for row in rows) / len(rows)
+
+
+def _group_key(row: dict) -> tuple[str, str, int]:
+    return (
+        str(row["matrix_dataset_mode"]),
+        str(row["matrix_compile_mode"]),
+        int(row["matrix_workers"]),
+    )
+
+
+def summarize_rows(rows: list[dict]) -> dict:
+    groups: dict[tuple[str, str, int], list[dict]] = {}
+    for row in rows:
+        groups.setdefault(_group_key(row), []).append(row)
+
+    summaries = []
+    for (dataset_mode, compile_mode, workers), group_rows in sorted(groups.items()):
+        summary = {
+            "dataset_mode": dataset_mode,
+            "compile_mode": compile_mode,
+            "workers": workers,
+            "runs": len(group_rows),
+            "dataset_materialized_bytes": max(
+                int(row.get("dataset_materialized_bytes", 0))
+                for row in group_rows
+            ),
+        }
+        for field in SUMMARY_FIELDS:
+            summary[f"mean_{field}"] = _mean(group_rows, field)
+        summaries.append(summary)
+
+    best_reported = None
+    best_end_to_end = None
+    if summaries:
+        best_reported = max(summaries, key=lambda row: row["mean_reported_samples_per_sec"])
+        best_end_to_end = min(summaries, key=lambda row: row["mean_end_to_end_wall_time_s"])
+
+    return {
+        "runs": len(rows),
+        "config_count": len(summaries),
+        "groups": summaries,
+        "best_reported": best_reported,
+        "best_end_to_end": best_end_to_end,
+    }
+
+
+def _format_summary_row(row: dict) -> str:
+    return (
+        f"{row['dataset_mode']} {row['compile_mode']} workers={row['workers']} "
+        f"reported={row['mean_reported_samples_per_sec']:.1f}/s "
+        f"e2e={row['mean_end_to_end_wall_time_s']:.2f}s"
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--transactions", type=int, default=4096)
@@ -74,6 +142,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--profile-model-max-modules", type=int, default=64)
     parser.add_argument("--profile-model-include", type=str, default=None)
     parser.add_argument("--json-out", type=str, default=None)
+    parser.add_argument("--summary-out", type=str, default=None)
     return parser.parse_args()
 
 
@@ -140,12 +209,24 @@ def main() -> None:
                         f"e2e={result.get('end_to_end_wall_time_s', result['wall_time_s']):.2f}s"
                     )
 
+    summary = summarize_rows(rows)
+    if summary["best_reported"]:
+        print("Best steady:", _format_summary_row(summary["best_reported"]))
+    if summary["best_end_to_end"]:
+        print("Best end-to-end:", _format_summary_row(summary["best_end_to_end"]))
+
     if args.json_out:
         out_path = Path(args.json_out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("w") as handle:
             json.dump(rows, handle, indent=2)
         print(f"Wrote matrix results to {out_path}")
+    if args.summary_out:
+        out_path = Path(args.summary_out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with out_path.open("w") as handle:
+            json.dump(summary, handle, indent=2)
+        print(f"Wrote matrix summary to {out_path}")
 
 
 if __name__ == "__main__":
