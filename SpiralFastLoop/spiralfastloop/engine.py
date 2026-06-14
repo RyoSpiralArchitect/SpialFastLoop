@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, MutableMapping
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, cast
 
+import fnmatch
+import time
 import torch
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
@@ -14,6 +16,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 from .utils import (
     AmpSetting,
+    PhaseProfiler,
     ThroughputMeter,
     autocast_ctx,
     dataloader_from_dataset,
@@ -233,7 +236,7 @@ class FastTrainer:
         self.scheduler = scheduler
         self.grad_accum = max(1, int(grad_accum))
         self.clip_grad_norm = clip_grad_norm
-        self.log_interval = log_interval
+        self.log_interval = max(1, int(log_interval))
         self.trigger_hook = trigger_hook
         self.logger = logger
         self.log_on_rank0 = log_on_rank0
@@ -241,12 +244,18 @@ class FastTrainer:
 
         # AMP policy
         self.amp_enabled, self.amp_dtype, use_scaler = get_amp_policy(self.device, use_amp)
-        self.scaler = torch.cuda.amp.GradScaler(enabled=(use_scaler and self.amp_enabled))
+        try:
+            self.scaler = torch.amp.GradScaler("cuda", enabled=(use_scaler and self.amp_enabled))
+        except Exception:
+            self.scaler = torch.cuda.amp.GradScaler(enabled=(use_scaler and self.amp_enabled))
 
         # torch.compile best-effort (skip CPU)
         self.compiled = False
+        self.compile_init_time_s = 0.0
         if self.device != "cpu":
+            compile_started_at = time.perf_counter()
             self.model, self.compiled = safe_compile(self.model, mode=compile_mode)
+            self.compile_init_time_s = time.perf_counter() - compile_started_at
 
         # DDP wrap if requested and initialized
         self.using_ddp = False
@@ -298,6 +307,92 @@ class FastTrainer:
             summary = ", ".join(f"{k}={v}" for k, v in metrics.items())
             print(f"[{stage}:{mode}] step={step} {summary}", flush=True)
 
+    def _install_profile_model_hooks(
+        self,
+        profiler: PhaseProfiler,
+        *,
+        depth: int = 1,
+        max_modules: int = 64,
+        include: Optional[str | Sequence[str]] = None,
+    ) -> list[Any]:
+        if not profiler.enabled:
+            return []
+        root = getattr(self.model, "module", self.model)
+        root = getattr(root, "_orig_mod", root)
+        max_depth = max(1, int(depth))
+        if include is None:
+            include_patterns: list[str] = []
+        elif isinstance(include, str):
+            include_patterns = [item.strip() for item in include.split(",") if item.strip()]
+        else:
+            include_patterns = [str(item).strip() for item in include if str(item).strip()]
+
+        def matches_include(name: str) -> bool:
+            if not include_patterns:
+                return True
+            return any(
+                name == pattern
+                or name.startswith(pattern + ".")
+                or fnmatch.fnmatchcase(name, pattern)
+                for pattern in include_patterns
+            )
+
+        selected = []
+        for name, module in root.named_modules():
+            if not name:
+                continue
+            if len(name.split(".")) == max_depth and matches_include(name):
+                selected.append((name, module))
+            if len(selected) >= max(1, int(max_modules)):
+                break
+
+        handles: list[Any] = []
+
+        def disable_dynamo_if_available(hook: Callable[..., Any]) -> Callable[..., Any]:
+            try:
+                dynamo = getattr(torch, "_dynamo", None)
+                disable = getattr(dynamo, "disable", None)
+                if callable(disable):
+                    return disable(hook)
+            except Exception:
+                pass
+            return hook
+
+        def forward_pre(label: str):
+            def hook(_module: nn.Module, _inputs: Any) -> None:
+                profiler.start_detail("forward", label)
+            return hook
+
+        def forward_post(label: str):
+            def hook(_module: nn.Module, _inputs: Any, _outputs: Any) -> None:
+                profiler.stop_detail("forward", label)
+            return hook
+
+        def grad_ready(label: str):
+            def hook(grad: torch.Tensor) -> torch.Tensor:
+                profiler.record_event_since_start("backward", "backward_grad_ready", label)
+                return grad
+            return hook
+
+        seen_params = set()
+        for name, module in selected:
+            label = f"model.{name}"
+            try:
+                handles.append(module.register_forward_pre_hook(disable_dynamo_if_available(forward_pre(label))))
+                handles.append(module.register_forward_hook(disable_dynamo_if_available(forward_post(label))))
+            except Exception:
+                pass
+            for param in module.parameters(recurse=True):
+                param_id = id(param)
+                if param_id in seen_params or not param.requires_grad:
+                    continue
+                seen_params.add(param_id)
+                try:
+                    handles.append(param.register_hook(grad_ready(label)))
+                except Exception:
+                    pass
+        return handles
+
     def train_one_epoch(
         self,
         loader: Iterable[Any],
@@ -305,6 +400,15 @@ class FastTrainer:
         *,
         steps: Optional[int] = None,
         epoch: Optional[int] = None,
+        collect_profile: bool = False,
+        profile_sync: bool = False,
+        profile_distribution: bool = True,
+        profile_window: int = 512,
+        profile_model: bool = False,
+        profile_model_depth: int = 1,
+        profile_model_max_modules: int = 64,
+        profile_model_include: Optional[str | Sequence[str]] = None,
+        warmup_steps: int = 0,
     ) -> Dict[str, Any]:
         """
         Train for one epoch (or a fixed number of steps if steps is provided).
@@ -315,7 +419,23 @@ class FastTrainer:
         sampler = getattr(loader, "sampler", None)
         if isinstance(sampler, DistributedSampler) and epoch is not None:
             sampler.set_epoch(epoch)
+        warmup_step_limit = max(0, int(warmup_steps))
         meter = ThroughputMeter(fast_mode=self.meter_fast_mode)
+        warmup_meter = ThroughputMeter(fast_mode=self.meter_fast_mode)
+        steady_meter = ThroughputMeter(fast_mode=self.meter_fast_mode)
+        profiler = PhaseProfiler(
+            enabled=collect_profile,
+            device=self.device,
+            sync=profile_sync,
+            track_distribution=profile_distribution,
+            window=profile_window,
+        )
+        profile_hook_handles = self._install_profile_model_hooks(
+            profiler,
+            depth=profile_model_depth,
+            max_modules=profile_model_max_modules,
+            include=profile_model_include,
+        ) if (collect_profile and profile_model) else []
 
         # Detect if criterion supports reduction='none'
         supports_per_sample = False
@@ -333,19 +453,63 @@ class FastTrainer:
                     pass
 
         self.optimizer.zero_grad(set_to_none=True)
+        if self.device.startswith("cuda"):
+            try:
+                torch.cuda.reset_peak_memory_stats()
+            except Exception:
+                pass
+        elif self.device.startswith("mps"):
+            try:
+                reset_mps_peak = getattr(torch.mps, "reset_peak_memory_stats", None)
+                if callable(reset_mps_peak):
+                    reset_mps_peak()
+            except Exception:
+                pass
 
-        total_loss = torch.zeros((), device=self.device, dtype=torch.float64)
-        total_weight = torch.zeros((), device=self.device, dtype=torch.float64)
+        metric_dtype = torch.float32 if self.device.startswith("mps") else torch.float64
+        total_loss = torch.zeros((), device=self.device, dtype=metric_dtype)
+        total_weight = torch.zeros((), device=self.device, dtype=metric_dtype)
+        warmup_loss = torch.zeros((), device=self.device, dtype=metric_dtype)
+        warmup_weight = torch.zeros((), device=self.device, dtype=metric_dtype)
+        steady_loss = torch.zeros((), device=self.device, dtype=metric_dtype)
+        steady_weight = torch.zeros((), device=self.device, dtype=metric_dtype)
         total_items = 0
+        warmup_items = 0
+        steady_items = 0
         step_idx = 0
         optimizer_steps = 0
+        warmup_recorded_steps = 0
+        steady_recorded_steps = 0
+        warmup_optimizer_steps = 0
+        steady_optimizer_steps = 0
 
-        for batch in loader:
-            step_idx += 1
-            if steps is not None and step_idx > steps:
-                break
+        def profiled_batches() -> Iterable[tuple[Any, float]]:
+            nonlocal step_idx
+            data_iter = iter(loader)
+            try:
+                while steps is None or step_idx < steps:
+                    step_started_at = time.perf_counter()
+                    profiler.start("data_wait")
+                    try:
+                        batch = next(data_iter)
+                    except StopIteration:
+                        profiler.cancel("data_wait")
+                        break
+                    profiler.stop("data_wait")
+                    step_idx += 1
+                    yield batch, step_started_at
+            finally:
+                for handle in profile_hook_handles:
+                    try:
+                        handle.remove()
+                    except Exception:
+                        pass
 
+        for batch, step_started_at in profiled_batches():
+
+            profiler.start("transfer")
             batch = to_device(batch, self.device, non_blocking=True)
+            profiler.stop("transfer")
             # Support (inputs, targets) or dict with 'inputs','targets'
             if isinstance(batch, (list, tuple)) and len(batch) == 2:
                 inputs, targets = batch
@@ -359,7 +523,9 @@ class FastTrainer:
             loss_weight_tensor: Optional[torch.Tensor] = None
 
             with autocast_ctx(self.device, self.amp_enabled, self.amp_dtype):
+                profiler.start("forward")
                 outputs = self.model(inputs)
+                profiler.stop("forward")
 
                 if targets is not None and criterion is not None:
                     if supports_per_sample and self.trigger_hook is not None:
@@ -369,7 +535,9 @@ class FastTrainer:
                             criterion.reduction = "none"
                         try:
                             # per-sample loss for trigger decisions
+                            profiler.start("loss")
                             loss_vec = _ensure_loss_vector(criterion(outputs, targets))
+                            profiler.stop("loss")
                         finally:
                             if reduction_to_restore is not None:
                                 criterion.reduction = reduction_to_restore
@@ -385,11 +553,14 @@ class FastTrainer:
                         if hasattr(self.trigger_hook, "observe"):
                             self.trigger_hook.observe(trigger_ctx)
                         # Trigger may inject extra samples (e.g., hard examples)
+                        profiler.start("trigger")
                         trig_result = self.trigger_hook(trigger_ctx)
+                        profiler.stop("trigger")
                         weights: Optional[torch.Tensor] = None
                         if trig_result is not None:
                             if trig_result.extra_inputs is not None:
                                 # Concatenate and recompute outputs & loss_vec
+                                profiler.start("inject_transfer")
                                 extra_x = to_device(trig_result.extra_inputs, self.device, non_blocking=True)
                                 extra_y = (
                                     to_device(trig_result.extra_targets, self.device, non_blocking=True)
@@ -400,13 +571,18 @@ class FastTrainer:
                                 if extra_y is None:
                                     raise ValueError("Trigger provided extra inputs without matching targets.")
                                 targets = _concatenate_batches(targets, extra_y)
+                                profiler.stop("inject_transfer")
+                                profiler.start("forward")
                                 outputs = self.model(inputs)
+                                profiler.stop("forward")
                                 reduction_to_restore = None
                                 if hasattr(criterion, "reduction") and getattr(criterion, "reduction") != "none":
                                     reduction_to_restore = getattr(criterion, "reduction")
                                     criterion.reduction = "none"
                                 try:
+                                    profiler.start("loss")
                                     loss_vec = _ensure_loss_vector(criterion(outputs, targets))
+                                    profiler.stop("loss")
                                 finally:
                                     if reduction_to_restore is not None:
                                         criterion.reduction = reduction_to_restore
@@ -414,6 +590,7 @@ class FastTrainer:
                             weights = trig_result.weights
 
                         if weights is not None:
+                            profiler.start("loss_reduce")
                             w = weights.to(loss_vec.device, dtype=loss_vec.dtype)
                             if w.ndim != 1 or w.shape[0] != loss_vec.shape[0]:
                                 raise ValueError("Trigger weights must be a 1D tensor that matches the concatenated batch size.")
@@ -425,13 +602,18 @@ class FastTrainer:
                                 raise ValueError("Trigger weights must sum to a positive value.")
                             loss = (loss_vec * w).sum() / weight_sum
                             loss_weight_tensor = weight_sum_detached.to(device=total_loss.device, dtype=total_loss.dtype)
+                            profiler.stop("loss_reduce")
                         else:
+                            profiler.start("loss_reduce")
                             loss = loss_vec.mean()
                             loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
+                            profiler.stop("loss_reduce")
                     else:
+                        profiler.start("loss")
                         loss = criterion(outputs, targets)
                         if isinstance(loss, torch.Tensor) and loss.ndim > 0:
                             loss = loss.mean()
+                        profiler.stop("loss")
                         reference = targets if targets is not None else inputs
                         batch_size = _infer_batch_size(reference)
                         loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
@@ -446,46 +628,98 @@ class FastTrainer:
                 loss = loss / self.grad_accum
 
             # Backward
+            profiler.start("backward")
             if self.scaler.is_enabled():
                 self.scaler.scale(loss).backward()
             else:
                 loss.backward()
+            profiler.stop("backward")
 
             # Step if accumulation boundary
             if step_idx % self.grad_accum == 0:
-                if self.clip_grad_norm is not None:
-                    if self.scaler.is_enabled():
-                        self.scaler.unscale_(self.optimizer)
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_grad_norm)
+                profiler.start("optimizer")
+                try:
+                    if self.clip_grad_norm is not None:
+                        profiler.start_detail("optimizer", "clip_grad_norm")
+                        try:
+                            if self.scaler.is_enabled():
+                                self.scaler.unscale_(self.optimizer)
+                            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_grad_norm)
+                        finally:
+                            profiler.stop_detail("optimizer", "clip_grad_norm")
 
-                if self.scaler.is_enabled():
-                    self.scaler.step(self.optimizer)
-                    self.scaler.update()
-                else:
-                    self.optimizer.step()
-                self.optimizer.zero_grad(set_to_none=True)
-                if self.scheduler is not None:
+                    if self.scaler.is_enabled():
+                        profiler.start_detail("optimizer", "scaler.step")
+                        try:
+                            self.scaler.step(self.optimizer)
+                        finally:
+                            profiler.stop_detail("optimizer", "scaler.step")
+                        profiler.start_detail("optimizer", "scaler.update")
+                        try:
+                            self.scaler.update()
+                        finally:
+                            profiler.stop_detail("optimizer", "scaler.update")
+                    else:
+                        profiler.start_detail("optimizer", "optimizer.step")
+                        try:
+                            self.optimizer.step()
+                        finally:
+                            profiler.stop_detail("optimizer", "optimizer.step")
+
+                    profiler.start_detail("optimizer", "zero_grad")
                     try:
-                        self.scheduler.step()
-                    except Exception:
-                        pass
-                optimizer_steps += 1
+                        self.optimizer.zero_grad(set_to_none=True)
+                    finally:
+                        profiler.stop_detail("optimizer", "zero_grad")
+                    if self.scheduler is not None:
+                        profiler.start_detail("optimizer", "scheduler.step")
+                        try:
+                            try:
+                                self.scheduler.step()
+                            except Exception:
+                                pass
+                        finally:
+                            profiler.stop_detail("optimizer", "scheduler.step")
+                    optimizer_steps += 1
+                    if warmup_step_limit > 0 and step_idx <= warmup_step_limit:
+                        warmup_optimizer_steps += 1
+                    else:
+                        steady_optimizer_steps += 1
+                finally:
+                    profiler.stop("optimizer")
 
             # Metrics
+            profiler.start("metrics")
             if batch_size is None:
                 reference = targets if targets is not None else inputs
                 batch_size = _infer_batch_size(reference)
             if loss_weight_tensor is None:
                 loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
 
-            meter.tick(int(batch_size))
-            total_items += int(batch_size)
+            batch_size_int = int(batch_size)
+            batch_duration_s = max(0.0, time.perf_counter() - step_started_at)
+            meter.record(batch_duration_s, batch_size_int)
+            total_items += batch_size_int
             loss_detached = raw_loss.detach().to(device=total_loss.device, dtype=total_loss.dtype)
             total_loss += loss_detached * loss_weight_tensor
             total_weight += loss_weight_tensor
+            if warmup_step_limit > 0 and step_idx <= warmup_step_limit:
+                warmup_meter.record(batch_duration_s, batch_size_int)
+                warmup_items += batch_size_int
+                warmup_loss += loss_detached * loss_weight_tensor
+                warmup_weight += loss_weight_tensor
+                warmup_recorded_steps += 1
+            else:
+                steady_meter.record(batch_duration_s, batch_size_int)
+                steady_items += batch_size_int
+                steady_loss += loss_detached * loss_weight_tensor
+                steady_weight += loss_weight_tensor
+                steady_recorded_steps += 1
+            profiler.stop("metrics")
 
             if (step_idx % self.log_interval) == 0:
                 m = meter.summary()
+                steady_m = steady_meter.summary()
                 weight_value = total_weight.item()
                 avg_loss = (total_loss / total_weight).item() if weight_value > 0 else 0.0
                 self._log_metrics(
@@ -495,6 +729,8 @@ class FastTrainer:
                         "samples_per_sec": m["samples_per_sec"],
                         "p50_s": m["p50_s"],
                         "p95_s": m["p95_s"],
+                        "p99_s": m["p99_s"],
+                        "steady_samples_per_sec": steady_m["samples_per_sec"],
                     },
                     step=step_idx,
                     epoch=epoch,
@@ -504,26 +740,85 @@ class FastTrainer:
         metrics: Dict[str, Any] = dict(meter.summary())
         if self.device.startswith("cuda"):
             try:
+                metrics["cuda_current_mem_bytes"] = torch.cuda.memory_allocated()
                 metrics["cuda_max_mem_bytes"] = torch.cuda.max_memory_allocated()
+                metrics["cuda_reserved_mem_bytes"] = torch.cuda.memory_reserved()
+                metrics["cuda_max_reserved_mem_bytes"] = torch.cuda.max_memory_reserved()
+            except Exception:
+                pass
+        elif self.device.startswith("mps"):
+            try:
+                metrics["mps_current_mem_bytes"] = torch.mps.current_allocated_memory()
+            except Exception:
+                pass
+            try:
+                metrics["mps_driver_mem_bytes"] = torch.mps.driver_allocated_memory()
+            except Exception:
+                pass
+            try:
+                metrics["mps_recommended_max_mem_bytes"] = torch.mps.recommended_max_memory()
+            except Exception:
+                pass
+            try:
+                max_mps_memory = getattr(torch.mps, "max_memory_allocated", None)
+                if callable(max_mps_memory):
+                    metrics["mps_max_mem_bytes"] = max_mps_memory()
             except Exception:
                 pass
         if self.dist_ctx.world_size > 1:
             total_loss = distributed_sum(total_loss)
             total_weight = distributed_sum(total_weight)
+            warmup_loss = distributed_sum(warmup_loss)
+            warmup_weight = distributed_sum(warmup_weight)
+            steady_loss = distributed_sum(steady_loss)
+            steady_weight = distributed_sum(steady_weight)
             total_items = int(distributed_sum(torch.tensor(total_items, device=total_loss.device)).item())
+            warmup_items = int(distributed_sum(torch.tensor(warmup_items, device=total_loss.device)).item())
+            steady_items = int(distributed_sum(torch.tensor(steady_items, device=total_loss.device)).item())
         weight_value = total_weight.item()
         if weight_value > 0:
             metrics["avg_loss"] = (total_loss / total_weight).item()
         else:
             metrics["avg_loss"] = 0.0
+        warmup_weight_value = warmup_weight.item()
+        steady_weight_value = steady_weight.item()
+        if warmup_weight_value > 0:
+            metrics["warmup_avg_loss"] = (warmup_loss / warmup_weight).item()
+        else:
+            metrics["warmup_avg_loss"] = 0.0
+        if steady_weight_value > 0:
+            metrics["steady_avg_loss"] = (steady_loss / steady_weight).item()
+        else:
+            metrics["steady_avg_loss"] = 0.0
         metrics["steps"] = step_idx
         metrics["optimizer_steps"] = optimizer_steps
         metrics["samples"] = total_items
+        warmup_summary = warmup_meter.summary()
+        steady_summary = steady_meter.summary()
+        for key, value in warmup_summary.items():
+            metrics[f"warmup_{key}"] = value
+        for key, value in steady_summary.items():
+            metrics[f"steady_{key}"] = value
+        metrics["warmup_steps"] = warmup_recorded_steps
+        metrics["steady_steps"] = steady_recorded_steps
+        metrics["warmup_samples"] = warmup_items
+        metrics["steady_samples"] = steady_items
+        metrics["warmup_optimizer_steps"] = warmup_optimizer_steps
+        metrics["steady_optimizer_steps"] = steady_optimizer_steps
+        metrics["cold_start_steps"] = warmup_recorded_steps
+        metrics["cold_start_time_s"] = warmup_summary["total_time_s"]
+        metrics["cold_start_samples_per_sec"] = warmup_summary["samples_per_sec"]
+        metrics["reported_samples_per_sec"] = (
+            steady_summary["samples_per_sec"] if steady_recorded_steps > 0 else metrics["samples_per_sec"]
+        )
         metrics["amp"] = self.amp_enabled
         metrics["compiled"] = self.compiled
+        metrics["compile_init_time_s"] = self.compile_init_time_s
         metrics["device"] = self.device
         metrics["world_size"] = self.dist_ctx.world_size
         metrics["rank"] = self.dist_ctx.rank
+        if collect_profile:
+            metrics["profile"] = profiler.summary()
         self._log_metrics("train", metrics, epoch=epoch, mode="epoch")
         return metrics
 
@@ -561,8 +856,9 @@ class FastTrainer:
         if isinstance(sampler, DistributedSampler) and epoch is not None:
             sampler.set_epoch(epoch)
         meter = ThroughputMeter(fast_mode=self.meter_fast_mode)
-        total_loss = torch.zeros((), device=self.device, dtype=torch.float64)
-        total_weight = torch.zeros((), device=self.device, dtype=torch.float64)
+        metric_dtype = torch.float32 if self.device.startswith("mps") else torch.float64
+        total_loss = torch.zeros((), device=self.device, dtype=metric_dtype)
+        total_weight = torch.zeros((), device=self.device, dtype=metric_dtype)
         total_items = 0
         step_idx = 0
         metric_sums: Dict[str, float] = {}
@@ -570,9 +866,9 @@ class FastTrainer:
 
         with torch.no_grad():
             for batch in loader:
-                step_idx += 1
-                if steps is not None and step_idx > steps:
+                if steps is not None and step_idx >= steps:
                     break
+                step_idx += 1
                 batch = to_device(batch, self.device, non_blocking=True)
                 if isinstance(batch, (list, tuple)) and len(batch) == 2:
                     inputs, targets = batch
@@ -615,6 +911,7 @@ class FastTrainer:
                             "samples_per_sec": m["samples_per_sec"],
                             "p50_s": m["p50_s"],
                             "p95_s": m["p95_s"],
+                            "p99_s": m["p99_s"],
                         },
                         step=step_idx,
                         epoch=epoch,

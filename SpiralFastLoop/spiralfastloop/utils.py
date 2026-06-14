@@ -196,17 +196,18 @@ def dataloader_from_dataset(
                 drop_last=drop_last,
             )
             shuffle = False
-    return DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        sampler=sampler,
-        num_workers=workers,
-        prefetch_factor=prefetch_factor,
-        persistent_workers=persistent,
-        pin_memory=pin_memory,
-        drop_last=drop_last,
-    )
+    loader_kwargs: Dict[str, Any] = {
+        "batch_size": batch_size,
+        "shuffle": shuffle,
+        "sampler": sampler,
+        "num_workers": workers,
+        "pin_memory": pin_memory,
+        "drop_last": drop_last,
+    }
+    if workers > 0:
+        loader_kwargs["prefetch_factor"] = prefetch_factor
+        loader_kwargs["persistent_workers"] = persistent
+    return DataLoader(dataset, **loader_kwargs)
 
 
 def distributed_sum(value: torch.Tensor) -> torch.Tensor:
@@ -351,9 +352,12 @@ class ThroughputMeter:
         "_batches",
         "_median",
         "_p95",
+        "_p99",
         "_last_duration",
         "_min_duration",
         "_max_duration",
+        "_mean_duration",
+        "_m2_duration",
         "_ema_throughput",
         "_track_distribution",
         "_track_window",
@@ -442,9 +446,12 @@ class ThroughputMeter:
         self._batches = 0
         self._median = _PSquareQuantile(0.5) if self._track_distribution else None
         self._p95 = _PSquareQuantile(0.95) if self._track_distribution else None
+        self._p99 = _PSquareQuantile(0.99) if self._track_distribution else None
         self._last_duration = 0.0
         self._min_duration = math.inf
         self._max_duration = 0.0
+        self._mean_duration = 0.0
+        self._m2_duration = 0.0
         self._ema_throughput: Optional[float] = None
         self._window_records.clear()
         self._window_duration = 0.0
@@ -471,6 +478,10 @@ class ThroughputMeter:
         self.samples += batch_size_int
         self._accumulate_total_time(duration)
         self._batches += 1
+        delta = duration - self._mean_duration
+        self._mean_duration += delta / self._batches
+        delta2 = duration - self._mean_duration
+        self._m2_duration += delta * delta2
 
         if duration < self._min_duration:
             self._min_duration = duration
@@ -486,10 +497,13 @@ class ThroughputMeter:
         if self._track_distribution:
             median = self._median
             p95 = self._p95
+            p99 = self._p99
             if median is not None:
                 median.add(duration)
             if p95 is not None:
                 p95.add(duration)
+            if p99 is not None:
+                p99.add(duration)
         self._last_duration = duration
 
         window_limit = self._window_limit
@@ -528,18 +542,35 @@ class ThroughputMeter:
         if self._best_time_per_sample:
             best_sps = 1.0 / self._best_time_per_sample
         headroom = (best_sps / thr) if thr > 0.0 else 0.0
-        if self._track_distribution and self._median is not None and self._p95 is not None:
+        window_values = [duration for duration, _samples in self._window_records] if self._track_window else []
+        if self._track_distribution and window_values:
+            ordered = sorted(window_values)
+
+            def window_percentile(quantile: float) -> float:
+                index = int(round(quantile * (len(ordered) - 1)))
+                index = max(0, min(len(ordered) - 1, index))
+                return float(ordered[index])
+
+            p50 = window_percentile(0.5)
+            p95 = window_percentile(0.95)
+            p99 = window_percentile(0.99)
+        elif self._track_distribution and self._median is not None and self._p95 is not None and self._p99 is not None:
             p50 = self._median.value()
             p95 = self._p95.value()
+            p99 = self._p99.value()
         else:
             p50 = 0.0
             p95 = 0.0
+            p99 = 0.0
+        std_batch = (self._m2_duration / (batches - 1)) ** 0.5 if batches > 1 else 0.0
         window_thr = 0.0
         if self._window_duration > 0.0 and self._window_batches > 0:
             window_thr = self._window_samples / self._window_duration
         return {
             "p50_s": p50,
             "p95_s": p95,
+            "p99_s": p99,
+            "std_batch_s": std_batch,
             "samples_per_sec": thr,
             "avg_batch_s": avg_batch,
             "total_time_s": total,
@@ -592,6 +623,308 @@ class ThroughputMeter:
     @property
     def total_time(self) -> float:
         return self._total_time
+
+
+def synchronize_device(device: str) -> None:
+    """Best-effort accelerator synchronization for precise profiling."""
+    device_type = _device_type(device)
+    if device_type == "cuda":
+        try:
+            torch.cuda.synchronize(torch.device(device))
+        except Exception:
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
+    elif device_type == "mps":
+        try:
+            torch.mps.synchronize()
+        except Exception:
+            pass
+
+
+class PhaseProfiler:
+    """Opt-in phase and module-detail timer for training-loop bottleneck analysis."""
+
+    def __init__(
+        self,
+        *,
+        enabled: bool = False,
+        device: str = "cpu",
+        sync: bool = False,
+        track_distribution: bool = True,
+        window: int = 512,
+    ) -> None:
+        self.enabled = bool(enabled)
+        self.device = device
+        self.sync = bool(sync)
+        self.track_distribution = bool(track_distribution)
+        self.window = max(8, int(window))
+        self.totals: Dict[str, float] = {}
+        self.calls: Dict[str, int] = {}
+        self.samples: Dict[str, deque[float]] = {}
+        self._starts: Dict[str, float] = {}
+        self.detail_totals: Dict[str, Dict[str, float]] = {}
+        self.detail_calls: Dict[str, Dict[str, int]] = {}
+        self.detail_samples: Dict[str, Dict[str, deque[float]]] = {}
+        self._detail_starts: Dict[tuple[str, str], list[float]] = {}
+        self.event_totals: Dict[str, Dict[str, float]] = {}
+        self.event_calls: Dict[str, Dict[str, int]] = {}
+        self.event_samples: Dict[str, Dict[str, deque[float]]] = {}
+
+    @staticmethod
+    def _percentile(values: list[float], percentile: float) -> float:
+        if not values:
+            return 0.0
+        ordered = sorted(values)
+        index = int(round((percentile / 100.0) * (len(ordered) - 1)))
+        index = max(0, min(len(ordered) - 1, index))
+        return ordered[index]
+
+    @staticmethod
+    def _std(values: list[float]) -> float:
+        if len(values) < 2:
+            return 0.0
+        mean = math.fsum(values) / len(values)
+        return (math.fsum((value - mean) ** 2 for value in values) / (len(values) - 1)) ** 0.5
+
+    def _record(self, name: str, seconds: float) -> None:
+        duration = float(seconds)
+        self.totals[name] = self.totals.get(name, 0.0) + duration
+        self.calls[name] = self.calls.get(name, 0) + 1
+        if self.track_distribution:
+            bucket = self.samples.get(name)
+            if bucket is None:
+                bucket = deque(maxlen=self.window)
+                self.samples[name] = bucket
+            bucket.append(duration)
+
+    def _record_detail(self, parent: str, name: str, seconds: float) -> None:
+        duration = float(seconds)
+        totals = self.detail_totals.setdefault(parent, {})
+        calls = self.detail_calls.setdefault(parent, {})
+        totals[name] = totals.get(name, 0.0) + duration
+        calls[name] = calls.get(name, 0) + 1
+        if self.track_distribution:
+            samples = self.detail_samples.setdefault(parent, {})
+            bucket = samples.get(name)
+            if bucket is None:
+                bucket = deque(maxlen=self.window)
+                samples[name] = bucket
+            bucket.append(duration)
+
+    def _phase_row(
+        self,
+        total: float,
+        calls: int,
+        samples: deque[float] | tuple[()] | list[float],
+        denom: float,
+        pct_name: str = "pct",
+    ) -> Dict[str, Any]:
+        calls = max(1, int(calls))
+        row: Dict[str, Any] = {
+            "total_s": float(total),
+            "avg_ms": (float(total) / calls) * 1e3,
+            pct_name: (100.0 * float(total) / denom) if denom > 0 else 0.0,
+            "calls": calls,
+        }
+        sample_values = list(samples or ())
+        if self.track_distribution and sample_values:
+            row.update({
+                "sample_count": len(sample_values),
+                "p50_ms": self._percentile(sample_values, 50) * 1e3,
+                "p95_ms": self._percentile(sample_values, 95) * 1e3,
+                "p99_ms": self._percentile(sample_values, 99) * 1e3,
+                "std_ms": self._std(sample_values) * 1e3,
+                "min_ms": min(sample_values) * 1e3,
+                "max_ms": max(sample_values) * 1e3,
+            })
+        return row
+
+    def _event_row(self, total: float, calls: int, samples: deque[float] | list[float]) -> Dict[str, Any]:
+        calls = max(1, int(calls))
+        sample_values = list(samples or ())
+        row: Dict[str, Any] = {
+            "total_s": float(total),
+            "avg_ms": (float(total) / calls) * 1e3,
+            "calls": calls,
+            "sample_count": calls,
+        }
+        if sample_values:
+            row.update({
+                "window_sample_count": len(sample_values),
+                "p50_ms": self._percentile(sample_values, 50) * 1e3,
+                "p95_ms": self._percentile(sample_values, 95) * 1e3,
+                "p99_ms": self._percentile(sample_values, 99) * 1e3,
+                "std_ms": self._std(sample_values) * 1e3,
+                "min_ms": min(sample_values) * 1e3,
+                "max_ms": max(sample_values) * 1e3,
+            })
+        return row
+
+    def start(self, name: str) -> None:
+        if not self.enabled:
+            return
+        if self.sync:
+            synchronize_device(self.device)
+        self._starts[str(name)] = time.perf_counter()
+
+    def stop(self, name: str) -> None:
+        if not self.enabled:
+            return
+        if self.sync:
+            synchronize_device(self.device)
+        key = str(name)
+        start = self._starts.pop(key, None)
+        if start is None:
+            return
+        self._record(key, time.perf_counter() - start)
+
+    def cancel(self, name: str) -> None:
+        if self.enabled:
+            self._starts.pop(str(name), None)
+
+    def start_detail(self, parent: str, name: str) -> None:
+        if not self.enabled:
+            return
+        if self.sync:
+            synchronize_device(self.device)
+        key = (str(parent), str(name))
+        self._detail_starts.setdefault(key, []).append(time.perf_counter())
+
+    def stop_detail(self, parent: str, name: str) -> None:
+        if not self.enabled:
+            return
+        if self.sync:
+            synchronize_device(self.device)
+        key = (str(parent), str(name))
+        starts = self._detail_starts.get(key)
+        if not starts:
+            return
+        start = starts.pop()
+        if not starts:
+            self._detail_starts.pop(key, None)
+        self._record_detail(str(parent), str(name), time.perf_counter() - start)
+
+    def record_event_since_start(self, parent: str, group: str, name: str) -> None:
+        if not self.enabled:
+            return
+        if self.sync:
+            synchronize_device(self.device)
+        start = self._starts.get(str(parent))
+        if start is None:
+            return
+        group_key = str(group)
+        name_key = str(name)
+        duration = time.perf_counter() - start
+        totals = self.event_totals.setdefault(group_key, {})
+        calls = self.event_calls.setdefault(group_key, {})
+        totals[name_key] = totals.get(name_key, 0.0) + duration
+        calls[name_key] = calls.get(name_key, 0) + 1
+        if self.track_distribution:
+            samples = self.event_samples.setdefault(group_key, {})
+            bucket = samples.get(name_key)
+            if bucket is None:
+                bucket = deque(maxlen=self.window)
+                samples[name_key] = bucket
+            bucket.append(duration)
+
+    def summary(self) -> Dict[str, Any]:
+        if not self.enabled:
+            return {}
+        denom = math.fsum(self.totals.values())
+        phases = {
+            name: self._phase_row(total, self.calls.get(name, 0), self.samples.get(name, ()), denom)
+            for name, total in sorted(self.totals.items())
+        }
+        phase_breakdowns: Dict[str, Dict[str, Any]] = {}
+        for parent, totals in sorted(self.detail_totals.items()):
+            parent_total = self.totals.get(parent, math.fsum(totals.values()))
+            children = {
+                name: self._phase_row(
+                    total,
+                    self.detail_calls.get(parent, {}).get(name, 0),
+                    self.detail_samples.get(parent, {}).get(name, ()),
+                    parent_total,
+                    pct_name="pct_of_parent",
+                )
+                for name, total in sorted(totals.items())
+            }
+            top_children = sorted(
+                (
+                    {
+                        "name": name,
+                        "total_s": row["total_s"],
+                        "pct_of_parent": row["pct_of_parent"],
+                        "avg_ms": row["avg_ms"],
+                        "calls": row["calls"],
+                        "p95_ms": row.get("p95_ms"),
+                    }
+                    for name, row in children.items()
+                ),
+                key=lambda row: row["total_s"],
+                reverse=True,
+            )
+            tracked_s = math.fsum(float(row["total_s"]) for row in children.values())
+            phase_breakdowns[parent] = {
+                "parent_total_s": parent_total,
+                "tracked_s": tracked_s,
+                "untracked_s": parent_total - tracked_s,
+                "children": children,
+                "top_children": top_children,
+            }
+        phase_events: Dict[str, Dict[str, Any]] = {}
+        for group, totals in sorted(self.event_totals.items()):
+            children = {
+                name: self._event_row(
+                    total,
+                    self.event_calls.get(group, {}).get(name, 0),
+                    self.event_samples.get(group, {}).get(name, ()),
+                )
+                for name, total in sorted(totals.items())
+            }
+            top_children = sorted(
+                (
+                    {
+                        "name": name,
+                        "total_s": row["total_s"],
+                        "avg_ms": row["avg_ms"],
+                        "calls": row["calls"],
+                        "sample_count": row["sample_count"],
+                        "p95_ms": row.get("p95_ms"),
+                    }
+                    for name, row in children.items()
+                ),
+                key=lambda row: row["avg_ms"],
+                reverse=True,
+            )
+            phase_events[group] = {"children": children, "top_children": top_children}
+        top_phases = sorted(
+            (
+                {
+                    "name": name,
+                    "total_s": row["total_s"],
+                    "pct": row["pct"],
+                    "avg_ms": row["avg_ms"],
+                    "calls": row["calls"],
+                    "p95_ms": row.get("p95_ms"),
+                }
+                for name, row in phases.items()
+            ),
+            key=lambda row: row["total_s"],
+            reverse=True,
+        )
+        return {
+            "profile_sync": self.sync,
+            "profile_distribution": self.track_distribution,
+            "profile_window": self.window if self.track_distribution else 0,
+            "profile_total_s": denom,
+            "phases": phases,
+            "phase_breakdowns": phase_breakdowns,
+            "phase_events": phase_events,
+            "top_phases": top_phases,
+        }
+
 
 def maybe_channels_last(model: nn.Module, channels_last: bool = False) -> nn.Module:
     if not channels_last:

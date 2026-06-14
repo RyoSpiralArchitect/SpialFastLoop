@@ -3,10 +3,12 @@ import sys
 from pathlib import Path
 
 import pytest
+import torch
+from torch.utils.data import TensorDataset
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from spiralfastloop.utils import ThroughputMeter
+from spiralfastloop.utils import ThroughputMeter, dataloader_from_dataset
 
 
 def _percentile(values, percentile):
@@ -34,6 +36,8 @@ def test_throughput_meter_matches_percentiles_with_stream_data():
     assert summary["samples_per_sec"] == pytest.approx(total_samples / total_time, rel=1e-6)
     assert summary["p50_s"] == pytest.approx(_percentile(durations, 0.5), rel=0.05)
     assert summary["p95_s"] == pytest.approx(_percentile(durations, 0.95), rel=0.2)
+    assert summary["p99_s"] == pytest.approx(_percentile(durations, 0.99), rel=0.2)
+    assert summary["std_batch_s"] > 0.0
     assert summary["total_time_s"] == pytest.approx(total_time, rel=1e-12)
     assert summary["avg_batch_s"] == pytest.approx(total_time / len(durations), rel=1e-6)
     assert summary["batches"] == pytest.approx(len(durations))
@@ -114,8 +118,10 @@ def test_throughput_meter_can_skip_distribution_tracking():
 
     assert meter._median is None
     assert meter._p95 is None
+    assert meter._p99 is None
     assert summary["p50_s"] == 0.0
     assert summary["p95_s"] == 0.0
+    assert summary["p99_s"] == 0.0
     assert summary["min_batch_s"] == pytest.approx(min(durations))
     assert summary["max_batch_s"] == pytest.approx(max(durations))
     assert summary["ema_samples_per_sec"] == 0.0
@@ -189,3 +195,21 @@ def test_throughput_meter_time_batch_context_records_and_handles_exceptions():
     assert summary["min_batch_s"] == pytest.approx(0.02, rel=1e-9)
     assert summary["max_batch_s"] == pytest.approx(0.05, rel=1e-9)
     assert summary["window_batches"] == pytest.approx(2)
+
+
+def test_dataloader_from_dataset_allows_zero_workers() -> None:
+    dataset = TensorDataset(torch.randn(8, 2), torch.randint(0, 2, (8,)))
+    loader = dataloader_from_dataset(
+        dataset,
+        batch_size=4,
+        device="cpu",
+        num_workers=0,
+        prefetch_factor=4,
+        persistent=True,
+        shuffle=False,
+    )
+
+    first_inputs, first_targets = next(iter(loader))
+
+    assert first_inputs.shape == (4, 2)
+    assert first_targets.shape == (4,)

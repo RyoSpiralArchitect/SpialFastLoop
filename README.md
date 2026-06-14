@@ -14,6 +14,7 @@ It also ships an optional **Surprise→Repair (Surprisal Sandwich)** mechanism t
 - **Gradient Accumulation**: stable big-batch effect on small VRAM
 - **Data transfer tweaks**: non_blocking transfers; pin_memory recommended
 - **`torch.compile` (best-effort)**: reduces Python overhead
+- **Phase profiling**: opt-in timings for data wait, transfer, forward, loss, backward, optimizer, and module-level model drilldowns
 - **Sync reduction**: `.item()` minimized; `zero_grad(set_to_none=True)`
 - **Trigger hook (optional)**: per-sample loss driven injection (e.g., "Surprise→Repair" text augmentation)
 
@@ -43,6 +44,46 @@ metrics = trainer.train_one_epoch(loader, crit, steps=200)
 print(metrics)
 ```
 
+## Phase profiling
+Use `collect_profile=True` when you need a thicker read on training-loop bottlenecks.
+
+```python
+metrics = trainer.train_one_epoch(
+    loader,
+    crit,
+    steps=200,
+    collect_profile=True,
+    profile_model=True,
+    profile_model_depth=1,
+)
+
+print(metrics["profile"]["top_phases"][:3])
+print(metrics["profile"]["phase_breakdowns"]["forward"]["top_children"][:3])
+print(metrics["profile"]["phase_breakdowns"]["optimizer"]["top_children"][:3])
+print(metrics["profile"]["phase_events"]["backward_grad_ready"]["top_children"][:3])
+```
+
+`profile_model=True` adds per-module forward timings under
+`phase_breakdowns.forward` and backward gradient-ready timings under
+`phase_events.backward_grad_ready`. Use `profile_model_include="layer1,layer4"`
+with `profile_model_depth=2` to drill into selected blocks without hooking the
+entire model. The top-level phases include `data_wait`, so loader stalls can be
+separated from compute time. Throughput summaries include `p99_s` and
+`std_batch_s`, and optimizer internals are exposed under
+`phase_breakdowns.optimizer`. Set `profile_sync=True` only when you need stricter
+accelerator timings; it synchronizes around profiled regions and slows the run
+down. Use `--no-profile-distribution` in benchmark scripts to keep totals while
+skipping percentile windows when profiler overhead matters.
+
+For cold-start versus steady-state reads, pass `warmup_steps=N`. The first `N`
+completed training steps are still executed and measured, but they are reported
+separately as `cold_start_time_s`, `warmup_samples_per_sec`, and
+`warmup_avg_loss`. Post-warmup values are exposed as `steady_samples_per_sec`,
+`steady_p99_s`, and `steady_avg_loss`; `reported_samples_per_sec` uses steady
+throughput when steady steps exist. `compile_init_time_s` captures the immediate
+`torch.compile` wrapper setup cost, while lazy first-forward compilation shows up
+inside the warmup/cold-start window.
+
 ## Surprise→Repair (Surprisal Sandwich)
 **Goal:** Inject *surprise* mid-sentence by penalizing the most likely tokens, then **repair** coherence near the end.
 Use it to create *novel but coherent* samples and mix them into training (loss-std triggered) to avoid over-smoothed gradients.
@@ -69,10 +110,31 @@ Run local synthetic bench:
 python examples/bench_synth.py
 ```
 
+Profile the transactional benchmark:
+```bash
+python scripts/bench_parallel_transactions.py \
+  --device mps --steps 40 --runs 1 --workers 2 \
+  --warmup-steps 4 \
+  --collect-profile --profile-model --profile-model-depth 1 \
+  --profile-model-include 0,2 \
+  --json-out reports/bench_parallel_profile.json
+```
+
+Drill into ResNet blocks:
+```bash
+python scripts/profile_resnet_drilldown.py \
+  --device mps --dataset fake --steps 12 \
+  --warmup-steps 2 \
+  --profile-model-include layer1,layer4 --profile-model-depth 2 \
+  --json-out reports/resnet_layer14_drilldown.json
+```
+
 ## Examples
 - `examples/train_resnet.py` — CIFAR-10 (falls back to synthetic offline)
 - `examples/bench_synth.py` — synthetic speed test
 - `examples/sr_generate_demo.py` — Surprisal Sandwich generation (HF)
+- `scripts/bench_parallel_transactions.py` — synthetic transactional benchmark with optional phase profiling
+- `scripts/profile_resnet_drilldown.py` — ResNet block-level forward/backward profiling
 
 ## Trigger hook API
 To enable per-sample control, pass a criterion with `reduction='none'` and a `trigger_hook`:
