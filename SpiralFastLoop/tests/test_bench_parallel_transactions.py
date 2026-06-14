@@ -19,6 +19,7 @@ from scripts.bench_parallel_transactions import (
     _format_count,
     _format_metric_value,
     _has_positive_display_value,
+    build_model,
     device_arg,
     non_negative_int_arg,
     parse_args,
@@ -114,6 +115,27 @@ def test_transaction_dataset_bounds_indices_consistently() -> None:
     for index in (-9, 8):
         with pytest.raises(IndexError):
             dataset[index]
+
+
+@pytest.mark.parametrize(
+    ("features", "classes", "match"),
+    [
+        (0, 2, "features"),
+        (-1, 2, "features"),
+        (1.5, 2, "features"),
+        (True, 2, "features"),
+        (4, 0, "classes"),
+        (4, 1.5, "classes"),
+        (4, True, "classes"),
+    ],
+)
+def test_build_model_rejects_invalid_shape_values(
+    features: object,
+    classes: object,
+    match: str,
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        build_model(features, classes)  # type: ignore[arg-type]
 
 
 def test_summarize_metric_reports_distribution() -> None:
@@ -539,6 +561,44 @@ def test_validate_benchmark_args_rejects_invalid_direct_values(
         validate_benchmark_args(Namespace(warmup_steps=warmup_steps, steps=steps, device=device))
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("transactions", 0, "transactions"),
+        ("feature_dim", 1.5, "feature_dim"),
+        ("num_classes", True, "num_classes"),
+        ("batch_size", 0, "batch_size"),
+        ("grad_accum", "2", "grad_accum"),
+        ("prefetch_factor", -1, "prefetch_factor"),
+        ("runs", 0, "runs"),
+        ("profile_window", 0, "profile_window"),
+        ("profile_model_depth", 0, "profile_model_depth"),
+        ("profile_model_max_modules", 0, "profile_model_max_modules"),
+        ("workers", -1, "workers"),
+        ("log_interval", 1.5, "log_interval"),
+        ("seed", True, "seed"),
+        ("learning_rate", "0.001", "learning_rate"),
+        ("learning_rate", float("nan"), "learning_rate"),
+        ("compile", 1, "compile"),
+        ("collect_profile", "yes", "collect_profile"),
+        ("profile_sync", 0, "profile_sync"),
+        ("profile_distribution", "true", "profile_distribution"),
+        ("profile_model", 1, "profile_model"),
+        ("dataset_mode", "cached", "dataset_mode"),
+    ],
+)
+def test_validate_benchmark_args_rejects_invalid_optional_direct_values(
+    field: str,
+    value: object,
+    match: str,
+) -> None:
+    args = Namespace(warmup_steps=0, steps=1, device="cpu")
+    setattr(args, field, value)
+
+    with pytest.raises(ValueError, match=match):
+        validate_benchmark_args(args)
+
+
 def test_parse_args_rejects_zero_profile_model_depth(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "argv", ["bench_parallel_transactions.py", "--profile-model-depth", "0"])
 
@@ -627,3 +687,47 @@ def test_transaction_benchmark_rejects_invalid_direct_seed() -> None:
 
     with pytest.raises(ValueError, match="seed"):
         run_once(Args, 0)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("learning_rate", "0.001", "learning_rate"),
+        ("dataset_mode", "cached", "dataset_mode"),
+        ("compile", 1, "compile"),
+    ],
+)
+def test_transaction_benchmark_rejects_invalid_direct_config(
+    field: str,
+    value: object,
+    match: str,
+) -> None:
+    args = Namespace(
+        transactions=64,
+        feature_dim=8,
+        num_classes=3,
+        seed=100,
+        dataset_mode="materialized",
+        batch_size=16,
+        device="cpu",
+        workers=0,
+        prefetch_factor=2,
+        learning_rate=3e-4,
+        compile=False,
+        grad_accum=2,
+        log_interval=0,
+        steps=2,
+        collect_profile=False,
+        profile_sync=False,
+        profile_distribution=True,
+        profile_window=16,
+        profile_model=False,
+        profile_model_depth=1,
+        profile_model_max_modules=8,
+        profile_model_include=None,
+        warmup_steps=0,
+    )
+    setattr(args, field, value)
+
+    with pytest.raises(ValueError, match=match):
+        run_once(args, 0)

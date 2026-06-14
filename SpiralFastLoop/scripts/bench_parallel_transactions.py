@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from spiralfastloop import FastTrainer
 from spiralfastloop.utils import (
     _bool_setting,
+    _finite_float_setting,
     _int_setting,
     _non_negative_int_setting,
     _positive_int_setting,
@@ -293,6 +294,15 @@ def positive_float_arg(raw: object) -> float:
     return value
 
 
+def _positive_float_setting(raw: object, name: str) -> float:
+    if isinstance(raw, str):
+        raise ValueError(f"{name} must be a positive finite number")
+    value = _finite_float_setting(raw, name)
+    if value <= 0.0:
+        raise ValueError(f"{name} must be a positive finite number")
+    return value
+
+
 def device_arg(raw: object) -> str:
     if not isinstance(raw, str):
         raise argparse.ArgumentTypeError("must be one of auto, cpu, cuda, mps")
@@ -361,6 +371,34 @@ def validate_benchmark_args(args: argparse.Namespace) -> None:
     warmup_steps = _non_negative_int_setting(args.warmup_steps, "warmup_steps")
     if warmup_steps > steps:
         raise ValueError("warmup-steps must be less than or equal to steps")
+    for field in (
+        "transactions",
+        "feature_dim",
+        "num_classes",
+        "samples",
+        "classes",
+        "batch_size",
+        "grad_accum",
+        "prefetch_factor",
+        "runs",
+        "profile_window",
+        "profile_model_depth",
+        "profile_model_max_modules",
+    ):
+        if hasattr(args, field):
+            _positive_int_setting(getattr(args, field), field)
+    for field in ("workers", "log_interval"):
+        if hasattr(args, field):
+            _non_negative_int_setting(getattr(args, field), field)
+    if hasattr(args, "seed"):
+        _int_setting(args.seed, "seed")
+    if hasattr(args, "learning_rate"):
+        _positive_float_setting(args.learning_rate, "learning_rate")
+    for field in ("compile", "collect_profile", "profile_sync", "profile_distribution", "profile_model"):
+        if hasattr(args, field):
+            _bool_setting(getattr(args, field), field)
+    if hasattr(args, "dataset_mode") and args.dataset_mode not in {"generated", "materialized"}:
+        raise ValueError("dataset_mode must be one of generated, materialized")
     if hasattr(args, "device"):
         try:
             device_arg(args.device)
@@ -423,6 +461,8 @@ class SyntheticTransactionDataset(Dataset):
 
 
 def build_model(features: int, classes: int) -> nn.Module:
+    features = _positive_int_setting(features, "features")
+    classes = _positive_int_setting(classes, "classes")
     hidden = max(32, features * 2)
     return nn.Sequential(
         nn.Linear(features, hidden),
@@ -434,6 +474,7 @@ def build_model(features: int, classes: int) -> nn.Module:
 
 
 def run_once(args, run_index: int) -> BenchmarkResult:
+    validate_benchmark_args(args)
     run_seed = _int_setting(args.seed, "seed") + _non_negative_int_setting(run_index, "run_index")
     torch.manual_seed(run_seed)
     if torch.cuda.is_available():
