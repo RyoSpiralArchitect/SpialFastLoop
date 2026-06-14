@@ -115,6 +115,11 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "steady_samples_per_sec": 110.0,
             "wall_time_s": 2.0,
             "setup_time_s": 1.0,
+            "profile_forward_backward_pct": 40.0,
+            "profile_forward_backward_time_s": 0.20,
+            "profile_forward_pct": 15.0,
+            "profile_backward_pct": 25.0,
+            "profile_optimizer_pct": 10.0,
         },
         {
             "run": 1,
@@ -126,6 +131,11 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "wall_time_s": 1.0,
             "setup_time_s": 0.25,
             "end_to_end_wall_time_s": 1.25,
+            "profile_forward_backward_pct": 60.0,
+            "profile_forward_backward_time_s": 0.30,
+            "profile_forward_pct": 20.0,
+            "profile_backward_pct": 40.0,
+            "profile_optimizer_pct": 15.0,
         },
     ]
 
@@ -136,7 +146,10 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["min_end_to_end_wall_time_s"] == pytest.approx(1.25)
     assert summary["max_end_to_end_wall_time_s"] == pytest.approx(2.0)
     assert summary["stddev_wall_time_s"] == pytest.approx(0.5)
+    assert summary["mean_profile_forward_backward_pct"] == pytest.approx(50.0)
+    assert summary["max_profile_backward_pct"] == pytest.approx(40.0)
     assert summary["best_reported"]["run"] == 1
+    assert summary["best_reported"]["profile_forward_backward_pct"] == pytest.approx(60.0)
     assert summary["best_end_to_end"]["run"] == 1
 
 

@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from spiralfastloop import FastTrainer
 from spiralfastloop.utils import dataloader_from_dataset
 
-SUMMARY_FIELDS = (
+BASE_SUMMARY_FIELDS = (
     "reported_samples_per_sec",
     "samples_per_sec",
     "steady_samples_per_sec",
@@ -29,6 +29,27 @@ SUMMARY_FIELDS = (
     "wall_time_s",
     "cold_start_time_s",
 )
+
+PROFILE_SUMMARY_FIELDS = (
+    "profile_total_s",
+    "profile_data_wait_time_s",
+    "profile_data_wait_pct",
+    "profile_transfer_time_s",
+    "profile_transfer_pct",
+    "profile_forward_time_s",
+    "profile_forward_pct",
+    "profile_forward_avg_ms",
+    "profile_backward_time_s",
+    "profile_backward_pct",
+    "profile_backward_avg_ms",
+    "profile_forward_backward_time_s",
+    "profile_forward_backward_pct",
+    "profile_optimizer_time_s",
+    "profile_optimizer_pct",
+    "profile_optimizer_avg_ms",
+)
+
+SUMMARY_FIELDS = BASE_SUMMARY_FIELDS + PROFILE_SUMMARY_FIELDS
 
 BEST_RUN_FIELDS = (
     "run",
@@ -40,6 +61,11 @@ BEST_RUN_FIELDS = (
     "end_to_end_wall_time_s",
     "setup_time_s",
     "wall_time_s",
+    "profile_forward_backward_pct",
+    "profile_forward_backward_time_s",
+    "profile_forward_pct",
+    "profile_backward_pct",
+    "profile_optimizer_pct",
 )
 
 

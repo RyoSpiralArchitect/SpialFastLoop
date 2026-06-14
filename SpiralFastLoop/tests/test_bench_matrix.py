@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.bench_matrix import (
     _compile_requested,
+    _format_summary_row,
     _parse_csv_choices,
     _parse_worker_counts,
     parse_args,
@@ -56,6 +57,23 @@ def test_parse_args_rejects_zero_profile_model_depth(monkeypatch: pytest.MonkeyP
     assert exc_info.value.code == 2
 
 
+def test_format_summary_row_includes_profile_suffix_when_available() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_forward_backward_pct": 62.5,
+        "mean_profile_optimizer_pct": 12.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "fwd+bwd=62.5%" in formatted
+    assert "opt=12.0%" in formatted
+
+
 def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     rows = [
         {
@@ -70,6 +88,9 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "wall_time_s": 2.0,
             "cold_start_time_s": 0.5,
             "dataset_materialized_bytes": 0,
+            "profile_forward_backward_pct": 40.0,
+            "profile_forward_pct": 15.0,
+            "profile_backward_pct": 25.0,
         },
         {
             "matrix_dataset_mode": "generated",
@@ -83,6 +104,9 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "wall_time_s": 0.75,
             "cold_start_time_s": 0.1,
             "dataset_materialized_bytes": 0,
+            "profile_forward_backward_pct": 60.0,
+            "profile_forward_pct": 20.0,
+            "profile_backward_pct": 40.0,
         },
         {
             "matrix_dataset_mode": "materialized",
@@ -96,6 +120,9 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "wall_time_s": 0.6,
             "cold_start_time_s": 0.05,
             "dataset_materialized_bytes": 1024,
+            "profile_forward_backward_pct": 55.0,
+            "profile_forward_pct": 25.0,
+            "profile_backward_pct": 30.0,
         },
     ]
 
@@ -114,6 +141,9 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["stddev_reported_samples_per_sec"] == pytest.approx(100.0)
     assert generated["mean_end_to_end_wall_time_s"] == pytest.approx(2.0)
     assert generated["stddev_end_to_end_wall_time_s"] == pytest.approx(1.0)
+    assert generated["mean_profile_forward_backward_pct"] == pytest.approx(50.0)
+    assert generated["max_profile_backward_pct"] == pytest.approx(40.0)
+    assert summary["best_reported"]["mean_profile_forward_backward_pct"] == pytest.approx(55.0)
 
 
 def test_summarize_rows_handles_empty_input() -> None:

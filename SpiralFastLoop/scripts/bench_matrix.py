@@ -12,22 +12,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from bench_parallel_transactions import (
+    SUMMARY_FIELDS,
     non_negative_int_arg,
     positive_float_arg,
     positive_int_arg,
     run_once,
     summarize_metric,
     validate_benchmark_args,
-)
-
-SUMMARY_FIELDS = (
-    "reported_samples_per_sec",
-    "samples_per_sec",
-    "steady_samples_per_sec",
-    "end_to_end_wall_time_s",
-    "setup_time_s",
-    "wall_time_s",
-    "cold_start_time_s",
 )
 
 
@@ -111,10 +102,18 @@ def summarize_rows(rows: list[dict]) -> dict:
 
 
 def _format_summary_row(row: dict) -> str:
+    profile_suffix = ""
+    forward_backward_pct = float(row.get("mean_profile_forward_backward_pct", 0.0))
+    if forward_backward_pct > 0.0:
+        profile_suffix = (
+            f" fwd+bwd={forward_backward_pct:.1f}% "
+            f"opt={float(row.get('mean_profile_optimizer_pct', 0.0)):.1f}%"
+        )
     return (
         f"{row['dataset_mode']} {row['compile_mode']} workers={row['workers']} "
         f"reported={row['mean_reported_samples_per_sec']:.1f}/s "
         f"e2e={row['mean_end_to_end_wall_time_s']:.2f}s"
+        f"{profile_suffix}"
     )
 
 
