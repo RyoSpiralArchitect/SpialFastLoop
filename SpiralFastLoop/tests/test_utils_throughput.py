@@ -8,7 +8,13 @@ from torch.utils.data import TensorDataset
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from spiralfastloop.utils import ThroughputMeter, dataloader_from_dataset
+from spiralfastloop.utils import (
+    ThroughputMeter,
+    _PSquareQuantile,
+    dataloader_from_dataset,
+    safe_compile,
+    safe_compile_with_diagnostics,
+)
 
 
 def _percentile(values, percentile):
@@ -197,6 +203,68 @@ def test_throughput_meter_time_batch_context_records_and_handles_exceptions():
     assert summary["window_batches"] == pytest.approx(2)
 
 
+def test_p_square_quantile_reports_inconsistent_state() -> None:
+    quantile = _PSquareQuantile(0.5)
+    quantile._q = [0.1, 0.2, 0.3, 0.4, 0.5]
+    quantile._n = None
+    quantile._np = [1.0, 2.0, 3.0, 4.0, 5.0]
+    quantile._dn = [0.0, 0.25, 0.5, 0.75, 1.0]
+
+    with pytest.raises(RuntimeError, match="state is inconsistent"):
+        quantile.add(0.6)
+
+
+def test_p_square_quantile_update_requires_initialized_state() -> None:
+    quantile = _PSquareQuantile(0.5)
+
+    with pytest.raises(RuntimeError, match="not initialized"):
+        quantile._linear_update(2, 1)
+
+
+def test_safe_compile_rejects_non_module_compile_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = torch.nn.Linear(1, 1)
+
+    def fake_compile(_: torch.nn.Module, mode: str) -> object:
+        return object()
+
+    monkeypatch.setattr(torch, "compile", fake_compile, raising=False)
+
+    compiled, did_compile = safe_compile(model)
+
+    assert compiled is model
+    assert did_compile is False
+
+
+def test_safe_compile_with_diagnostics_reports_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = torch.nn.Linear(1, 1)
+
+    def fake_compile(_: torch.nn.Module, mode: str) -> object:
+        raise RuntimeError("compile exploded")
+
+    monkeypatch.setattr(torch, "compile", fake_compile, raising=False)
+
+    result = safe_compile_with_diagnostics(model)
+
+    assert result.model is model
+    assert result.compiled is False
+    assert result.fallback_reason == "RuntimeError: compile exploded"
+
+
+def test_safe_compile_with_diagnostics_reports_non_module_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = torch.nn.Linear(1, 1)
+
+    def fake_compile(_: torch.nn.Module, mode: str) -> object:
+        return object()
+
+    monkeypatch.setattr(torch, "compile", fake_compile, raising=False)
+
+    result = safe_compile_with_diagnostics(model)
+
+    assert result.model is model
+    assert result.compiled is False
+    assert result.fallback_reason == "non_module_result:object"
+
+
 def test_dataloader_from_dataset_allows_zero_workers() -> None:
     dataset = TensorDataset(torch.randn(8, 2), torch.randint(0, 2, (8,)))
     loader = dataloader_from_dataset(
@@ -213,3 +281,52 @@ def test_dataloader_from_dataset_allows_zero_workers() -> None:
 
     assert first_inputs.shape == (4, 2)
     assert first_targets.shape == (4,)
+
+
+def test_dataloader_from_dataset_applies_seed_to_shuffle_order() -> None:
+    dataset = TensorDataset(torch.arange(16).float().unsqueeze(1), torch.arange(16))
+
+    def order_for(seed: int) -> list[int]:
+        loader = dataloader_from_dataset(
+            dataset,
+            batch_size=4,
+            device="cpu",
+            num_workers=0,
+            shuffle=True,
+            seed=seed,
+        )
+        return [int(value) for _, targets in loader for value in targets]
+
+    first = order_for(7)
+    second = order_for(7)
+    different_seed = order_for(8)
+
+    assert first == second
+    assert first != different_seed
+
+
+def test_dataloader_from_dataset_seed_works_with_mps_default_device() -> None:
+    if not hasattr(torch, "set_default_device"):
+        pytest.skip("torch.set_default_device is not available")
+    if not torch.backends.mps.is_available():
+        pytest.skip("MPS is not available")
+    dataset = TensorDataset(
+        torch.arange(16, device="cpu").float().unsqueeze(1),
+        torch.arange(16, device="cpu"),
+    )
+    previous_device = torch.get_default_device() if hasattr(torch, "get_default_device") else "cpu"
+    torch.set_default_device("mps")
+    try:
+        loader = dataloader_from_dataset(
+            dataset,
+            batch_size=4,
+            device="cpu",
+            num_workers=0,
+            shuffle=True,
+            seed=7,
+        )
+        order = [int(value) for _, targets in loader for value in targets]
+    finally:
+        torch.set_default_device(previous_device)
+
+    assert sorted(order) == list(range(16))

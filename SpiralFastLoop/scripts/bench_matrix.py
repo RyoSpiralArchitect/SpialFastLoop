@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""Run a small matrix of transactional benchmark configurations."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from argparse import Namespace
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from bench_parallel_transactions import (
+    non_negative_int_arg,
+    positive_float_arg,
+    positive_int_arg,
+    run_once,
+    summarize_metric,
+    validate_benchmark_args,
+)
+
+SUMMARY_FIELDS = (
+    "reported_samples_per_sec",
+    "samples_per_sec",
+    "steady_samples_per_sec",
+    "end_to_end_wall_time_s",
+    "setup_time_s",
+    "wall_time_s",
+    "cold_start_time_s",
+)
+
+
+def _parse_csv_choices(raw: str, allowed: set[str], *, name: str) -> list[str]:
+    values = [item.strip() for item in raw.split(",") if item.strip()]
+    if not values:
+        raise ValueError(f"{name} must include at least one value")
+    invalid = sorted(set(values) - allowed)
+    if invalid:
+        raise ValueError(f"{name} includes unsupported values: {', '.join(invalid)}")
+    return values
+
+
+def _parse_worker_counts(raw: str) -> list[int]:
+    values = []
+    for item in raw.split(","):
+        text = item.strip()
+        if not text:
+            continue
+        try:
+            value = non_negative_int_arg(text)
+        except argparse.ArgumentTypeError as exc:
+            raise ValueError(f"worker counts {exc}") from exc
+        values.append(value)
+    if not values:
+        raise ValueError("worker counts must include at least one value")
+    return values
+
+
+def _compile_requested(mode: str) -> bool:
+    if mode == "compile":
+        return True
+    if mode == "no-compile":
+        return False
+    raise ValueError(f"unsupported compile mode: {mode}")
+
+
+def _group_key(row: dict) -> tuple[str, str, int]:
+    return (
+        str(row["matrix_dataset_mode"]),
+        str(row["matrix_compile_mode"]),
+        int(row["matrix_workers"]),
+    )
+
+
+def summarize_rows(rows: list[dict]) -> dict:
+    groups: dict[tuple[str, str, int], list[dict]] = {}
+    for row in rows:
+        groups.setdefault(_group_key(row), []).append(row)
+
+    summaries = []
+    for (dataset_mode, compile_mode, workers), group_rows in sorted(groups.items()):
+        summary = {
+            "dataset_mode": dataset_mode,
+            "compile_mode": compile_mode,
+            "workers": workers,
+            "runs": len(group_rows),
+            "dataset_materialized_bytes": max(
+                int(row.get("dataset_materialized_bytes", 0))
+                for row in group_rows
+            ),
+        }
+        for field in SUMMARY_FIELDS:
+            for stat_name, value in summarize_metric(group_rows, field).items():
+                summary[f"{stat_name}_{field}"] = value
+        summaries.append(summary)
+
+    best_reported = None
+    best_end_to_end = None
+    if summaries:
+        best_reported = max(summaries, key=lambda row: row["mean_reported_samples_per_sec"])
+        best_end_to_end = min(summaries, key=lambda row: row["mean_end_to_end_wall_time_s"])
+
+    return {
+        "runs": len(rows),
+        "config_count": len(summaries),
+        "groups": summaries,
+        "best_reported": best_reported,
+        "best_end_to_end": best_end_to_end,
+    }
+
+
+def _format_summary_row(row: dict) -> str:
+    return (
+        f"{row['dataset_mode']} {row['compile_mode']} workers={row['workers']} "
+        f"reported={row['mean_reported_samples_per_sec']:.1f}/s "
+        f"e2e={row['mean_end_to_end_wall_time_s']:.2f}s"
+    )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--transactions", type=positive_int_arg, default=4096)
+    parser.add_argument("--feature-dim", type=positive_int_arg, default=64)
+    parser.add_argument("--num-classes", type=positive_int_arg, default=8)
+    parser.add_argument("--batch-size", type=positive_int_arg, default=128)
+    parser.add_argument("--grad-accum", type=positive_int_arg, default=2)
+    parser.add_argument("--steps", type=positive_int_arg, default=16)
+    parser.add_argument("--warmup-steps", type=non_negative_int_arg, default=2)
+    parser.add_argument("--runs", type=positive_int_arg, default=1)
+    parser.add_argument("--learning-rate", type=positive_float_arg, default=3e-4)
+    parser.add_argument("--seed", type=int, default=1234)
+    parser.add_argument("--device", type=str, default="auto")
+    parser.add_argument("--prefetch-factor", type=positive_int_arg, default=4)
+    parser.add_argument("--log-interval", type=non_negative_int_arg, default=0)
+    parser.add_argument("--dataset-modes", type=str, default="generated,materialized")
+    parser.add_argument("--compile-modes", type=str, default="no-compile")
+    parser.add_argument("--worker-counts", type=str, default="0")
+    parser.add_argument("--collect-profile", action="store_true")
+    parser.add_argument("--profile-sync", action="store_true")
+    parser.add_argument("--no-profile-distribution", dest="profile_distribution", action="store_false")
+    parser.add_argument("--profile-window", type=positive_int_arg, default=512)
+    parser.add_argument("--profile-model", action="store_true")
+    parser.add_argument("--profile-model-depth", type=non_negative_int_arg, default=1)
+    parser.add_argument("--profile-model-max-modules", type=positive_int_arg, default=64)
+    parser.add_argument("--profile-model-include", type=str, default=None)
+    parser.add_argument("--json-out", type=str, default=None)
+    parser.add_argument("--summary-out", type=str, default=None)
+    args = parser.parse_args()
+    try:
+        validate_benchmark_args(args)
+    except ValueError as exc:
+        parser.error(str(exc))
+    return args
+
+
+def _run_args(args: argparse.Namespace, dataset_mode: str, compile_mode: str, workers: int) -> Namespace:
+    return Namespace(
+        transactions=args.transactions,
+        feature_dim=args.feature_dim,
+        num_classes=args.num_classes,
+        batch_size=args.batch_size,
+        grad_accum=args.grad_accum,
+        workers=workers,
+        prefetch_factor=args.prefetch_factor,
+        device=args.device,
+        steps=args.steps,
+        log_interval=args.log_interval,
+        compile=_compile_requested(compile_mode),
+        warmup_steps=args.warmup_steps,
+        runs=args.runs,
+        learning_rate=args.learning_rate,
+        seed=args.seed,
+        collect_profile=args.collect_profile or args.profile_model,
+        profile_sync=args.profile_sync,
+        profile_distribution=args.profile_distribution,
+        profile_window=args.profile_window,
+        profile_model=args.profile_model,
+        profile_model_depth=args.profile_model_depth,
+        profile_model_max_modules=args.profile_model_max_modules,
+        profile_model_include=args.profile_model_include,
+        dataset_mode=dataset_mode,
+    )
+
+
+def main() -> None:
+    args = parse_args()
+    dataset_modes = _parse_csv_choices(
+        args.dataset_modes,
+        {"generated", "materialized"},
+        name="dataset modes",
+    )
+    compile_modes = _parse_csv_choices(
+        args.compile_modes,
+        {"compile", "no-compile"},
+        name="compile modes",
+    )
+    worker_counts = _parse_worker_counts(args.worker_counts)
+
+    rows = []
+    for dataset_mode in dataset_modes:
+        for compile_mode in compile_modes:
+            for workers in worker_counts:
+                run_args = _run_args(args, dataset_mode, compile_mode, workers)
+                for run_index in range(args.runs):
+                    result = run_once(run_args, run_index).as_dict()
+                    result.update({
+                        "matrix_dataset_mode": dataset_mode,
+                        "matrix_compile_mode": compile_mode,
+                        "matrix_workers": workers,
+                    })
+                    rows.append(result)
+                    print(
+                        f"{dataset_mode:>12} {compile_mode:>10} workers={workers:<2} "
+                        f"run={run_index:<2} "
+                        f"steady={result.get('reported_samples_per_sec', 0.0):.1f}/s "
+                        f"e2e={result.get('end_to_end_wall_time_s', result['wall_time_s']):.2f}s"
+                    )
+
+    summary = summarize_rows(rows)
+    if summary["best_reported"]:
+        print("Best steady:", _format_summary_row(summary["best_reported"]))
+    if summary["best_end_to_end"]:
+        print("Best end-to-end:", _format_summary_row(summary["best_end_to_end"]))
+
+    if args.json_out:
+        out_path = Path(args.json_out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with out_path.open("w") as handle:
+            json.dump(rows, handle, indent=2)
+        print(f"Wrote matrix results to {out_path}")
+    if args.summary_out:
+        out_path = Path(args.summary_out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with out_path.open("w") as handle:
+            json.dump(summary, handle, indent=2)
+        print(f"Wrote matrix summary to {out_path}")
+
+
+if __name__ == "__main__":
+    main()

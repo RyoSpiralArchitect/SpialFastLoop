@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """Operational metrics helpers for monitoring training internals."""
 
 from __future__ import annotations

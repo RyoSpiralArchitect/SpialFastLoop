@@ -51,6 +51,11 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# Benchmark/report outputs
+.benchmarks/
+reports/
+bench_*.json
+
 # Translations
 *.mo
 *.pot

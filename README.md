@@ -103,7 +103,7 @@ HF demo:
 python examples/sr_generate_demo.py
 ```
 
-## Benchmarks 
+## Benchmarks
 | Device | Baseline (plain loop) | SpiralFastLoop | Speedup |
 |-------:|-----------------------:|---------------:|--------:|
 | GTX 1650 (CUDA) | 450 samples/s | 610 samples/s | 1.35× |
@@ -124,8 +124,27 @@ python scripts/bench_parallel_transactions.py \
   --warmup-steps 4 --no-compile \
   --collect-profile --profile-model --profile-model-depth 1 \
   --profile-model-include 0,2 \
-  --json-out reports/bench_parallel_profile.json
+  --json-out reports/bench_parallel_profile.json \
+  --summary-out reports/bench_parallel_profile_summary.json
 ```
+
+The transactional benchmark reports training-only `wall_time_s`, separate
+`setup_time_s`, combined `end_to_end_wall_time_s`, and
+`dataset_materialized_bytes` so materialized-data runs remain transparent.
+Use `--summary-out` to capture mean/min/max/stddev timing and throughput
+stats across repeated runs.
+
+Run a compact comparison matrix:
+```bash
+python scripts/bench_matrix.py \
+  --device cpu --steps 16 --runs 1 --worker-counts 0 \
+  --dataset-modes generated,materialized \
+  --compile-modes no-compile \
+  --json-out reports/bench_matrix.json \
+  --summary-out reports/bench_matrix_summary.json
+```
+Matrix summaries include per-config means, min/max values, stddev, best steady
+throughput, and best end-to-end configuration.
 
 Drill into ResNet blocks:
 ```bash

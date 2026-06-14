@@ -2,8 +2,8 @@
 
 ## Setup
 ```bash
-git clone https://github.com/your-user/SpiralFastLoop.git
-cd SpiralFastLoop
+git clone https://github.com/RyoSpiralArchitect/SpialFastLoop.git
+cd SpialFastLoop/SpiralFastLoop
 pip install -e .
 ```
 

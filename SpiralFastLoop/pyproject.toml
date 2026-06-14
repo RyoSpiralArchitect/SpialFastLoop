@@ -8,13 +8,13 @@ version = "0.1.1"
 description = "Fast, pragmatic training loop template for PyTorch (CUDA/MPS/CPU) with Surprisal Sandwich decoding extras."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "Ryō" }]
 dependencies = ["torch>=2.1"]
 keywords = ["pytorch", "training", "cuda", "mps", "acceleration", "llm", "transformers"]
 classifiers = [
   "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT License",
+  "License :: OSI Approved :: Apache Software License",
   "Operating System :: OS Independent",
   "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
@@ -23,13 +23,14 @@ classifiers = [
 extras = ["transformers>=4.40"]
 dev = [
   "pytest>=8.0",
+  "hypothesis>=6.0",
   "mypy>=1.9,<2.0",
   "flake8>=7.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-user/SpiralFastLoop"
-Repository = "https://github.com/your-user/SpiralFastLoop"
+Homepage = "https://github.com/RyoSpiralArchitect/SpialFastLoop"
+Repository = "https://github.com/RyoSpiralArchitect/SpialFastLoop"
 
 [tool.mypy]
 python_version = "3.9"
@@ -42,10 +43,6 @@ warn_unused_configs = true
 warn_unused_ignores = true
 strict_equality = true
 allow_redefinition = false
-
-[[tool.mypy.overrides]]
-module = ["tests.*"]
-ignore_errors = true
 
 [[tool.mypy.overrides]]
 module = ["transformers", "transformers.*"]

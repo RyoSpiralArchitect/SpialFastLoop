@@ -21,6 +21,13 @@ from torch.utils.data.dataset import Dataset
 SampleWindow = Union[deque[float], Tuple[()], list[float]]
 
 
+@dataclass(frozen=True)
+class CompileResult:
+    model: nn.Module
+    compiled: bool
+    fallback_reason: str = ""
+
+
 def get_best_device() -> str:
     """Pick the best available device among CUDA, MPS, CPU."""
     if torch.cuda.is_available():
@@ -160,6 +167,24 @@ def to_device(obj: Any, device: str, non_blocking: bool = True) -> Any:
         return mapping_type(converted_mapping)
     return obj
 
+
+def _torch_default_device() -> Any:
+    get_default_device = getattr(torch, "get_default_device", None)
+    if get_default_device is None:
+        return "cpu"
+    return get_default_device()
+
+
+def _seeded_dataloader_generator(seed: int) -> torch.Generator:
+    default_device = _torch_default_device()
+    try:
+        generator = torch.Generator(device=default_device)
+    except (RuntimeError, TypeError):
+        generator = torch.Generator()
+    generator.manual_seed(int(seed))
+    return generator
+
+
 def dataloader_from_dataset(
     dataset: Dataset[Any],
     batch_size: int,
@@ -199,8 +224,10 @@ def dataloader_from_dataset(
                 drop_last=drop_last,
             )
             shuffle = False
+    generator = _seeded_dataloader_generator(seed)
     loader_kwargs: Dict[str, Any] = {
         "batch_size": batch_size,
+        "generator": generator,
         "shuffle": shuffle,
         "sampler": sampler,
         "num_workers": workers,
@@ -243,16 +270,29 @@ class _PSquareQuantile:
         self._np: Optional[list[float]] = None
         self._dn: Optional[list[float]] = None
 
-    def add(self, value: float) -> None:
-        if not math.isfinite(value):
-            return
-
+    def _state(self) -> Optional[tuple[list[float], list[int], list[float], list[float]]]:
         q_values = self._q
         positions = self._n
         desired = self._np
         increments = self._dn
-
+        if q_values is None and positions is None and desired is None and increments is None:
+            return None
         if q_values is None or positions is None or desired is None or increments is None:
+            raise RuntimeError("P² quantile estimator state is inconsistent.")
+        return q_values, positions, desired, increments
+
+    def _initialized_state(self) -> tuple[list[float], list[int], list[float], list[float]]:
+        state = self._state()
+        if state is None:
+            raise RuntimeError("P² quantile estimator is not initialized.")
+        return state
+
+    def add(self, value: float) -> None:
+        if not math.isfinite(value):
+            return
+
+        state = self._state()
+        if state is None:
             initial = self._initial
             initial.append(float(value))
             if len(initial) == 5:
@@ -270,8 +310,7 @@ class _PSquareQuantile:
                 increments = [0.0, q / 2.0, q, (1.0 + q) / 2.0, 1.0]
                 self._q, self._n, self._np, self._dn = q_values, positions, desired, increments
             return
-
-        assert positions is not None and desired is not None and increments is not None
+        q_values, positions, desired, increments = state
 
         if value < q_values[0]:
             q_values[0] = float(value)
@@ -316,9 +355,7 @@ class _PSquareQuantile:
         return float(ordered[index])
 
     def _parabolic_update(self, idx: int, step: int) -> float:
-        assert self._q is not None and self._n is not None
-        q_values = self._q
-        positions = self._n
+        q_values, positions, _, _ = self._initialized_state()
         numerator = step * (
             (positions[idx] - positions[idx - 1] + step) * (q_values[idx + 1] - q_values[idx]) / (positions[idx + 1] - positions[idx])
             + (positions[idx + 1] - positions[idx] - step) * (q_values[idx] - q_values[idx - 1]) / (positions[idx] - positions[idx - 1])
@@ -329,9 +366,7 @@ class _PSquareQuantile:
         return q_values[idx] + numerator / denominator
 
     def _linear_update(self, idx: int, step: int) -> float:
-        assert self._q is not None and self._n is not None
-        q_values = self._q
-        positions = self._n
+        q_values, positions, _, _ = self._initialized_state()
         neighbour = idx + step
         denominator = positions[neighbour] - positions[idx]
         if denominator == 0:
@@ -945,12 +980,36 @@ def maybe_channels_last(model: nn.Module, channels_last: bool = False) -> nn.Mod
 
 def safe_compile(model: nn.Module, mode: str = "reduce-overhead") -> Tuple[nn.Module, bool]:
     """Compile model if torch.compile exists and succeeds."""
+    result = safe_compile_with_diagnostics(model, mode=mode)
+    return result.model, result.compiled
+
+
+def _format_compile_exception(exc: Exception) -> str:
+    message = str(exc).strip()
+    if len(message) > 200:
+        message = f"{message[:197]}..."
+    if message:
+        return f"{type(exc).__name__}: {message}"
+    return type(exc).__name__
+
+
+def safe_compile_with_diagnostics(model: nn.Module, mode: str = "reduce-overhead") -> CompileResult:
+    """Compile model if possible and keep a compact fallback reason."""
     compile_fn = getattr(torch, "compile", None)
     if compile_fn is None:
-        return model, False
+        return CompileResult(model=model, compiled=False, fallback_reason="torch_compile_unavailable")
     try:
         m = compile_fn(model, mode=mode)
-        assert isinstance(m, nn.Module)
-        return m, True
-    except Exception:
-        return model, False
+        if isinstance(m, nn.Module):
+            return CompileResult(model=m, compiled=True)
+        return CompileResult(
+            model=model,
+            compiled=False,
+            fallback_reason=f"non_module_result:{type(m).__name__}",
+        )
+    except Exception as exc:
+        return CompileResult(
+            model=model,
+            compiled=False,
+            fallback_reason=_format_compile_exception(exc),
+        )

@@ -8,7 +8,7 @@ authors:
     affiliation: ""
     orcid: ""
 identifiers: []
-repository-code: "https://github.com/your-user/SpiralFastLoop"
-license: MIT
+repository-code: "https://github.com/RyoSpiralArchitect/SpialFastLoop"
+license: Apache-2.0
 version: "0.1.1"
 date-released: "2025-09-18"

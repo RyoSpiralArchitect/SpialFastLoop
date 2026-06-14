@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """Numerical helpers for bias-resistant floating-point accumulation.
 
 This module exposes a small accumulator that fuses two stability techniques

@@ -1,11 +1,25 @@
+from __future__ import annotations
+
+import argparse
 import sys
+from argparse import Namespace
 from pathlib import Path
 
+import pytest
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.bench_parallel_transactions import SyntheticTransactionDataset
+from scripts.bench_parallel_transactions import (
+    SyntheticTransactionDataset,
+    non_negative_int_arg,
+    positive_float_arg,
+    positive_int_arg,
+    run_once,
+    summarize_metric,
+    summarize_results,
+    validate_benchmark_args,
+)
 
 
 def test_materialized_transaction_dataset_matches_shape_and_is_stable() -> None:
@@ -18,6 +32,7 @@ def test_materialized_transaction_dataset_matches_shape_and_is_stable() -> None:
     assert target_a.shape == ()
     assert torch.equal(features_a, features_b)
     assert torch.equal(target_a, target_b)
+    assert dataset.materialized_bytes == (8 * 4 * 4) + (8 * 8)
 
 
 def test_generated_transaction_dataset_is_index_deterministic() -> None:
@@ -28,3 +43,163 @@ def test_generated_transaction_dataset_is_index_deterministic() -> None:
 
     assert torch.equal(features_a, features_b)
     assert torch.equal(target_a, target_b)
+    assert dataset.materialized_bytes == 0
+
+
+def test_transaction_dataset_ignores_global_default_device() -> None:
+    if not hasattr(torch, "set_default_device"):
+        pytest.skip("torch.set_default_device is not available")
+    previous_device = torch.get_default_device() if hasattr(torch, "get_default_device") else "cpu"
+    torch.set_default_device("meta")
+    try:
+        materialized = SyntheticTransactionDataset(4, 2, 2, seed=123, materialized=True)
+        generated = SyntheticTransactionDataset(4, 2, 2, seed=123, materialized=False)
+
+        materialized_features, materialized_target = materialized[0]
+        generated_features, generated_target = generated[0]
+
+        assert materialized_features.device.type == "cpu"
+        assert materialized_target.device.type == "cpu"
+        assert generated_features.device.type == "cpu"
+        assert generated_target.device.type == "cpu"
+    finally:
+        torch.set_default_device(previous_device)
+
+
+def test_transaction_dataset_rejects_invalid_shapes() -> None:
+    for kwargs in (
+        {"size": -1, "features": 4, "classes": 3},
+        {"size": 8, "features": 0, "classes": 3},
+        {"size": 8, "features": 4, "classes": 0},
+    ):
+        with pytest.raises(ValueError):
+            SyntheticTransactionDataset(**kwargs)
+
+
+def test_transaction_dataset_bounds_indices_consistently() -> None:
+    dataset = SyntheticTransactionDataset(8, 4, 3, seed=123, materialized=True)
+
+    last_features, last_target = dataset[-1]
+    direct_features, direct_target = dataset[7]
+
+    assert torch.equal(last_features, direct_features)
+    assert torch.equal(last_target, direct_target)
+
+    for index in (-9, 8):
+        with pytest.raises(IndexError):
+            dataset[index]
+
+
+def test_summarize_metric_reports_distribution() -> None:
+    rows = [
+        {"samples_per_sec": 100.0},
+        {"samples_per_sec": 300.0},
+    ]
+
+    stats = summarize_metric(rows, "samples_per_sec")
+
+    assert stats["mean"] == pytest.approx(200.0)
+    assert stats["min"] == pytest.approx(100.0)
+    assert stats["max"] == pytest.approx(300.0)
+    assert stats["stddev"] == pytest.approx(100.0)
+
+
+def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
+    rows = [
+        {
+            "run": 0,
+            "seed": 10,
+            "dataset_mode": "generated",
+            "samples_per_sec": 90.0,
+            "steady_samples_per_sec": 110.0,
+            "wall_time_s": 2.0,
+            "setup_time_s": 1.0,
+        },
+        {
+            "run": 1,
+            "seed": 11,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 200.0,
+            "samples_per_sec": 160.0,
+            "steady_samples_per_sec": 200.0,
+            "wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "end_to_end_wall_time_s": 1.25,
+        },
+    ]
+
+    summary = summarize_results(rows)
+
+    assert summary["runs"] == 2
+    assert summary["mean_reported_samples_per_sec"] == pytest.approx(155.0)
+    assert summary["min_end_to_end_wall_time_s"] == pytest.approx(1.25)
+    assert summary["max_end_to_end_wall_time_s"] == pytest.approx(2.0)
+    assert summary["stddev_wall_time_s"] == pytest.approx(0.5)
+    assert summary["best_reported"]["run"] == 1
+    assert summary["best_end_to_end"]["run"] == 1
+
+
+def test_summarize_results_handles_empty_input() -> None:
+    summary = summarize_results([])
+
+    assert summary["runs"] == 0
+    assert summary["best_reported"] is None
+    assert summary["best_end_to_end"] is None
+    assert summary["mean_wall_time_s"] == pytest.approx(0.0)
+    assert summary["stddev_wall_time_s"] == pytest.approx(0.0)
+
+
+def test_benchmark_arg_types_reject_empty_or_invalid_runs() -> None:
+    assert positive_int_arg("1") == 1
+    assert non_negative_int_arg("0") == 0
+    assert positive_float_arg("0.25") == pytest.approx(0.25)
+
+    for parser in (positive_int_arg, positive_float_arg):
+        with pytest.raises(argparse.ArgumentTypeError):
+            parser("0")
+    with pytest.raises(argparse.ArgumentTypeError):
+        non_negative_int_arg("-1")
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_int_arg("1.5")
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_float_arg("nan")
+
+
+def test_validate_benchmark_args_rejects_warmup_larger_than_steps() -> None:
+    with pytest.raises(ValueError, match="warmup-steps"):
+        validate_benchmark_args(Namespace(warmup_steps=3, steps=2))
+
+    validate_benchmark_args(Namespace(warmup_steps=2, steps=2))
+
+
+def test_transaction_benchmark_records_run_seed() -> None:
+    class Args:
+        transactions = 64
+        feature_dim = 8
+        num_classes = 3
+        seed = 100
+        dataset_mode = "materialized"
+        batch_size = 16
+        device = "cpu"
+        workers = 0
+        prefetch_factor = 2
+        learning_rate = 3e-4
+        compile = False
+        grad_accum = 2
+        log_interval = 0
+        steps = 2
+        collect_profile = False
+        profile_sync = False
+        profile_distribution = True
+        profile_window = 16
+        profile_model = False
+        profile_model_depth = 1
+        profile_model_max_modules = 8
+        profile_model_include = None
+        warmup_steps = 0
+
+    result = run_once(Args, 3).as_dict()
+
+    assert result["seed"] == 103
+    assert result["dataset_mode"] == "materialized"
+    assert result["dataset_materialized_bytes"] == (64 * 8 * 4) + (64 * 8)

@@ -26,7 +26,7 @@ from .utils import (
     get_best_device,
     init_distributed,
     maybe_channels_last,
-    safe_compile,
+    safe_compile_with_diagnostics,
     to_device,
 )
 from .logging_utils import MetricsLogger
@@ -254,10 +254,18 @@ class FastTrainer:
         # torch.compile best-effort (skip CPU)
         self.compiled = False
         self.compile_init_time_s = 0.0
+        self.compile_fallback_reason = ""
         if self.compile_requested and self.device != "cpu":
             compile_started_at = time.perf_counter()
-            self.model, self.compiled = safe_compile(self.model, mode=compile_mode)
+            compile_result = safe_compile_with_diagnostics(self.model, mode=compile_mode)
+            self.model = compile_result.model
+            self.compiled = compile_result.compiled
+            self.compile_fallback_reason = compile_result.fallback_reason
             self.compile_init_time_s = time.perf_counter() - compile_started_at
+        elif self.compile_requested:
+            self.compile_fallback_reason = "cpu_device"
+        else:
+            self.compile_fallback_reason = "not_requested"
 
         # DDP wrap if requested and initialized
         self.using_ddp = False
@@ -817,6 +825,7 @@ class FastTrainer:
         metrics["compile_requested"] = self.compile_requested
         metrics["compiled"] = self.compiled
         metrics["compile_init_time_s"] = self.compile_init_time_s
+        metrics["compile_fallback_reason"] = self.compile_fallback_reason
         metrics["device"] = self.device
         metrics["world_size"] = self.dist_ctx.world_size
         metrics["rank"] = self.dist_ctx.rank
