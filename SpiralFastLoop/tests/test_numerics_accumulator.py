@@ -120,6 +120,54 @@ def test_add_rejects_invalid_values_before_mutating_state(value: object) -> None
     assert acc.snapshot() == snapshot
 
 
+def test_extend_rejects_non_iterable_values_before_mutating_state() -> None:
+    acc = HybridCompensatedAccumulator(unit=0.01, rng=random.Random(13))
+    acc.add(0.25)
+    snapshot = acc.snapshot()
+
+    with pytest.raises(ValueError, match="values"):
+        acc.extend(object())  # type: ignore[arg-type]
+
+    assert acc.snapshot() == snapshot
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [0.05, float("nan")],
+        [0.05, float("inf")],
+        [0.05, True],
+        [0.05, "0.1"],
+        [0.05, b"0.1"],
+        [0.05, object()],
+    ],
+)
+def test_extend_rejects_invalid_items_without_mutating_state(values: list[object]) -> None:
+    acc = HybridCompensatedAccumulator(unit=0.01, rng=random.Random(14))
+    acc.add(0.25)
+    snapshot = acc.snapshot()
+
+    with pytest.raises(ValueError, match="value"):
+        acc.extend(values)  # type: ignore[arg-type]
+
+    assert acc.snapshot() == snapshot
+
+
+def test_extend_rolls_back_when_iterator_raises_mid_stream() -> None:
+    def values():
+        yield 0.05
+        raise RuntimeError("stream boom")
+
+    acc = HybridCompensatedAccumulator(unit=0.01, rng=random.Random(15))
+    acc.add(0.25)
+    snapshot = acc.snapshot()
+
+    with pytest.raises(RuntimeError, match="stream boom"):
+        acc.extend(values())
+
+    assert acc.snapshot() == snapshot
+
+
 @pytest.mark.parametrize(
     "total, compensation, field",
     [

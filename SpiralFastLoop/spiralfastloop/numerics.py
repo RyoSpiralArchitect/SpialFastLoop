@@ -158,8 +158,18 @@ class HybridCompensatedAccumulator:
     def extend(self, values: Iterable[float]) -> None:
         """Add multiple values into the accumulator."""
 
-        for value in values:
-            self.add(value)
+        try:
+            iterator = iter(values)
+        except TypeError as exc:
+            raise ValueError("values must be an iterable of finite floats") from exc
+
+        snapshot = self.snapshot()
+        try:
+            for value in iterator:
+                self.add(value)
+        except Exception:
+            self.restore(*snapshot)
+            raise
 
     # ------------------------------------------------------------------
     # Accessors
