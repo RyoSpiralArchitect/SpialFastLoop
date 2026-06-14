@@ -88,8 +88,9 @@ def run_once(args, run_index: int) -> BenchmarkResult:
         optimizer,
         scheduler=None,
         device=args.device,
+        use_compile=args.compile,
         grad_accum=args.grad_accum,
-        log_interval=max(1, args.steps // 5),
+        log_interval=args.log_interval,
     )
 
     start = time.perf_counter()
@@ -127,6 +128,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prefetch-factor", type=int, default=4, help="Prefetch factor passed to the dataloader.")
     parser.add_argument("--device", type=str, default="auto", help="Device override (auto/cuda/mps/cpu).")
     parser.add_argument("--steps", type=int, default=200, help="Number of training steps per run.")
+    parser.add_argument("--log-interval", type=int, default=0, help="Step log interval; 0 disables step logs.")
+    parser.add_argument(
+        "--no-compile",
+        dest="compile",
+        action="store_false",
+        help="Disable torch.compile for lower cold-start cost.",
+    )
     parser.add_argument(
         "--warmup-steps",
         type=int,

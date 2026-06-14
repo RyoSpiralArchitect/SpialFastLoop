@@ -201,6 +201,7 @@ class FastTrainer:
         *,
         device: Optional[str] = None,
         use_amp: AmpSetting = "auto",
+        use_compile: bool = True,
         compile_mode: str = "reduce-overhead",
         grad_accum: int = 1,
         channels_last: bool = False,
@@ -236,11 +237,12 @@ class FastTrainer:
         self.scheduler = scheduler
         self.grad_accum = max(1, int(grad_accum))
         self.clip_grad_norm = clip_grad_norm
-        self.log_interval = max(1, int(log_interval))
+        self.log_interval = max(0, int(log_interval))
         self.trigger_hook = trigger_hook
         self.logger = logger
         self.log_on_rank0 = log_on_rank0
         self.meter_fast_mode = bool(meter_fast_mode)
+        self.compile_requested = bool(use_compile)
 
         # AMP policy
         self.amp_enabled, self.amp_dtype, use_scaler = get_amp_policy(self.device, use_amp)
@@ -252,7 +254,7 @@ class FastTrainer:
         # torch.compile best-effort (skip CPU)
         self.compiled = False
         self.compile_init_time_s = 0.0
-        if self.device != "cpu":
+        if self.compile_requested and self.device != "cpu":
             compile_started_at = time.perf_counter()
             self.model, self.compiled = safe_compile(self.model, mode=compile_mode)
             self.compile_init_time_s = time.perf_counter() - compile_started_at
@@ -717,7 +719,7 @@ class FastTrainer:
                 steady_recorded_steps += 1
             profiler.stop("metrics")
 
-            if (step_idx % self.log_interval) == 0:
+            if self.log_interval > 0 and (step_idx % self.log_interval) == 0:
                 m = meter.summary()
                 steady_m = steady_meter.summary()
                 weight_value = total_weight.item()
@@ -812,6 +814,7 @@ class FastTrainer:
             steady_summary["samples_per_sec"] if steady_recorded_steps > 0 else metrics["samples_per_sec"]
         )
         metrics["amp"] = self.amp_enabled
+        metrics["compile_requested"] = self.compile_requested
         metrics["compiled"] = self.compiled
         metrics["compile_init_time_s"] = self.compile_init_time_s
         metrics["device"] = self.device
@@ -903,7 +906,7 @@ class FastTrainer:
                         metric_sums[key] = metric_sums.get(key, 0.0) + metric_value * batch_size
                         metric_weights[key] = metric_weights.get(key, 0.0) + batch_size
 
-                if (step_idx % self.log_interval) == 0:
+                if self.log_interval > 0 and (step_idx % self.log_interval) == 0:
                     m = meter.summary()
                     self._log_metrics(
                         "eval",

@@ -54,6 +54,8 @@ def parse_args():
     parser.add_argument("--steps", type=int, default=200)
     parser.add_argument("--warmup-steps", type=int, default=0)
     parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument("--log-interval", type=int, default=0)
+    parser.add_argument("--no-compile", dest="compile", action="store_false")
     parser.add_argument("--collect-profile", action="store_true")
     return parser.parse_args()
 
@@ -79,7 +81,15 @@ def main():
         persistent=args.workers > 0,
     )
     m1 = MLP(d=args.feature_dim, C=args.classes); o1 = torch.optim.AdamW(m1.parameters(), lr=3e-4, fused=torch.cuda.is_available())
-    trainer = FastTrainer(m1, o1, device=str(device), grad_accum=2, channels_last=False, log_interval=args.steps + 1)
+    trainer = FastTrainer(
+        m1,
+        o1,
+        device=str(device),
+        use_compile=args.compile,
+        grad_accum=2,
+        channels_last=False,
+        log_interval=args.log_interval,
+    )
     fast = trainer.train_one_epoch(
         loader1,
         crit,
