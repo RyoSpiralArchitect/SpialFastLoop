@@ -144,9 +144,9 @@ def _best_finite_row(
 ) -> Optional[dict]:
     candidates = []
     for row in rows:
-        if sample_count_field is not None:
+        if sample_count_field is not None and sample_count_field in row:
             sample_count = _finite_metric_value(row, sample_count_field)
-            if sample_count == 0.0:
+            if sample_count is None or sample_count <= 0.0:
                 continue
         value = _finite_metric_value(row, field)
         if value is None:

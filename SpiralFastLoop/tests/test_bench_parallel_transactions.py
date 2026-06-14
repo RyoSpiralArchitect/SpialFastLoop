@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.bench_parallel_transactions import (
     SyntheticTransactionDataset,
+    _best_finite_row,
     non_negative_int_arg,
     parse_args,
     positive_float_arg,
@@ -384,6 +385,40 @@ def test_summarize_results_omits_non_finite_best_run_fields() -> None:
     assert "profile_forward_backward_pct" not in summary["best_reported"]
     assert "profile_backward_pct" not in summary["best_reported"]
     json.dumps(summary, allow_nan=False)
+
+
+def test_best_finite_row_requires_positive_sample_count() -> None:
+    rows = [
+        {"run": 0, "mean_score": 300.0, "sample_count_score": float("nan")},
+        {"run": 1, "mean_score": 250.0, "sample_count_score": -1.0},
+        {"run": 2, "mean_score": 200.0, "sample_count_score": 0.0},
+        {"run": 3, "mean_score": 150.0, "sample_count_score": 2.0},
+    ]
+
+    best = _best_finite_row(
+        rows,
+        "mean_score",
+        prefer_high=True,
+        sample_count_field="sample_count_score",
+    )
+
+    assert best == rows[3]
+
+
+def test_best_finite_row_keeps_rows_without_sample_count_field() -> None:
+    rows = [
+        {"run": 0, "mean_score": 100.0},
+        {"run": 1, "mean_score": 150.0, "sample_count_score": 0.0},
+    ]
+
+    best = _best_finite_row(
+        rows,
+        "mean_score",
+        prefer_high=True,
+        sample_count_field="sample_count_score",
+    )
+
+    assert best == rows[0]
 
 
 def test_benchmark_arg_types_reject_empty_or_invalid_runs() -> None:
