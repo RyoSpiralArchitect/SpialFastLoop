@@ -107,6 +107,12 @@ def _device_type(device: str) -> str:
     return device.split(":", 1)[0]
 
 
+def _bool_setting(value: Any, name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"{name} must be a boolean")
+
+
 def _int_setting(value: Any, name: str) -> int:
     if isinstance(value, bool):
         raise ValueError(f"{name} must be an integer")
@@ -513,19 +519,28 @@ class ThroughputMeter:
         track_window: bool = True,
         fast_mode: bool = False,
     ) -> None:
-        if fast_mode:
-            track_distribution = False
-            track_window = False
-            smoothing = None
-        if smoothing is not None:
-            if not (0.0 < smoothing <= 1.0):
+        fast_mode_value = _bool_setting(fast_mode, "fast_mode")
+        if fast_mode_value:
+            track_distribution_value = False
+            track_window_value = False
+            smoothing_value = None
+        else:
+            track_distribution_value = _bool_setting(
+                track_distribution,
+                "track_distribution",
+            )
+            track_window_value = _bool_setting(track_window, "track_window")
+            smoothing_value = None
+            if smoothing is not None:
+                smoothing_value = _finite_float_setting(smoothing, "smoothing")
+            if smoothing_value is not None and not (0.0 < smoothing_value <= 1.0):
                 raise ValueError("smoothing must be in the interval (0, 1].")
         window_int = _non_negative_int_setting(window, "window")
-        self._track_distribution = bool(track_distribution)
-        self._track_window = bool(track_window)
-        self._fast_mode = bool(fast_mode)
+        self._track_distribution = track_distribution_value
+        self._track_window = track_window_value
+        self._fast_mode = fast_mode_value
         self._time_fn: Callable[[], float] = time_fn or time.perf_counter
-        self._smoothing = smoothing
+        self._smoothing = smoothing_value
         self._window_limit = window_int if self._track_window else 0
         self._window_records: deque[tuple[float, int]] = deque()
         self._window_duration = 0.0
@@ -745,10 +760,10 @@ class PhaseProfiler:
         track_distribution: bool = True,
         window: int = 512,
     ) -> None:
-        self.enabled = bool(enabled)
+        self.enabled = _bool_setting(enabled, "enabled")
         self.device = device
-        self.sync = bool(sync)
-        self.track_distribution = bool(track_distribution)
+        self.sync = _bool_setting(sync, "sync")
+        self.track_distribution = _bool_setting(track_distribution, "track_distribution")
         self.window = _positive_int_setting(window, "window")
         self.totals: Dict[str, float] = {}
         self.calls: Dict[str, int] = {}

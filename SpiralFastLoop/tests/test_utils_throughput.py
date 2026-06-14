@@ -99,6 +99,29 @@ def test_throughput_meter_rejects_invalid_window_values(window):
         ThroughputMeter(window=window)
 
 
+@pytest.mark.parametrize("smoothing", [0.0, -0.1, 1.1, float("nan"), True, "bad"])
+def test_throughput_meter_rejects_invalid_smoothing_values(smoothing):
+    with pytest.raises(ValueError, match="smoothing"):
+        ThroughputMeter(smoothing=smoothing)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "field"),
+    [
+        ({"track_distribution": 1}, "track_distribution"),
+        ({"track_distribution": "false"}, "track_distribution"),
+        ({"track_distribution": None}, "track_distribution"),
+        ({"track_window": 0}, "track_window"),
+        ({"track_window": "false"}, "track_window"),
+        ({"fast_mode": 1}, "fast_mode"),
+        ({"fast_mode": "true"}, "fast_mode"),
+    ],
+)
+def test_throughput_meter_rejects_invalid_boolean_settings(kwargs, field):
+    with pytest.raises(ValueError, match=field):
+        ThroughputMeter(**kwargs)
+
+
 def test_throughput_meter_reset_clears_state():
     meter = ThroughputMeter()
     meter.record(0.1, 8)

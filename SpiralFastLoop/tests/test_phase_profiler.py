@@ -31,6 +31,25 @@ def test_phase_profiler_rejects_invalid_window_values(window: object) -> None:
         PhaseProfiler(enabled=True, window=window)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "field"),
+    [
+        ({"enabled": 1}, "enabled"),
+        ({"enabled": "true"}, "enabled"),
+        ({"sync": 0}, "sync"),
+        ({"sync": "false"}, "sync"),
+        ({"track_distribution": 1}, "track_distribution"),
+        ({"track_distribution": "false"}, "track_distribution"),
+    ],
+)
+def test_phase_profiler_rejects_invalid_boolean_settings(
+    kwargs: dict[str, object],
+    field: str,
+) -> None:
+    with pytest.raises(ValueError, match=field):
+        PhaseProfiler(**kwargs)  # type: ignore[arg-type]
+
+
 def test_phase_profiler_respects_exact_distribution_window() -> None:
     profiler = PhaseProfiler(enabled=True, window=1)
 
