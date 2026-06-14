@@ -831,26 +831,12 @@ def test_evaluate_rejects_invalid_metrics_fn_before_loop() -> None:
 
 
 def test_evaluate_logs_metrics_fn_failures_before_reraising() -> None:
-    class CapturingLogger:
-        def __init__(self) -> None:
-            self.rows: list[tuple[str, dict[str, object], str]] = []
-
-        def log_metrics(
-            self,
-            stage: str,
-            metrics: dict[str, object],
-            *,
-            mode: str = "step",
-            **_: object,
-        ) -> None:
-            self.rows.append((stage, metrics, mode))
-
     inputs = torch.randn(2, 4)
     targets = torch.randint(0, 3, (2,))
     loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
     model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
-    logger = CapturingLogger()
+    logger = _CapturingLogger()
     trainer = FastTrainer(
         model,
         optimizer,
@@ -890,20 +876,6 @@ def test_evaluate_logs_metrics_fn_failures_before_reraising() -> None:
 
 
 def test_evaluate_logs_forward_failures_before_reraising() -> None:
-    class CapturingLogger:
-        def __init__(self) -> None:
-            self.rows: list[tuple[str, dict[str, object], str]] = []
-
-        def log_metrics(
-            self,
-            stage: str,
-            metrics: dict[str, object],
-            *,
-            mode: str = "step",
-            **_: object,
-        ) -> None:
-            self.rows.append((stage, metrics, mode))
-
     class FailingModel(nn.Module):
         def __init__(self) -> None:
             super().__init__()
@@ -917,7 +889,7 @@ def test_evaluate_logs_forward_failures_before_reraising() -> None:
     loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
     model = FailingModel()
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
-    logger = CapturingLogger()
+    logger = _CapturingLogger()
     trainer = FastTrainer(
         model,
         optimizer,
@@ -1072,26 +1044,12 @@ def test_predict_can_return_metrics_and_phase_profile() -> None:
 
 
 def test_predict_logs_postprocess_failures_before_reraising() -> None:
-    class CapturingLogger:
-        def __init__(self) -> None:
-            self.rows: list[tuple[str, dict[str, object], str]] = []
-
-        def log_metrics(
-            self,
-            stage: str,
-            metrics: dict[str, object],
-            *,
-            mode: str = "step",
-            **_: object,
-        ) -> None:
-            self.rows.append((stage, metrics, mode))
-
     inputs = torch.randn(2, 4)
     targets = torch.zeros(2)
     loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
     model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 2))
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
-    logger = CapturingLogger()
+    logger = _CapturingLogger()
     trainer = FastTrainer(
         model,
         optimizer,
@@ -1125,20 +1083,6 @@ def test_predict_logs_postprocess_failures_before_reraising() -> None:
 
 
 def test_predict_logs_forward_failures_before_reraising() -> None:
-    class CapturingLogger:
-        def __init__(self) -> None:
-            self.rows: list[tuple[str, dict[str, object], str]] = []
-
-        def log_metrics(
-            self,
-            stage: str,
-            metrics: dict[str, object],
-            *,
-            mode: str = "step",
-            **_: object,
-        ) -> None:
-            self.rows.append((stage, metrics, mode))
-
     class FailingModel(nn.Module):
         def __init__(self) -> None:
             super().__init__()
@@ -1152,7 +1096,7 @@ def test_predict_logs_forward_failures_before_reraising() -> None:
     loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
     model = FailingModel()
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
-    logger = CapturingLogger()
+    logger = _CapturingLogger()
     trainer = FastTrainer(
         model,
         optimizer,
@@ -1442,20 +1386,6 @@ def test_train_one_epoch_cleans_profile_phase_when_loader_fails(
 def test_train_one_epoch_cleans_profile_phase_when_forward_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class CapturingLogger:
-        def __init__(self) -> None:
-            self.rows: list[tuple[str, dict[str, object], str]] = []
-
-        def log_metrics(
-            self,
-            stage: str,
-            metrics: dict[str, object],
-            *,
-            mode: str = "step",
-            **_: object,
-        ) -> None:
-            self.rows.append((stage, metrics, mode))
-
     class FailingModel(nn.Module):
         def __init__(self) -> None:
             super().__init__()
@@ -1470,7 +1400,7 @@ def test_train_one_epoch_cleans_profile_phase_when_forward_fails(
     loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
     model = FailingModel()
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
-    logger = CapturingLogger()
+    logger = _CapturingLogger()
     trainer = FastTrainer(
         model,
         optimizer,
