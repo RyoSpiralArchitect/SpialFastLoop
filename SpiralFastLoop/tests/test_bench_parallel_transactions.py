@@ -31,7 +31,7 @@ from scripts.bench_parallel_transactions import (
     summarize_results,
     validate_benchmark_args,
 )
-from scripts.json_utils import dump_json
+from scripts.json_utils import dump_json, dumps_json
 
 
 def test_materialized_transaction_dataset_matches_shape_and_is_stable() -> None:
@@ -218,6 +218,24 @@ def test_dump_json_converts_non_finite_values_to_null() -> None:
             "history": [1.0, None],
         },
     ]
+
+
+def test_dumps_json_normalizes_artifact_payload_values() -> None:
+    payload = {
+        "scalar_tensor": torch.tensor(float("nan")),
+        "vector_tensor": torch.tensor([1.0, float("inf")]),
+        "path": Path("artifacts") / "summary.json",
+        "tags": {"beta", "alpha"},
+        ("tuple", "key"): "value",
+    }
+
+    normalized = json.loads(dumps_json(payload))
+
+    assert normalized["scalar_tensor"] is None
+    assert normalized["vector_tensor"] == [1.0, None]
+    assert normalized["path"] == "artifacts/summary.json"
+    assert normalized["tags"] == ["alpha", "beta"]
+    assert normalized["['tuple', 'key']"] == "value"
 
 
 def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
