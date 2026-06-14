@@ -123,3 +123,31 @@ def test_metrics_logger_writes_nested_csv_values_as_json_strings(tmp_path) -> No
     assert json.loads(row["vector"]) == [1.0, None]
     assert json.loads(row["nested"]) == {"tags": ["alpha", "beta"]}
     assert row["path"] == "artifacts/metrics.csv"
+
+
+def test_metrics_logger_extends_csv_fields_for_new_metrics(tmp_path) -> None:
+    logger = logging.getLogger("spiralfastloop.test.csv_extend")
+    logger.handlers.clear()
+    logger.addHandler(logging.NullHandler())
+    logger.propagate = False
+    csv_path = tmp_path / "metrics.csv"
+
+    first_logger = MetricsLogger(logger=logger, csv_path=str(csv_path))
+    first_logger.log_metrics("train", {"loss": 1.0}, step=0)
+
+    second_logger = MetricsLogger(logger=logger, csv_path=str(csv_path))
+    second_logger.log_metrics(
+        "train",
+        {"loss": 0.5, "accuracy": 0.75, "history": [1.0, float("nan")]},
+        step=1,
+    )
+
+    with csv_path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+
+    assert rows[0]["loss"] == "1.0"
+    assert rows[0]["accuracy"] == ""
+    assert rows[0]["history"] == ""
+    assert rows[1]["loss"] == "0.5"
+    assert rows[1]["accuracy"] == "0.75"
+    assert json.loads(rows[1]["history"]) == [1.0, None]

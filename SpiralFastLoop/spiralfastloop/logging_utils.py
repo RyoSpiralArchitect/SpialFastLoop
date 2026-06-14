@@ -102,20 +102,44 @@ class MetricsLogger:
         if self.csv_path is None:
             return
         self._ensure_dir(self.csv_path)
-        if self._csv_fields is None:
-            if os.path.exists(self.csv_path) and os.path.getsize(self.csv_path) > 0:
-                with open(self.csv_path, newline="", encoding="utf-8") as handle:
-                    reader = csv.reader(handle)
-                    header = next(reader, None)
-                    if header:
-                        self._csv_fields = list(header)
-            if self._csv_fields is None:
-                self._csv_fields = list(payload.keys())
+        self._ensure_csv_fields(payload)
+        assert self._csv_fields is not None
         with open(self.csv_path, "a", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=self._csv_fields, extrasaction="ignore")
             if handle.tell() == 0:
                 writer.writeheader()
             writer.writerow({key: _csv_safe_metric_value(value) for key, value in payload.items()})
+
+    def _ensure_csv_fields(self, payload: Dict[str, Any]) -> None:
+        if self.csv_path is None:
+            return
+        if self._csv_fields is None:
+            self._csv_fields = self._read_csv_header()
+        if self._csv_fields is None:
+            self._csv_fields = list(payload.keys())
+            return
+        new_fields = [key for key in payload.keys() if key not in self._csv_fields]
+        if not new_fields:
+            return
+        self._csv_fields.extend(new_fields)
+        if not os.path.exists(self.csv_path) or os.path.getsize(self.csv_path) == 0:
+            return
+        with open(self.csv_path, newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+        with open(self.csv_path, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=self._csv_fields, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
+
+    def _read_csv_header(self) -> Optional[list[str]]:
+        if self.csv_path is None:
+            return None
+        if not os.path.exists(self.csv_path) or os.path.getsize(self.csv_path) == 0:
+            return None
+        with open(self.csv_path, newline="", encoding="utf-8") as handle:
+            reader = csv.reader(handle)
+            header = next(reader, None)
+        return list(header) if header else None
 
     def log_metrics(
         self,
