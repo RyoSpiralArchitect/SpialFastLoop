@@ -1315,6 +1315,9 @@ def test_train_one_epoch_collects_phase_and_model_profile() -> None:
     assert metrics["profile_model_hook_count"] >= 4
     assert metrics["profile_model_hook_failures"] == 0
     assert metrics["profile_model_hook_last_error"] == ""
+    assert metrics["train_failed"] is False
+    assert metrics["train_failure_stage"] == ""
+    assert metrics["train_failure_last_error"] == ""
     assert "data_wait" in phases
     assert "forward" in phases
     assert "loss" in phases
