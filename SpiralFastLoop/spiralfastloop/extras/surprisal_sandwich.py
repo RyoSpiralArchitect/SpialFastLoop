@@ -5,21 +5,57 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Optional, Tuple, cast
 
 import torch
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    LogitsProcessor,
-    LogitsProcessorList,
-)
+
+try:
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoTokenizer,
+        LogitsProcessor,
+        LogitsProcessorList,
+    )
+except ImportError:  # pragma: no cover - exercised when optional extras are absent
+    AutoModelForCausalLM = None  # type: ignore[assignment,misc]
+    AutoTokenizer = None  # type: ignore[assignment,misc]
+    LogitsProcessorList = None  # type: ignore[assignment,misc]
+
+    class LogitsProcessor:  # type: ignore[no-redef]
+        """Fallback base class so lightweight processors remain importable."""
+
+        pass
 
 __all__ = [
     "AntiTopKMiddle",
     "CoherenceTailBoost",
     "surprise_repair_generate",
 ]
+
+
+def _validate_fraction(name: str, value: float) -> float:
+    value = float(value)
+    if not math.isfinite(value) or value < 0.0 or value > 1.0:
+        raise ValueError(f"{name} must be a finite value in [0, 1].")
+    return value
+
+
+def _validate_window(start_frac: float, end_frac: float) -> tuple[float, float]:
+    start = _validate_fraction("start_frac", start_frac)
+    end = _validate_fraction("end_frac", end_frac)
+    if start >= end:
+        raise ValueError("start_frac must be less than end_frac.")
+    return start, end
+
+
+def _require_transformers() -> None:
+    if AutoTokenizer is None or AutoModelForCausalLM is None or LogitsProcessorList is None:
+        raise ImportError(
+            "surprise_repair_generate requires transformers; install with "
+            "`pip install spiralfastloop[extras]`."
+        )
+
 
 class AntiTopKMiddle(LogitsProcessor):
     """
@@ -33,11 +69,15 @@ class AntiTopKMiddle(LogitsProcessor):
         topk: int = 5,
         alpha: float = 10.0,
     ) -> None:
-        assert 0.0 <= start_frac < end_frac <= 1.0
-        self.sf: float = start_frac
-        self.ef: float = end_frac
-        self.topk: int = topk
-        self.alpha: float = alpha
+        start, end = _validate_window(start_frac, end_frac)
+        if topk <= 0:
+            raise ValueError("topk must be a positive integer.")
+        if not math.isfinite(float(alpha)):
+            raise ValueError("alpha must be finite.")
+        self.sf: float = start
+        self.ef: float = end
+        self.topk: int = int(topk)
+        self.alpha: float = float(alpha)
         self.step: int = 0
         self.max_steps: Optional[int] = None
 
@@ -47,7 +87,10 @@ class AntiTopKMiddle(LogitsProcessor):
         pos = self.step
         self.step += 1
         if self.sf * self.max_steps <= pos < self.ef * self.max_steps:
-            vals, idx = torch.topk(scores, self.topk, dim=-1)
+            k = min(self.topk, scores.shape[-1])
+            if k <= 0:
+                return scores
+            vals, idx = torch.topk(scores, k, dim=-1)
             scores.scatter_(dim=-1, index=idx, src=vals - self.alpha)
         return scores
 
@@ -63,8 +106,10 @@ class CoherenceTailBoost(LogitsProcessor):
         primary_tokenizer: Optional[Any] = None,
         tiny_tokenizer: Optional[Any] = None,
     ) -> None:
-        self.sf: float = start_frac
-        self.mu: float = mu
+        self.sf: float = _validate_fraction("start_frac", start_frac)
+        if not math.isfinite(float(mu)):
+            raise ValueError("mu must be finite.")
+        self.mu: float = float(mu)
         self.tiny: Optional[Any] = tiny_model
         self.step: int = 0
         self.max_steps: Optional[int] = None
@@ -115,6 +160,8 @@ class CoherenceTailBoost(LogitsProcessor):
             )
             self.past = out.past_key_values if self._tokenizers_compatible else None
             tiny_logits = out.logits[:, -1, :]
+            if tiny_logits.shape != scores.shape:
+                return scores
             scores = scores + self.mu * tiny_logits
         return scores
 
@@ -130,6 +177,7 @@ def surprise_repair_generate(
     mu: float = 0.4,
     **genkw: Any,
 ) -> str:
+    _require_transformers()
     tok: Any = AutoTokenizer.from_pretrained(main_name)
     main: Any = AutoModelForCausalLM.from_pretrained(main_name, device_map="auto").eval()
 
