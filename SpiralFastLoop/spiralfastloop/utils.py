@@ -58,11 +58,33 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_non_negative_int(name: str, default: int) -> int:
+    value = _env_int(name, default)
+    return value if value >= 0 else default
+
+
+def _env_positive_int(name: str, default: int) -> int:
+    value = _env_int(name, default)
+    return value if value > 0 else default
+
+
+def _non_empty_string_setting(value: Any, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    return value.strip()
+
+
+def _optional_non_empty_string_setting(value: Any, name: str) -> Optional[str]:
+    if value is None:
+        return None
+    return _non_empty_string_setting(value, name)
+
+
 def get_distributed_context() -> DistributedContext:
     if torch.distributed.is_available() and torch.distributed.is_initialized():
         rank = torch.distributed.get_rank()
         world_size = torch.distributed.get_world_size()
-        local_rank = _env_int("LOCAL_RANK", rank)
+        local_rank = _env_non_negative_int("LOCAL_RANK", rank)
         backend = torch.distributed.get_backend()
         return DistributedContext(
             is_initialized=True,
@@ -71,9 +93,9 @@ def get_distributed_context() -> DistributedContext:
             local_rank=local_rank,
             backend=backend,
         )
-    rank = _env_int("RANK", 0)
-    world_size = _env_int("WORLD_SIZE", 1)
-    local_rank = _env_int("LOCAL_RANK", rank)
+    rank = _env_non_negative_int("RANK", 0)
+    world_size = _env_positive_int("WORLD_SIZE", 1)
+    local_rank = _env_non_negative_int("LOCAL_RANK", rank)
     return DistributedContext(
         is_initialized=False,
         rank=rank,
@@ -88,16 +110,18 @@ def init_distributed(
     backend: Optional[str] = None,
     init_method: str = "env://",
 ) -> DistributedContext:
+    backend_value = _optional_non_empty_string_setting(backend, "backend")
+    init_method_value = _non_empty_string_setting(init_method, "init_method")
     if not torch.distributed.is_available():
         return get_distributed_context()
     if torch.distributed.is_initialized():
         return get_distributed_context()
-    world_size = _env_int("WORLD_SIZE", 1)
+    world_size = _env_positive_int("WORLD_SIZE", 1)
     if world_size <= 1:
         return get_distributed_context()
-    if backend is None:
-        backend = "nccl" if torch.cuda.is_available() else "gloo"
-    torch.distributed.init_process_group(backend=backend, init_method=init_method)
+    if backend_value is None:
+        backend_value = "nccl" if torch.cuda.is_available() else "gloo"
+    torch.distributed.init_process_group(backend=backend_value, init_method=init_method_value)
     return get_distributed_context()
 
 AmpSetting = Union[bool, Literal["auto"], None]

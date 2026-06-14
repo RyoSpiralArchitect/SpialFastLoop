@@ -16,6 +16,8 @@ from spiralfastloop.utils import (
     autocast_ctx,
     dataloader_from_dataset,
     get_amp_policy,
+    get_distributed_context,
+    init_distributed,
     maybe_channels_last,
     safe_compile,
     safe_compile_with_diagnostics,
@@ -30,6 +32,83 @@ def _percentile(values, percentile):
     index = int(round(percentile * (len(ordered) - 1)))
     index = max(0, min(len(ordered) - 1, index))
     return ordered[index]
+
+
+def test_distributed_context_reads_valid_env_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(utils_mod.torch.distributed, "is_available", lambda: False)
+    monkeypatch.setenv("RANK", "2")
+    monkeypatch.setenv("WORLD_SIZE", "4")
+    monkeypatch.setenv("LOCAL_RANK", "1")
+
+    ctx = get_distributed_context()
+
+    assert ctx.rank == 2
+    assert ctx.world_size == 4
+    assert ctx.local_rank == 1
+    assert ctx.backend is None
+    assert ctx.is_initialized is False
+
+
+def test_distributed_context_sanitizes_invalid_env_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(utils_mod.torch.distributed, "is_available", lambda: False)
+    monkeypatch.setenv("RANK", "-2")
+    monkeypatch.setenv("WORLD_SIZE", "0")
+    monkeypatch.setenv("LOCAL_RANK", "-1")
+
+    ctx = get_distributed_context()
+
+    assert ctx.rank == 0
+    assert ctx.world_size == 1
+    assert ctx.local_rank == 0
+
+
+@pytest.mark.parametrize("backend", [True, 1, "", "   ", object()])
+def test_init_distributed_rejects_invalid_backend_values(backend: object) -> None:
+    with pytest.raises(ValueError, match="backend"):
+        init_distributed(backend=backend)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("init_method", [None, True, 1, "", "   ", object()])
+def test_init_distributed_rejects_invalid_init_methods(init_method: object) -> None:
+    with pytest.raises(ValueError, match="init_method"):
+        init_distributed(init_method=init_method)  # type: ignore[arg-type]
+
+
+def test_init_distributed_uses_validated_backend_and_init_method(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setattr(utils_mod.torch.distributed, "is_available", lambda: True)
+    monkeypatch.setattr(utils_mod.torch.distributed, "is_initialized", lambda: False)
+    monkeypatch.setattr(
+        utils_mod.torch.distributed,
+        "init_process_group",
+        lambda *, backend, init_method: calls.append((backend, init_method)),
+    )
+
+    init_distributed(backend=" gloo ", init_method=" env:// ")
+
+    assert calls == [("gloo", "env://")]
+
+
+def test_init_distributed_ignores_invalid_world_size_without_initializing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setenv("WORLD_SIZE", "-2")
+    monkeypatch.setattr(utils_mod.torch.distributed, "is_available", lambda: True)
+    monkeypatch.setattr(utils_mod.torch.distributed, "is_initialized", lambda: False)
+    monkeypatch.setattr(
+        utils_mod.torch.distributed,
+        "init_process_group",
+        lambda *, backend, init_method: calls.append((backend, init_method)),
+    )
+
+    ctx = init_distributed(backend="gloo", init_method="env://")
+
+    assert calls == []
+    assert ctx.world_size == 1
 
 
 def test_throughput_meter_matches_percentiles_with_stream_data():
