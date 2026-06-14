@@ -74,6 +74,21 @@ def test_format_summary_row_includes_profile_suffix_when_available() -> None:
     assert "opt=12.0%" in formatted
 
 
+def test_format_summary_row_omits_profile_suffix_when_absent() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "fwd+bwd" not in formatted
+    assert "opt=" not in formatted
+
+
 def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     rows = [
         {
@@ -144,6 +159,30 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["mean_profile_forward_backward_pct"] == pytest.approx(50.0)
     assert generated["max_profile_backward_pct"] == pytest.approx(40.0)
     assert summary["best_reported"]["mean_profile_forward_backward_pct"] == pytest.approx(55.0)
+
+
+def test_summarize_rows_skips_profile_fields_when_absent() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert group["mean_reported_samples_per_sec"] == pytest.approx(100.0)
+    assert "mean_profile_forward_backward_pct" not in group
+    assert "mean_profile_forward_backward_pct" not in summary["best_reported"]
 
 
 def test_summarize_rows_handles_empty_input() -> None:

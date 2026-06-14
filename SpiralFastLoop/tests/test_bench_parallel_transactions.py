@@ -161,6 +161,28 @@ def test_summarize_results_handles_empty_input() -> None:
     assert summary["best_end_to_end"] is None
     assert summary["mean_wall_time_s"] == pytest.approx(0.0)
     assert summary["stddev_wall_time_s"] == pytest.approx(0.0)
+    assert "mean_profile_forward_backward_pct" not in summary
+
+
+def test_summarize_results_skips_profile_fields_when_absent() -> None:
+    rows = [
+        {
+            "run": 0,
+            "seed": 10,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+        },
+    ]
+
+    summary = summarize_results(rows)
+
+    assert summary["mean_reported_samples_per_sec"] == pytest.approx(100.0)
+    assert "mean_profile_forward_backward_pct" not in summary
+    assert "profile_forward_backward_pct" not in summary["best_reported"]
 
 
 def test_benchmark_arg_types_reject_empty_or_invalid_runs() -> None:

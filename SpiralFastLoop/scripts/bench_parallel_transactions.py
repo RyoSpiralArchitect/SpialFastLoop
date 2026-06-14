@@ -95,6 +95,14 @@ def _compact_run(row: dict) -> dict:
     return {field: row[field] for field in BEST_RUN_FIELDS if field in row}
 
 
+def summary_fields_for_rows(rows: list[dict]) -> tuple[str, ...]:
+    present_fields = set()
+    for row in rows:
+        present_fields.update(row.keys())
+    profile_fields = tuple(field for field in PROFILE_SUMMARY_FIELDS if field in present_fields)
+    return BASE_SUMMARY_FIELDS + profile_fields
+
+
 def summarize_metric(rows: list[dict], field: str) -> dict[str, float]:
     values = [float(row.get(field, 0.0)) for row in rows]
     if not values:
@@ -116,7 +124,7 @@ def summarize_results(rows: list[dict]) -> dict:
         "best_reported": None,
         "best_end_to_end": None,
     }
-    for field in SUMMARY_FIELDS:
+    for field in summary_fields_for_rows(summary_rows):
         for stat_name, value in summarize_metric(summary_rows, field).items():
             summary[f"{stat_name}_{field}"] = value
 

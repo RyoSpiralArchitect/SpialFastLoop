@@ -12,12 +12,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from bench_parallel_transactions import (
-    SUMMARY_FIELDS,
     non_negative_int_arg,
     positive_float_arg,
     positive_int_arg,
     run_once,
     summarize_metric,
+    summary_fields_for_rows,
     validate_benchmark_args,
 )
 
@@ -81,7 +81,7 @@ def summarize_rows(rows: list[dict]) -> dict:
                 for row in group_rows
             ),
         }
-        for field in SUMMARY_FIELDS:
+        for field in summary_fields_for_rows(group_rows):
             for stat_name, value in summarize_metric(group_rows, field).items():
                 summary[f"{stat_name}_{field}"] = value
         summaries.append(summary)
