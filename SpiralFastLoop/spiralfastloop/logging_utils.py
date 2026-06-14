@@ -67,10 +67,14 @@ def _normalize_metric_value(value: Any) -> Any:
 
 def _normalize_metric_payload(metrics: Mapping[Any, Any]) -> Dict[str, Any]:
     normalized: Dict[str, Any] = {}
+    blank_keys = 0
     reserved_keys: list[str] = []
     duplicate_keys: list[str] = []
     for key, value in metrics.items():
         normalized_key = _json_safe_metric_key(key)
+        if not normalized_key.strip():
+            blank_keys += 1
+            continue
         if normalized_key in _RESERVED_PAYLOAD_KEYS:
             reserved_keys.append(normalized_key)
             continue
@@ -78,6 +82,8 @@ def _normalize_metric_payload(metrics: Mapping[Any, Any]) -> Dict[str, Any]:
             duplicate_keys.append(normalized_key)
             continue
         normalized[normalized_key] = _normalize_metric_value(value)
+    if blank_keys:
+        raise ValueError("metrics keys must be non-empty after normalization")
     if reserved_keys:
         names = ", ".join(sorted(set(reserved_keys)))
         raise ValueError(f"metrics must not contain reserved payload keys: {names}")
