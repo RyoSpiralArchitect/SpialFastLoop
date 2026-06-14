@@ -45,6 +45,14 @@ def _capture_engine_phase_profilers(monkeypatch: pytest.MonkeyPatch) -> list[Pha
     return profilers
 
 
+class _FailingLoader:
+    def __iter__(self) -> "_FailingLoader":
+        return self
+
+    def __next__(self) -> tuple[torch.Tensor, torch.Tensor]:
+        raise RuntimeError("loader boom")
+
+
 @pytest.mark.parametrize(
     ("batch", "reason", "match"),
     [
@@ -864,6 +872,21 @@ def test_evaluate_logs_metrics_fn_failures_before_reraising() -> None:
     assert metrics["user_metric_skipped_count"] == 0
 
 
+def test_evaluate_cleans_profile_phase_when_loader_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    with pytest.raises(RuntimeError, match="loader boom"):
+        trainer.evaluate(_FailingLoader(), nn.CrossEntropyLoss(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+
+
 def test_evaluate_reports_scalar_tensor_inputs_as_unmeasured() -> None:
     class ScalarTensorDataset(torch.utils.data.Dataset[torch.Tensor]):
         def __len__(self) -> int:
@@ -1002,6 +1025,21 @@ def test_predict_logs_postprocess_failures_before_reraising() -> None:
     assert metrics["postprocess_last_error"] == "RuntimeError: postprocess boom"
     assert metrics["predict_failed"] is True
     assert metrics["predict_failure_stage"] == "postprocess"
+
+
+def test_predict_cleans_profile_phase_when_loader_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 2))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    with pytest.raises(RuntimeError, match="loader boom"):
+        trainer.predict(_FailingLoader(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
 
 
 def test_predict_reports_unmeasured_steps_when_batch_size_is_unknown() -> None:
@@ -1193,20 +1231,13 @@ def test_train_one_epoch_collects_phase_and_model_profile() -> None:
 def test_train_one_epoch_cleans_profile_phase_when_loader_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class FailingLoader:
-        def __iter__(self) -> "FailingLoader":
-            return self
-
-        def __next__(self) -> tuple[torch.Tensor, torch.Tensor]:
-            raise RuntimeError("loader boom")
-
     profilers = _capture_engine_phase_profilers(monkeypatch)
     model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
     trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
 
     with pytest.raises(RuntimeError, match="loader boom"):
-        trainer.train_one_epoch(FailingLoader(), nn.CrossEntropyLoss(), steps=1, collect_profile=True)
+        trainer.train_one_epoch(_FailingLoader(), nn.CrossEntropyLoss(), steps=1, collect_profile=True)
 
     assert len(profilers) == 1
     assert profilers[0]._starts == {}

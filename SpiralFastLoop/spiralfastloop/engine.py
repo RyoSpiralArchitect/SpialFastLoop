@@ -1510,7 +1510,11 @@ class FastTrainer:
                 except StopIteration:
                     profiler.cancel("data_wait")
                     break
-                profiler.stop("data_wait")
+                except Exception:
+                    profiler.cancel("data_wait")
+                    raise
+                else:
+                    profiler.stop("data_wait")
                 step_idx += 1
                 profiler.start("transfer")
                 try:
@@ -1745,7 +1749,11 @@ class FastTrainer:
                 except StopIteration:
                     profiler.cancel("data_wait")
                     break
-                profiler.stop("data_wait")
+                except Exception:
+                    profiler.cancel("data_wait")
+                    raise
+                else:
+                    profiler.stop("data_wait")
                 step_idx += 1
                 profiler.start("transfer")
                 try:
