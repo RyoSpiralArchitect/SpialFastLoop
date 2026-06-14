@@ -68,6 +68,14 @@ class _CapturingLogger:
         self.rows.append((stage, metrics, mode))
 
 
+def _single_error_metrics(logger: _CapturingLogger, stage: str) -> dict[str, object]:
+    assert len(logger.rows) == 1
+    row_stage, metrics, mode = logger.rows[0]
+    assert row_stage == stage
+    assert mode == "error"
+    return metrics
+
+
 @pytest.mark.parametrize(
     ("batch", "reason", "match"),
     [
@@ -1479,13 +1487,174 @@ def test_train_one_epoch_cleans_profile_phase_when_loss_fails(
     loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
     model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
-    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+    logger = _CapturingLogger()
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        logger=logger,
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
 
     with pytest.raises(RuntimeError, match="loss boom"):
         trainer.train_one_epoch(loader, FailingCriterion(), steps=1, collect_profile=True)
 
     assert len(profilers) == 1
     assert profilers[0]._starts == {}
+    metrics = _single_error_metrics(logger, "train")
+    assert metrics["steps"] == 1
+    assert metrics["optimizer_steps"] == 0
+    assert metrics["samples"] == 0
+    assert metrics["train_failed"] is True
+    assert metrics["train_failure_stage"] == "loss"
+    assert metrics["train_failure_last_error"] == "RuntimeError: loss boom"
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "forward" in phases
+    assert "loss" in phases
+
+
+def test_train_one_epoch_logs_backward_failures_before_reraising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DetachedCriterion(nn.Module):
+        def forward(self, outputs: torch.Tensor, _targets: torch.Tensor) -> torch.Tensor:
+            return outputs.detach().sum()
+
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    inputs = torch.randn(2, 4)
+    targets = torch.randint(0, 3, (2,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    logger = _CapturingLogger()
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        logger=logger,
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
+
+    with pytest.raises(RuntimeError, match="does not require grad"):
+        trainer.train_one_epoch(loader, DetachedCriterion(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    metrics = _single_error_metrics(logger, "train")
+    assert metrics["steps"] == 1
+    assert metrics["optimizer_steps"] == 0
+    assert metrics["samples"] == 0
+    assert metrics["train_failed"] is True
+    assert metrics["train_failure_stage"] == "backward"
+    assert "does not require grad" in metrics["train_failure_last_error"]
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "loss" in phases
+    assert "backward" in phases
+
+
+def test_train_one_epoch_logs_optimizer_failures_before_reraising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    inputs = torch.randn(2, 4)
+    targets = torch.randint(0, 3, (2,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+
+    def fail_step(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("optimizer boom")
+
+    monkeypatch.setattr(optimizer, "step", fail_step)
+    logger = _CapturingLogger()
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        logger=logger,
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
+
+    with pytest.raises(RuntimeError, match="optimizer boom"):
+        trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    metrics = _single_error_metrics(logger, "train")
+    assert metrics["steps"] == 1
+    assert metrics["optimizer_steps"] == 0
+    assert metrics["samples"] == 0
+    assert metrics["train_failed"] is True
+    assert metrics["train_failure_stage"] == "optimizer"
+    assert metrics["train_failure_last_error"] == "RuntimeError: optimizer boom"
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "backward" in phases
+    assert "optimizer" in phases
+
+
+def test_train_one_epoch_logs_metrics_failures_before_reraising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_meter = engine.ThroughputMeter
+    meters: list[object] = []
+
+    class FailingRecordMeter(original_meter):  # type: ignore[misc, valid-type]
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)
+            meters.append(self)
+
+        def record(self, duration: float, batch_size: int) -> None:
+            if self is meters[0]:
+                raise RuntimeError("metrics meter boom")
+            super().record(duration, batch_size)
+
+    monkeypatch.setattr(engine, "ThroughputMeter", FailingRecordMeter)
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    inputs = torch.randn(2, 4)
+    targets = torch.randint(0, 3, (2,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    logger = _CapturingLogger()
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        logger=logger,
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
+
+    with pytest.raises(RuntimeError, match="metrics meter boom"):
+        trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    metrics = _single_error_metrics(logger, "train")
+    assert metrics["steps"] == 1
+    assert metrics["optimizer_steps"] == 1
+    assert metrics["samples"] == 0
+    assert metrics["train_failed"] is True
+    assert metrics["train_failure_stage"] == "metrics"
+    assert metrics["train_failure_last_error"] == "RuntimeError: metrics meter boom"
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "optimizer" in phases
+    assert "metrics" in phases
 
 
 def test_profile_flat_metrics_skip_invalid_values() -> None:
