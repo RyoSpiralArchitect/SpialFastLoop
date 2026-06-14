@@ -106,6 +106,7 @@ def test_train_one_epoch_splits_warmup_and_steady_metrics() -> None:
     assert metrics["steady_samples_per_sec"] > 0.0
     assert metrics["reported_samples_per_sec"] == metrics["steady_samples_per_sec"]
     assert metrics["compile_init_time_s"] == 0.0
+    assert metrics["compile_fallback_reason"] == "cpu_device"
     assert metrics["warmup_avg_loss"] > 0.0
     assert metrics["steady_avg_loss"] > 0.0
 
@@ -132,6 +133,7 @@ def test_train_one_epoch_can_disable_step_logs_and_compile(capsys) -> None:
     assert metrics["compile_requested"] is False
     assert metrics["compiled"] is False
     assert metrics["compile_init_time_s"] == 0.0
+    assert metrics["compile_fallback_reason"] == "not_requested"
 
 
 def test_model_profile_hooks_are_removed_after_exception() -> None:

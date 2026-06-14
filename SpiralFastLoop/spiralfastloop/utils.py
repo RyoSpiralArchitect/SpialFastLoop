@@ -21,6 +21,13 @@ from torch.utils.data.dataset import Dataset
 SampleWindow = Union[deque[float], Tuple[()], list[float]]
 
 
+@dataclass(frozen=True)
+class CompileResult:
+    model: nn.Module
+    compiled: bool
+    fallback_reason: str = ""
+
+
 def get_best_device() -> str:
     """Pick the best available device among CUDA, MPS, CPU."""
     if torch.cuda.is_available():
@@ -973,13 +980,36 @@ def maybe_channels_last(model: nn.Module, channels_last: bool = False) -> nn.Mod
 
 def safe_compile(model: nn.Module, mode: str = "reduce-overhead") -> Tuple[nn.Module, bool]:
     """Compile model if torch.compile exists and succeeds."""
+    result = safe_compile_with_diagnostics(model, mode=mode)
+    return result.model, result.compiled
+
+
+def _format_compile_exception(exc: Exception) -> str:
+    message = str(exc).strip()
+    if len(message) > 200:
+        message = f"{message[:197]}..."
+    if message:
+        return f"{type(exc).__name__}: {message}"
+    return type(exc).__name__
+
+
+def safe_compile_with_diagnostics(model: nn.Module, mode: str = "reduce-overhead") -> CompileResult:
+    """Compile model if possible and keep a compact fallback reason."""
     compile_fn = getattr(torch, "compile", None)
     if compile_fn is None:
-        return model, False
+        return CompileResult(model=model, compiled=False, fallback_reason="torch_compile_unavailable")
     try:
         m = compile_fn(model, mode=mode)
         if isinstance(m, nn.Module):
-            return m, True
-        return model, False
-    except Exception:
-        return model, False
+            return CompileResult(model=m, compiled=True)
+        return CompileResult(
+            model=model,
+            compiled=False,
+            fallback_reason=f"non_module_result:{type(m).__name__}",
+        )
+    except Exception as exc:
+        return CompileResult(
+            model=model,
+            compiled=False,
+            fallback_reason=_format_compile_exception(exc),
+        )

@@ -13,6 +13,7 @@ from spiralfastloop.utils import (
     _PSquareQuantile,
     dataloader_from_dataset,
     safe_compile,
+    safe_compile_with_diagnostics,
 )
 
 
@@ -232,6 +233,36 @@ def test_safe_compile_rejects_non_module_compile_result(monkeypatch: pytest.Monk
 
     assert compiled is model
     assert did_compile is False
+
+
+def test_safe_compile_with_diagnostics_reports_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = torch.nn.Linear(1, 1)
+
+    def fake_compile(_: torch.nn.Module, mode: str) -> object:
+        raise RuntimeError("compile exploded")
+
+    monkeypatch.setattr(torch, "compile", fake_compile, raising=False)
+
+    result = safe_compile_with_diagnostics(model)
+
+    assert result.model is model
+    assert result.compiled is False
+    assert result.fallback_reason == "RuntimeError: compile exploded"
+
+
+def test_safe_compile_with_diagnostics_reports_non_module_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = torch.nn.Linear(1, 1)
+
+    def fake_compile(_: torch.nn.Module, mode: str) -> object:
+        return object()
+
+    monkeypatch.setattr(torch, "compile", fake_compile, raising=False)
+
+    result = safe_compile_with_diagnostics(model)
+
+    assert result.model is model
+    assert result.compiled is False
+    assert result.fallback_reason == "non_module_result:object"
 
 
 def test_dataloader_from_dataset_allows_zero_workers() -> None:
