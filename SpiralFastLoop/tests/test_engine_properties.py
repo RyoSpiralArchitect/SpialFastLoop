@@ -189,6 +189,12 @@ else:
         pytest.skip("hypothesis not installed")
 
 
+@pytest.mark.parametrize("batch", [torch.tensor(1.0), torch.empty(0, 2)])
+def test_infer_batch_size_rejects_unmeasurable_tensors(batch: torch.Tensor) -> None:
+    with pytest.raises(ValueError, match="batch|scalar"):
+        _infer_batch_size(batch)
+
+
 def test_configure_cuda_backends_updates_flags():
     called = {"flash": False, "mem_eff": False, "math": False}
 

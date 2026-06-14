@@ -439,6 +439,37 @@ def test_predict_reports_unmeasured_steps_when_batch_size_is_unknown() -> None:
     assert metrics["samples_per_sec"] == 0.0
 
 
+def test_predict_reports_scalar_tensor_inputs_as_unmeasured() -> None:
+    class ScalarTensorDataset(torch.utils.data.Dataset[torch.Tensor]):
+        def __len__(self) -> int:
+            return 2
+
+        def __getitem__(self, index: int) -> torch.Tensor:
+            return torch.tensor(float(index))
+
+    class ScalarModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.weight = nn.Parameter(torch.tensor(1.0))
+
+        def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+            return inputs * self.weight
+
+    loader = DataLoader(ScalarTensorDataset(), batch_size=None)
+    model = ScalarModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    predictions, metrics = trainer.predict(loader, return_metrics=True)
+
+    assert len(predictions) == 2
+    assert metrics["steps"] == 2
+    assert metrics["measured_steps"] == 0
+    assert metrics["unmeasured_steps"] == 2
+    assert metrics["batch_size_inference_failures"] == 2
+    assert metrics["samples"] == 0
+
+
 def test_fit_accepts_train_profile_and_loader_options() -> None:
     inputs = torch.randn(8, 4)
     targets = torch.randint(0, 3, (8,))

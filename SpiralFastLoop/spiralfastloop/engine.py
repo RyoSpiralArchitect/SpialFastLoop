@@ -193,6 +193,10 @@ def _concatenate_batches(base: Any, extra: Any) -> Any:
 
 def _infer_batch_size(batch: Any) -> int:
     if isinstance(batch, torch.Tensor):
+        if batch.ndim == 0:
+            raise ValueError("Unable to infer batch size from scalar tensor.")
+        if batch.shape[0] <= 0:
+            raise ValueError("Tensor batch dimension must be non-zero.")
         return int(batch.shape[0])
     if isinstance(batch, Mapping):
         candidate_values = []
@@ -234,7 +238,7 @@ def _infer_batch_size(batch: Any) -> int:
 def _try_infer_batch_size(batch: Any) -> Optional[int]:
     try:
         return _infer_batch_size(batch)
-    except (TypeError, ValueError):
+    except (IndexError, TypeError, ValueError):
         return None
 
 
