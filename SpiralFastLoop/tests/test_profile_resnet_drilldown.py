@@ -192,7 +192,7 @@ def test_print_summary_formats_malformed_metrics_as_na(
                 },
                 "optimizer": {
                     "top_children": [
-                        {"name": "adamw", "pct_of_parent": True, "avg_ms": 0.5},
+                        {"name": True, "pct_of_parent": True, "avg_ms": 0.5},
                     ],
                 },
             },
@@ -218,7 +218,7 @@ def test_print_summary_formats_malformed_metrics_as_na(
     assert "<unnamed>: 12.0% avg=1.00ms" in output
     assert "conv: n/a avg=n/a p95=1.00ms" in output
     assert "layer4: avg=n/a p95=n/a" in output
-    assert "adamw: n/a avg=0.50ms" in output
+    assert "<unnamed>: n/a avg=0.50ms" in output
 
 
 def test_print_summary_ignores_malformed_profile_container(

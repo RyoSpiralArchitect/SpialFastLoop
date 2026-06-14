@@ -19,6 +19,7 @@ from scripts.bench_parallel_transactions import (
     _format_count,
     _format_metric_value,
     _has_positive_display_value,
+    _profile_row_name,
     build_model,
     device_arg,
     non_negative_int_arg,
@@ -674,6 +675,22 @@ def test_display_formatters_hide_malformed_values() -> None:
     assert _has_positive_display_value(2)
     for raw in (0, None, True, "2", float("nan"), float("inf")):
         assert not _has_positive_display_value(raw)
+
+
+@pytest.mark.parametrize(
+    ("row", "expected"),
+    [
+        ({"name": "forward"}, "forward"),
+        ({"name": ""}, "<unnamed>"),
+        ({"name": "   "}, "<unnamed>"),
+        ({"name": True}, "<unnamed>"),
+        ({"name": 1}, "<unnamed>"),
+        ({"name": ["forward"]}, "<unnamed>"),
+        ({}, "<unnamed>"),
+    ],
+)
+def test_profile_row_name_hides_malformed_names(row: dict[str, object], expected: str) -> None:
+    assert _profile_row_name(row) == expected
 
 
 def test_validate_benchmark_args_rejects_warmup_larger_than_steps() -> None:

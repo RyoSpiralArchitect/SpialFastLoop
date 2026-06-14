@@ -478,7 +478,10 @@ def _has_positive_display_value(raw: object) -> bool:
 
 
 def _profile_row_name(row: dict[str, Any]) -> str:
-    return str(row.get("name", "<unnamed>"))
+    name = row.get("name")
+    if isinstance(name, str) and name.strip():
+        return name
+    return "<unnamed>"
 
 
 def _dict_value(raw: object) -> dict[str, Any]:
