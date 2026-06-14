@@ -670,10 +670,11 @@ class ThroughputMeter:
         self._best_time_per_sample: Optional[float] = None
 
     def tick(self, batch_size: int) -> None:
+        batch_size_int = _positive_int_setting(batch_size, "batch_size")
         now = self._now()
         elapsed = max(0.0, now - self.last)
         self.last = now
-        self.record(elapsed, batch_size)
+        self.record(elapsed, batch_size_int)
 
     def record(self, duration_s: float, batch_size: int) -> None:
         duration = _non_negative_finite_float_setting(duration_s, "duration_s")

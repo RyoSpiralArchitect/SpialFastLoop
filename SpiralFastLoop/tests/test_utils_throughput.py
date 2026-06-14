@@ -180,6 +180,27 @@ def test_throughput_meter_tick_rejects_invalid_time_values_without_mutating_stat
     assert meter.summary() == summary_before
 
 
+@pytest.mark.parametrize("batch_size", [0, -5, 1.5, "2", True])
+def test_throughput_meter_tick_rejects_invalid_batch_sizes_without_mutating_state(batch_size: object):
+    calls: list[float] = []
+
+    def fake_time() -> float:
+        value = float(len(calls))
+        calls.append(value)
+        return value
+
+    meter = ThroughputMeter(time_fn=fake_time)
+    summary_before = meter.summary()
+    last_before = meter.last
+
+    with pytest.raises(ValueError, match="batch_size"):
+        meter.tick(batch_size)  # type: ignore[arg-type]
+
+    assert calls == [0.0]
+    assert meter.last == last_before
+    assert meter.summary() == summary_before
+
+
 def test_throughput_meter_rejects_invalid_inputs():
     meter = ThroughputMeter()
 
