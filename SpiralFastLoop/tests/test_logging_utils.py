@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from spiralfastloop.logging_utils import MetricsLogger
+from spiralfastloop.logging_utils import MetricsLogger, default_logger
 
 
 def test_metrics_logger_writes_strict_jsonl_for_non_finite_metrics(tmp_path) -> None:
@@ -50,6 +50,85 @@ def test_metrics_logger_writes_strict_jsonl_for_non_finite_metrics(tmp_path) -> 
     }
     assert payload["['top', 'tuple']"] == 3.0
     assert payload["step"] == 1
+
+
+@pytest.mark.parametrize("name", [None, True, "", "   ", object()])
+def test_default_logger_rejects_invalid_names(name: object) -> None:
+    with pytest.raises(ValueError, match="name"):
+        default_logger(name)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "field"),
+    [
+        ({"logger": object()}, "logger"),
+        ({"logger": type("BadLogger", (), {"log": object()})()}, "logger"),
+        ({"jsonl_path": ""}, "jsonl_path"),
+        ({"jsonl_path": object()}, "jsonl_path"),
+        ({"csv_path": ""}, "csv_path"),
+        ({"csv_path": object()}, "csv_path"),
+        ({"log_level": -1}, "log_level"),
+        ({"log_level": 1.5}, "log_level"),
+        ({"log_level": "20"}, "log_level"),
+        ({"log_level": True}, "log_level"),
+        ({"is_primary": 1}, "is_primary"),
+        ({"is_primary": "true"}, "is_primary"),
+    ],
+)
+def test_metrics_logger_rejects_invalid_constructor_settings(
+    kwargs: dict[str, object],
+    field: str,
+) -> None:
+    with pytest.raises(ValueError, match=field):
+        MetricsLogger(**kwargs)  # type: ignore[arg-type]
+
+
+def test_metrics_logger_normalizes_pathlike_sinks_and_allows_logger_none(tmp_path) -> None:
+    jsonl_path = tmp_path / "nested" / "metrics.jsonl"
+    csv_path = tmp_path / "nested" / "metrics.csv"
+    metrics_logger = MetricsLogger(
+        logger=None,
+        jsonl_path=jsonl_path,
+        csv_path=csv_path,
+    )
+
+    metrics_logger.log_metrics("train", {"loss": 1.0}, mode="epoch")
+
+    payload = json.loads(jsonl_path.read_text(encoding="utf-8"))
+    assert payload["stage"] == "train"
+    assert payload["mode"] == "epoch"
+    with csv_path.open(newline="", encoding="utf-8") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["loss"] == "1.0"
+
+
+@pytest.mark.parametrize(
+    ("stage", "mode", "metrics", "field"),
+    [
+        ("", "step", {"loss": 1.0}, "stage"),
+        ("   ", "step", {"loss": 1.0}, "stage"),
+        (True, "step", {"loss": 1.0}, "stage"),
+        ("train", "", {"loss": 1.0}, "mode"),
+        ("train", "   ", {"loss": 1.0}, "mode"),
+        ("train", True, {"loss": 1.0}, "mode"),
+        ("train", "step", object(), "metrics"),
+        ("train", "step", [("loss", 1.0)], "metrics"),
+    ],
+)
+def test_metrics_logger_rejects_invalid_payload_settings(
+    stage: object,
+    mode: object,
+    metrics: object,
+    field: str,
+) -> None:
+    metrics_logger = MetricsLogger(logger=None)
+
+    with pytest.raises(ValueError, match=field):
+        metrics_logger.log_metrics(
+            stage,  # type: ignore[arg-type]
+            metrics,  # type: ignore[arg-type]
+            mode=mode,  # type: ignore[arg-type]
+        )
 
 
 @pytest.mark.parametrize("step", [-1, 1.5, "2", True])

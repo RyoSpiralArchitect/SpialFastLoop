@@ -11,11 +11,15 @@ import os
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 import torch
 
-from .utils import _non_negative_int_setting
+from .utils import (
+    _bool_setting,
+    _non_empty_string_setting,
+    _non_negative_int_setting,
+)
 
 __all__ = ["MetricsLogger", "default_logger"]
 
@@ -64,8 +68,31 @@ def _csv_safe_metric_value(value: Any) -> Any:
     return value
 
 
+def _optional_path_setting(path: Any, name: str) -> Optional[str]:
+    if path is None:
+        return None
+    if not isinstance(path, (str, os.PathLike)):
+        raise ValueError(f"{name} must be a non-empty filesystem path or None")
+    try:
+        normalized = os.fspath(path)
+    except TypeError as exc:
+        raise ValueError(f"{name} must be a non-empty filesystem path or None") from exc
+    if not isinstance(normalized, str) or not normalized:
+        raise ValueError(f"{name} must be a non-empty filesystem path or None")
+    return normalized
+
+
+def _optional_logger_setting(logger: Any) -> Optional[logging.Logger]:
+    if logger is None:
+        return None
+    log = getattr(logger, "log", None)
+    if not callable(log):
+        raise ValueError("logger must provide a callable log() method or be None")
+    return cast(logging.Logger, logger)
+
+
 def default_logger(name: str = "spiralfastloop") -> logging.Logger:
-    logger = logging.getLogger(name)
+    logger = logging.getLogger(_non_empty_string_setting(name, "name"))
     if not logger.handlers:
         handler = logging.StreamHandler()
         formatter = logging.Formatter("[%(asctime)s] %(levelname)s %(message)s")
@@ -79,12 +106,19 @@ def default_logger(name: str = "spiralfastloop") -> logging.Logger:
 class MetricsLogger:
     """Log metrics to stdlib logging and optional JSONL/CSV sinks."""
 
-    logger: logging.Logger = field(default_factory=default_logger)
+    logger: Optional[logging.Logger] = field(default_factory=default_logger)
     jsonl_path: Optional[str] = None
     csv_path: Optional[str] = None
     log_level: int = logging.INFO
     is_primary: bool = True
     _csv_fields: Optional[list[str]] = field(default=None, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.logger = _optional_logger_setting(self.logger)
+        self.jsonl_path = _optional_path_setting(self.jsonl_path, "jsonl_path")
+        self.csv_path = _optional_path_setting(self.csv_path, "csv_path")
+        self.log_level = _non_negative_int_setting(self.log_level, "log_level")
+        self.is_primary = _bool_setting(self.is_primary, "is_primary")
 
     def _ensure_dir(self, path: str) -> None:
         directory = os.path.dirname(path)
@@ -152,11 +186,15 @@ class MetricsLogger:
     ) -> None:
         if not self.is_primary:
             return
+        stage_value = _non_empty_string_setting(stage, "stage")
+        mode_value = _non_empty_string_setting(mode, "mode")
+        if not isinstance(metrics, Mapping):
+            raise ValueError("metrics must be a mapping")
         normalized = {_json_safe_metric_key(k): _normalize_metric_value(v) for k, v in metrics.items()}
         payload: Dict[str, Any] = {
             "timestamp": time.time(),
-            "stage": stage,
-            "mode": mode,
+            "stage": stage_value,
+            "mode": mode_value,
             **normalized,
         }
         if step is not None:
@@ -168,7 +206,7 @@ class MetricsLogger:
 
         if self.logger is not None:
             summary = ", ".join(f"{k}={v}" for k, v in normalized.items())
-            prefix = f"[{stage}:{mode}]"
+            prefix = f"[{stage_value}:{mode_value}]"
             if epoch is not None:
                 prefix += f" epoch={epoch}"
             if step is not None:
