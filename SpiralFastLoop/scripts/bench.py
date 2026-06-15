@@ -271,6 +271,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-compile", dest="compile", action="store_false")
     parser.add_argument("--meter-fast-mode", action="store_true", help="Use lighter throughput meters without tail/window stats.")
     parser.add_argument("--collect-profile", action="store_true")
+    parser.add_argument("--profile-sync", action="store_true", help="Synchronize accelerator around profiled phases.")
+    parser.add_argument(
+        "--no-profile-distribution",
+        dest="profile_distribution",
+        action="store_false",
+        help="Skip p50/p95/p99/std samples and collect phase totals only.",
+    )
+    parser.add_argument("--profile-window", type=positive_int_arg, default=512, help="Per-phase sample window size.")
     args = parser.parse_args()
     try:
         validate_benchmark_args(args)
@@ -330,6 +338,9 @@ def main() -> None:
         criterion,
         steps=args.steps,
         collect_profile=args.collect_profile,
+        profile_sync=args.profile_sync,
+        profile_distribution=args.profile_distribution,
+        profile_window=args.profile_window,
         warmup_steps=args.warmup_steps,
     )
 

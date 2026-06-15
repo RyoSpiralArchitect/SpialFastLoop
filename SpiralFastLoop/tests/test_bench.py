@@ -397,6 +397,10 @@ def test_bench_parse_args_accepts_valid_minimal_run(monkeypatch: pytest.MonkeyPa
             "--log-interval",
             "0",
             "--meter-fast-mode",
+            "--profile-sync",
+            "--no-profile-distribution",
+            "--profile-window",
+            "8",
         ],
     )
 
@@ -409,6 +413,9 @@ def test_bench_parse_args_accepts_valid_minimal_run(monkeypatch: pytest.MonkeyPa
     assert args.workers == 0
     assert args.learning_rate == pytest.approx(0.001)
     assert args.meter_fast_mode is True
+    assert args.profile_sync is True
+    assert args.profile_distribution is False
+    assert args.profile_window == 8
 
 
 @pytest.mark.parametrize(
@@ -425,6 +432,7 @@ def test_bench_parse_args_accepts_valid_minimal_run(monkeypatch: pytest.MonkeyPa
         ["bench.py", "--learning-rate", "nan"],
         ["bench.py", "--device", "gpu"],
         ["bench.py", "--log-interval", "-1"],
+        ["bench.py", "--profile-window", "0"],
     ],
 )
 def test_bench_parse_args_rejects_invalid_numeric_values(
@@ -437,6 +445,69 @@ def test_bench_parse_args_rejects_invalid_numeric_values(
         bench.parse_args()
 
     assert exc_info.value.code == 2
+
+
+def test_bench_main_forwards_profile_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class CapturingTrainer:
+        def __init__(self, *_args: object, **kwargs: object) -> None:
+            captured["init_kwargs"] = kwargs
+
+        def train_one_epoch(self, *_args: object, **kwargs: object) -> dict[str, object]:
+            captured["train_kwargs"] = kwargs
+            return {
+                "samples_per_sec": 1.0,
+                "reported_samples_per_sec": 1.0,
+                "steps": 1,
+                "samples": 2,
+            }
+
+    monkeypatch.setattr(bench, "FastTrainer", CapturingTrainer)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bench.py",
+            "--samples",
+            "4",
+            "--feature-dim",
+            "2",
+            "--classes",
+            "2",
+            "--batch-size",
+            "2",
+            "--steps",
+            "1",
+            "--grad-accum",
+            "1",
+            "--workers",
+            "0",
+            "--device",
+            "cpu",
+            "--no-compile",
+            "--meter-fast-mode",
+            "--collect-profile",
+            "--profile-sync",
+            "--no-profile-distribution",
+            "--profile-window",
+            "8",
+        ],
+    )
+
+    bench.main()
+
+    init_kwargs = captured["init_kwargs"]
+    train_kwargs = captured["train_kwargs"]
+    assert isinstance(init_kwargs, dict)
+    assert isinstance(train_kwargs, dict)
+    assert init_kwargs["meter_fast_mode"] is True
+    assert train_kwargs["collect_profile"] is True
+    assert train_kwargs["profile_sync"] is True
+    assert train_kwargs["profile_distribution"] is False
+    assert train_kwargs["profile_window"] == 8
 
 
 def test_bench_parse_args_rejects_warmup_larger_than_steps(

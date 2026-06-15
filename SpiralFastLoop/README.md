@@ -118,7 +118,9 @@ CUDA/MPS runs also include device memory fields such as `cuda_max_mem_bytes` or
 
 Benchmark scripts default to `--log-interval 0` to avoid extra synchronization
 in timing runs. Use `--no-compile` when short MPS or CPU smoke tests are
-dominated by compile startup.
+dominated by compile startup. Use `--meter-fast-mode` to skip throughput
+tail/window bookkeeping, and `--no-profile-distribution` when profile totals
+are enough without per-phase p50/p95/p99/std samples.
 
 ## Example Smoke Runs
 
