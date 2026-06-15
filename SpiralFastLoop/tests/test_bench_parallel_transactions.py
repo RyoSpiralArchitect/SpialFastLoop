@@ -1271,6 +1271,7 @@ def test_summarize_results_skips_out_of_range_percentages() -> None:
             "setup_time_s": 0.25,
             "end_to_end_wall_time_s": 1.25,
             "profile_forward_backward_pct": 125.0,
+            "profile_forward_top_pct_of_parent": 125.0,
             "profile_loss_pct": -1.0,
             "profile_backward_pct": 60.0,
         },
@@ -1285,6 +1286,7 @@ def test_summarize_results_skips_out_of_range_percentages() -> None:
             "setup_time_s": 0.20,
             "end_to_end_wall_time_s": 1.10,
             "profile_forward_backward_pct": 50.0,
+            "profile_forward_top_pct_of_parent": 75.0,
             "profile_loss_pct": 8.0,
         },
     ]
@@ -1294,11 +1296,14 @@ def test_summarize_results_skips_out_of_range_percentages() -> None:
     assert summary["mean_profile_forward_backward_pct"] == pytest.approx(50.0)
     assert summary["sample_count_profile_forward_backward_pct"] == pytest.approx(1.0)
     assert summary["invalid_count_profile_forward_backward_pct"] == pytest.approx(1.0)
+    assert summary["mean_profile_forward_top_pct_of_parent"] == pytest.approx(100.0)
+    assert "invalid_count_profile_forward_top_pct_of_parent" not in summary
     assert summary["mean_profile_loss_pct"] == pytest.approx(8.0)
     assert summary["invalid_count_profile_loss_pct"] == pytest.approx(1.0)
     assert summary["best_reported"]["run"] == 0
     assert "profile_forward_backward_pct" not in summary["best_reported"]
     assert "profile_loss_pct" not in summary["best_reported"]
+    assert summary["best_reported"]["profile_forward_top_pct_of_parent"] == pytest.approx(125.0)
     assert summary["best_reported"]["profile_backward_pct"] == pytest.approx(60.0)
     json.dumps(summary, allow_nan=False)
 

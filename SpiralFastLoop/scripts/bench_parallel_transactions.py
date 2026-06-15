@@ -258,6 +258,10 @@ PROFILE_SUMMARY_FIELDS = (
     + PROFILE_EVENT_SUMMARY_FIELDS
     + PROFILE_MODEL_SUMMARY_FIELDS
 )
+BOUNDED_PERCENT_SUMMARY_FIELDS = frozenset(
+    field for field in PROFILE_SUMMARY_FIELDS
+    if field.endswith("_pct")
+)
 
 DEVICE_MEMORY_SUMMARY_FIELDS = (
     "cuda_current_mem_bytes",
@@ -680,7 +684,7 @@ def _positive_sample_count_value(raw: object) -> Optional[float]:
 
 
 def _summary_metric_max_value(field: str) -> Optional[float]:
-    return 100.0 if field.endswith("_pct") else None
+    return 100.0 if field in BOUNDED_PERCENT_SUMMARY_FIELDS else None
 
 
 def _summary_metric_min_value(field: str) -> float:

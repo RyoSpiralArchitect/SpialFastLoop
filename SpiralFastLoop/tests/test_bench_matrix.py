@@ -1525,6 +1525,7 @@ def test_summarize_rows_skips_out_of_range_profile_percentages() -> None:
             "wall_time_s": 0.75,
             "dataset_materialized_bytes": 0,
             "profile_forward_backward_pct": 125.0,
+            "profile_forward_top_pct_of_parent": 125.0,
             "profile_loss_pct": -1.0,
             "profile_backward_pct": 40.0,
         },
@@ -1540,6 +1541,7 @@ def test_summarize_rows_skips_out_of_range_profile_percentages() -> None:
             "wall_time_s": 0.70,
             "dataset_materialized_bytes": 0,
             "profile_forward_backward_pct": 60.0,
+            "profile_forward_top_pct_of_parent": 75.0,
             "profile_loss_pct": 8.0,
         },
     ]
@@ -1550,6 +1552,8 @@ def test_summarize_rows_skips_out_of_range_profile_percentages() -> None:
     assert group["mean_profile_forward_backward_pct"] == pytest.approx(60.0)
     assert group["sample_count_profile_forward_backward_pct"] == pytest.approx(1.0)
     assert group["invalid_count_profile_forward_backward_pct"] == pytest.approx(1.0)
+    assert group["mean_profile_forward_top_pct_of_parent"] == pytest.approx(100.0)
+    assert "invalid_count_profile_forward_top_pct_of_parent" not in group
     assert group["mean_profile_loss_pct"] == pytest.approx(8.0)
     assert group["invalid_count_profile_loss_pct"] == pytest.approx(1.0)
     assert group["mean_profile_backward_pct"] == pytest.approx(40.0)
