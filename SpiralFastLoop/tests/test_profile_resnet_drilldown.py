@@ -248,6 +248,40 @@ def test_print_summary_formats_malformed_metrics_as_na(
     assert "<unnamed>: n/a avg=0.50ms" in output
 
 
+def test_print_summary_shows_breakdown_tracking_totals(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    metrics = {
+        "samples_per_sec": 1.0,
+        "profile": {
+            "phase_breakdowns": {
+                "forward": {
+                    "tracked_s": 0.07,
+                    "untracked_s": 0.03,
+                    "overtracked_s": 0.02,
+                    "top_children": [
+                        {"name": "conv", "pct_of_parent": 70.0, "avg_ms": 1.0},
+                    ],
+                },
+                "optimizer": {
+                    "tracked_s": 0.04,
+                    "untracked_s": 0.01,
+                    "overtracked_s": 0.0,
+                    "top_children": [
+                        {"name": "step", "pct_of_parent": 80.0, "avg_ms": 0.5},
+                    ],
+                },
+            },
+        },
+    }
+
+    drilldown._print_summary(metrics, topk=4)
+
+    output = capsys.readouterr().out
+    assert "forward drilldown: tracked=70.00ms untracked=30.00ms overtracked=20.00ms" in output
+    assert "optimizer drilldown: tracked=40.00ms untracked=10.00ms" in output
+
+
 def test_print_summary_ignores_malformed_profile_container(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

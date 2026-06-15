@@ -605,6 +605,27 @@ def _profile_child_rows(profile: dict[str, Any], section: str, group: str) -> li
     return _list_value(group_profile.get("top_children"))
 
 
+def _profile_breakdown(profile: dict[str, Any], group: str) -> dict[str, Any]:
+    breakdowns = _dict_value(profile.get("phase_breakdowns"))
+    return _dict_value(breakdowns.get(group))
+
+
+def _format_profile_breakdown_summary(profile: dict[str, Any], group: str) -> str:
+    breakdown = _profile_breakdown(profile, group)
+    if not breakdown:
+        return ""
+    parts = [
+        f"tracked={_format_metric_value(breakdown.get('tracked_s'), precision=2, scale=1e3, suffix='ms')}",
+        f"untracked={_format_metric_value(breakdown.get('untracked_s'), precision=2, scale=1e3, suffix='ms')}",
+    ]
+    if _has_positive_display_value(breakdown.get("overtracked_s")):
+        parts.append(
+            f"overtracked="
+            f"{_format_metric_value(breakdown.get('overtracked_s'), precision=2, scale=1e3, suffix='ms')}"
+        )
+    return " ".join(parts)
+
+
 def validate_benchmark_args(args: argparse.Namespace) -> None:
     steps = _positive_int_setting(args.steps, "steps")
     warmup_steps = _non_negative_int_setting(args.warmup_steps, "warmup_steps")
@@ -922,13 +943,15 @@ def main() -> None:
             print(f"  phases: {top_phases}")
             forward = _profile_child_rows(profile, "phase_breakdowns", "forward")
             if forward:
+                forward_summary = _format_profile_breakdown_summary(profile, "forward")
                 top_forward = ", ".join(
                     f"{_profile_row_name(row)}="
                     f"{_format_metric_value(row.get('pct_of_parent'), precision=1, suffix='%')}"
                     for row in forward[:4]
                     if isinstance(row, dict)
                 )
-                print(f"  forward: {top_forward}")
+                suffix = f" ({forward_summary})" if forward_summary else ""
+                print(f"  forward: {top_forward}{suffix}")
             backward = _profile_child_rows(profile, "phase_events", "backward_grad_ready")
             if backward:
                 top_backward = ", ".join(
@@ -939,13 +962,15 @@ def main() -> None:
                 print(f"  backward_grad_ready: {top_backward}")
             optimizer = _profile_child_rows(profile, "phase_breakdowns", "optimizer")
             if optimizer:
+                optimizer_summary = _format_profile_breakdown_summary(profile, "optimizer")
                 top_optimizer = ", ".join(
                     f"{_profile_row_name(row)}="
                     f"{_format_metric_value(row.get('pct_of_parent'), precision=1, suffix='%')}"
                     for row in optimizer[:4]
                     if isinstance(row, dict)
                 )
-                print(f"  optimizer: {top_optimizer}")
+                suffix = f" ({optimizer_summary})" if optimizer_summary else ""
+                print(f"  optimizer: {top_optimizer}{suffix}")
 
     payload = [result.as_dict() for result in results]
     aggregate = summarize_results(payload)

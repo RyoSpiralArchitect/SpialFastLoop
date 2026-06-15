@@ -25,6 +25,7 @@ from scripts.bench_parallel_transactions import (
     _dict_value,
     _format_count,
     _format_metric_value,
+    _format_profile_breakdown_summary,
     _has_positive_display_value,
     _list_value,
     _optional_path_setting,
@@ -139,7 +140,8 @@ def _print_summary(metrics: dict[str, Any], topk: int) -> None:
 
     forward = _top_rows(profile, "forward", "forward", topk)
     if forward:
-        print("forward drilldown:")
+        summary = _format_profile_breakdown_summary(profile, "forward")
+        print(f"forward drilldown: {summary}" if summary else "forward drilldown:")
         for row in forward:
             print(
                 f"  {_profile_row_name(row)}: "
@@ -160,7 +162,8 @@ def _print_summary(metrics: dict[str, Any], topk: int) -> None:
 
     optimizer = _top_rows(profile, "optimizer", "breakdown", topk)
     if optimizer:
-        print("optimizer drilldown:")
+        summary = _format_profile_breakdown_summary(profile, "optimizer")
+        print(f"optimizer drilldown: {summary}" if summary else "optimizer drilldown:")
         for row in optimizer:
             print(
                 f"  {_profile_row_name(row)}: "

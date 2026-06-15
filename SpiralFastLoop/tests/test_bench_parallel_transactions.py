@@ -21,6 +21,7 @@ from scripts.bench_parallel_transactions import (
     _best_finite_row,
     _format_count,
     _format_metric_value,
+    _format_profile_breakdown_summary,
     _has_positive_display_value,
     _profile_row_name,
     build_model,
@@ -1135,6 +1136,33 @@ def test_display_formatters_hide_malformed_values() -> None:
     assert _has_positive_display_value(2)
     for raw in (0, None, True, "2", float("nan"), float("inf"), FailingFloat()):
         assert not _has_positive_display_value(raw)
+
+
+def test_format_profile_breakdown_summary_includes_overtracked_when_positive() -> None:
+    profile = {
+        "phase_breakdowns": {
+            "forward": {
+                "tracked_s": 0.07,
+                "untracked_s": 0.03,
+                "overtracked_s": 0.02,
+            },
+            "optimizer": {
+                "tracked_s": 0.04,
+                "untracked_s": 0.01,
+                "overtracked_s": 0.0,
+            },
+        },
+    }
+
+    assert _format_profile_breakdown_summary(
+        profile,
+        "forward",
+    ) == "tracked=70.00ms untracked=30.00ms overtracked=20.00ms"
+    assert _format_profile_breakdown_summary(
+        profile,
+        "optimizer",
+    ) == "tracked=40.00ms untracked=10.00ms"
+    assert _format_profile_breakdown_summary(profile, "loss") == ""
 
 
 @pytest.mark.parametrize(
