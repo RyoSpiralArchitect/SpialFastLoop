@@ -2456,6 +2456,42 @@ def test_profile_flat_metrics_skip_negative_and_out_of_range_values() -> None:
     ]
 
 
+def test_profile_flat_metrics_skip_missing_phase_fields() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "phases": {
+            "forward": {"pct": 10.0},
+            "backward": {"total_s": 0.2, "avg_ms": 0.7},
+            "optimizer": {},
+        },
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert "profile_total_s" not in metrics
+    assert "profile_forward_time_s" not in metrics
+    assert metrics["profile_forward_pct"] == pytest.approx(10.0)
+    assert "profile_forward_avg_ms" not in metrics
+    assert metrics["profile_backward_time_s"] == pytest.approx(0.2)
+    assert "profile_backward_pct" not in metrics
+    assert metrics["profile_backward_avg_ms"] == pytest.approx(0.7)
+    assert "profile_optimizer_time_s" not in metrics
+    assert "profile_optimizer_pct" not in metrics
+    assert "profile_optimizer_avg_ms" not in metrics
+    assert metrics["profile_forward_backward_time_s"] == pytest.approx(0.2)
+    assert metrics["profile_forward_backward_pct"] == pytest.approx(10.0)
+    assert metrics["profile_flat_metric_invalid_count"] == 7
+    assert metrics["profile_flat_metric_invalid_fields"] == [
+        "profile_total_s",
+        "profile_forward_time_s",
+        "profile_forward_avg_ms",
+        "profile_backward_pct",
+        "profile_optimizer_time_s",
+        "profile_optimizer_pct",
+        "profile_optimizer_avg_ms",
+    ]
+
+
 def test_profile_flat_metrics_omit_combined_pct_above_100() -> None:
     metrics: dict[str, object] = {}
     profile = {

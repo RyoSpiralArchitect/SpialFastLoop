@@ -58,6 +58,7 @@ _PROFILE_PHASE_METRIC_NAMES = (
     "collect_output",
     "metrics",
 )
+_PROFILE_METRIC_MISSING = object()
 
 _BATCH_SIZE_INFERENCE_FAILURE_REASONS = (
     "tensor_scalar",
@@ -138,7 +139,12 @@ def _record_profile_flat_metric_invalids(metrics: Dict[str, Any], invalid_fields
 def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, Any]) -> None:
     """Expose common phase timers as flat metrics for benchmark tables."""
     invalid_fields: list[str] = []
-    _set_profile_metric(metrics, "profile_total_s", profile.get("profile_total_s", 0.0), invalid_fields)
+    _set_profile_metric(
+        metrics,
+        "profile_total_s",
+        profile.get("profile_total_s", _PROFILE_METRIC_MISSING),
+        invalid_fields,
+    )
     phases = profile.get("phases", {})
     if not isinstance(phases, Mapping):
         _record_profile_flat_metric_invalids(metrics, invalid_fields)
@@ -155,20 +161,20 @@ def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, An
         time_s = _set_profile_metric(
             metrics,
             f"profile_{phase_name}_time_s",
-            row.get("total_s", 0.0),
+            row.get("total_s", _PROFILE_METRIC_MISSING),
             invalid_fields,
         )
         pct = _set_profile_metric(
             metrics,
             f"profile_{phase_name}_pct",
-            row.get("pct", 0.0),
+            row.get("pct", _PROFILE_METRIC_MISSING),
             invalid_fields,
             max_value=100.0,
         )
         _set_profile_metric(
             metrics,
             f"profile_{phase_name}_avg_ms",
-            row.get("avg_ms", 0.0),
+            row.get("avg_ms", _PROFILE_METRIC_MISSING),
             invalid_fields,
         )
         if phase_name in {"forward", "backward"}:
