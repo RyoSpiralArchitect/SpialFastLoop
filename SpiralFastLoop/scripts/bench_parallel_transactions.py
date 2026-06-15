@@ -914,6 +914,16 @@ def _set_profile_bottleneck_category_top_fields(
     entry["top_unit"] = candidate.get("unit", "")
     entry["top_score_basis"] = candidate.get("score_basis", "")
     entry["top_score_formula"] = candidate.get("score_formula", "")
+    for candidate_key, entry_key in (
+        ("label", "top_label"),
+        ("reason", "top_reason"),
+        ("next_step", "top_next_step"),
+    ):
+        text_value = candidate.get(candidate_key)
+        if isinstance(text_value, str) and text_value:
+            entry[entry_key] = text_value
+        else:
+            entry.pop(entry_key, None)
 
     parent_metric = candidate.get("parent_metric")
     parent_value = candidate.get("parent_value")

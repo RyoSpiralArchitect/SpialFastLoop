@@ -987,6 +987,9 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
         "top_unit": "profile_pct",
         "top_score_basis": "direct_metric",
         "top_score_formula": "score=value",
+        "top_label": "backward phase",
+        "top_reason": "backward owns a large share of profiled loop time",
+        "top_next_step": "inspect gradient-ready span and backward top-child metrics",
         "severity_counts": {"high": 1, "medium": 2},
         "pressure_rank": 1,
     }
@@ -1006,6 +1009,9 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
         "top_unit": "profile_pct",
         "top_score_basis": "direct_metric",
         "top_score_formula": "score=value",
+        "top_label": "backward phase",
+        "top_reason": "backward owns a large share of profiled loop time",
+        "top_next_step": "inspect gradient-ready span and backward top-child metrics",
         "severity_counts": {"high": 1, "medium": 2},
         "pressure_rank": 1,
     }
@@ -1027,6 +1033,9 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
         "top_score_formula": "score=parent_value*value/100",
         "top_parent_metric": "profile_backward_pct",
         "top_parent_value": pytest.approx(50.0),
+        "top_label": "backward ready top child",
+        "top_reason": "one module dominates gradient-ready timing",
+        "top_next_step": "focus backward inspection on the slowest ready module",
         "severity_counts": {"medium": 2, "low": 1},
         "pressure_rank": 3,
     }
@@ -1048,6 +1057,9 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
         "top_score_formula": "score=parent_value*value/100",
         "top_parent_metric": "profile_forward_pct",
         "top_parent_value": pytest.approx(20.0),
+        "top_label": "forward untracked time",
+        "top_reason": "a large share of forward time is outside child timers",
+        "top_next_step": "increase model profiling coverage or include narrower module filters",
         "severity_counts": {"low": 2},
         "pressure_rank": 4,
     }

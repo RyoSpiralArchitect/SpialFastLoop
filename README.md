@@ -95,8 +95,9 @@ capped. Summaries also expose `profile_bottleneck_top_candidate`,
 `profile_bottleneck_severity_thresholds`, and
 `profile_bottleneck_category_summary` for dashboards that compare phase-share,
 coverage-gap, child-hotspot, and readiness-span pressure directly. Category
-summaries include max, total, mean, ranking `pressure_score`, `pressure_rank`, and
-top-candidate metric/value/provenance plus severity-count pressure per category.
+summaries include max, total, mean, ranking `pressure_score`, `pressure_rank`,
+top-candidate label/reason/next-step, metric/value/provenance, and
+severity-count pressure per category.
 Matrix summaries surface the same signal as
 compact `hotspot=...` and strongest-first `pressure(...)` fragments, including
 the top hotspot severity, category-level severity suffixes such as `[high]`,

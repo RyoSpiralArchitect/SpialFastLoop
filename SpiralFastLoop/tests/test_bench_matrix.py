@@ -1586,6 +1586,9 @@ def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
         "top_unit": "profile_pct",
         "top_score_basis": "direct_metric",
         "top_score_formula": "score=value",
+        "top_label": "backward phase",
+        "top_reason": "backward owns a large share of profiled loop time",
+        "top_next_step": "inspect gradient-ready span and backward top-child metrics",
         "severity_counts": {"high": 1, "medium": 1},
         "pressure_rank": 1,
     }
@@ -1605,6 +1608,9 @@ def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
         "top_unit": "profile_pct",
         "top_score_basis": "direct_metric",
         "top_score_formula": "score=value",
+        "top_label": "backward phase",
+        "top_reason": "backward owns a large share of profiled loop time",
+        "top_next_step": "inspect gradient-ready span and backward top-child metrics",
         "severity_counts": {"high": 1, "medium": 1},
         "pressure_rank": 1,
     }
@@ -1626,6 +1632,9 @@ def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
         "top_score_formula": "score=parent_value*value/100",
         "top_parent_metric": "profile_backward_pct",
         "top_parent_value": pytest.approx(30.0),
+        "top_label": "backward readiness span",
+        "top_reason": "gradient readiness is spread across a large part of backward time",
+        "top_next_step": "look for long gaps between earliest and latest ready modules",
         "severity_counts": {"medium": 1},
         "pressure_rank": 2,
     }
