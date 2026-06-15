@@ -901,6 +901,30 @@ def profile_bottleneck_candidates_for_summary(summary: dict) -> list[dict[str, o
     return _ranked_profile_bottleneck_candidates(summary)[:PROFILE_BOTTLENECK_CANDIDATE_LIMIT]
 
 
+def _set_profile_bottleneck_category_top_fields(
+    entry: dict[str, object],
+    candidate: dict[str, object],
+) -> None:
+    entry["score_unit"] = candidate.get("score_unit", "")
+    entry["top_candidate"] = candidate.get("name", "")
+    entry["top_rank"] = candidate.get("rank", 0)
+    entry["top_severity"] = candidate.get("severity", "")
+    entry["top_metric"] = candidate.get("metric", "")
+    entry["top_value"] = candidate.get("value", 0.0)
+    entry["top_unit"] = candidate.get("unit", "")
+    entry["top_score_basis"] = candidate.get("score_basis", "")
+    entry["top_score_formula"] = candidate.get("score_formula", "")
+
+    parent_metric = candidate.get("parent_metric")
+    parent_value = candidate.get("parent_value")
+    if isinstance(parent_metric, str) and parent_metric and parent_value is not None:
+        entry["top_parent_metric"] = parent_metric
+        entry["top_parent_value"] = parent_value
+    else:
+        entry.pop("top_parent_metric", None)
+        entry.pop("top_parent_value", None)
+
+
 def _profile_bottleneck_category_summary(
     candidates: list[dict[str, object]],
 ) -> dict[str, dict[str, object]]:
@@ -920,13 +944,12 @@ def _profile_bottleneck_category_summary(
                 "mean_score": 0.0,
                 "pressure_score": 0.0,
                 "pressure_score_unit": candidate.get("score_unit", ""),
-                "score_unit": candidate.get("score_unit", ""),
-                "top_candidate": candidate.get("name", ""),
-                "top_rank": candidate.get("rank", 0),
-                "top_severity": candidate.get("severity", ""),
+                "score_unit": "",
                 "severity_counts": {},
             },
         )
+        if entry["count"] == 0:
+            _set_profile_bottleneck_category_top_fields(entry, candidate)
         entry["count"] = int(entry["count"]) + 1
         total_score = _finite_summary_value(entry.get("total_score"))
         entry["total_score"] = (total_score or 0.0) + score
@@ -937,10 +960,7 @@ def _profile_bottleneck_category_summary(
         max_score = _finite_summary_value(entry.get("max_score"))
         if max_score is None or score > max_score:
             entry["max_score"] = score
-            entry["score_unit"] = candidate.get("score_unit", "")
-            entry["top_candidate"] = candidate.get("name", "")
-            entry["top_rank"] = candidate.get("rank", 0)
-            entry["top_severity"] = candidate.get("severity", "")
+            _set_profile_bottleneck_category_top_fields(entry, candidate)
     for entry in category_summary.values():
         count = int(entry.get("count", 0))
         total_score = _finite_summary_value(entry.get("total_score"))
