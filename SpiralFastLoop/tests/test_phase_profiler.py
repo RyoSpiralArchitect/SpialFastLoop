@@ -1249,6 +1249,7 @@ def test_evaluate_distributed_summary_sums_metrics_fn_counts(
     assert metrics["steps"] == 2
     assert metrics["batches"] == pytest.approx(2.0)
     assert metrics["samples"] == 4
+    assert type(metrics["samples"]) is int
     assert metrics["measured_steps"] == 2
     assert metrics["unmeasured_steps"] == 0
     assert metrics["samples_per_sec"] == pytest.approx(
@@ -1307,6 +1308,7 @@ def test_train_distributed_summary_sums_workload_counters(
     assert metrics["steps"] == 4
     assert metrics["batches"] == pytest.approx(4.0)
     assert metrics["samples"] == 8
+    assert type(metrics["samples"]) is int
     assert metrics["samples_per_sec"] == pytest.approx(
         metrics["samples"] / metrics["total_time_s"]
     )
@@ -1765,6 +1767,7 @@ def test_predict_distributed_summary_sums_counter_metrics(
     assert metrics["steps"] == 2
     assert metrics["batches"] == pytest.approx(2.0)
     assert metrics["samples"] == 4
+    assert type(metrics["samples"]) is int
     assert metrics["measured_steps"] == 2
     assert metrics["unmeasured_steps"] == 0
     assert metrics["samples_per_sec"] == pytest.approx(

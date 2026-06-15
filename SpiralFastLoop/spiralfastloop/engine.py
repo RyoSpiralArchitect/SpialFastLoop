@@ -1872,6 +1872,7 @@ class FastTrainer:
                     batches=measured_steps,
                     device=torch.device(self.device),
                 )
+                metrics["samples"] = total_items
             metrics["reported_samples_per_sec"] = metrics["samples_per_sec"]
             metrics["device"] = self.device
             metrics["world_size"] = self.dist_ctx.world_size
@@ -2182,6 +2183,7 @@ class FastTrainer:
                     batches=measured_steps,
                     device=torch.device(self.device),
                 )
+                metrics["samples"] = total_items
             metrics["reported_samples_per_sec"] = metrics["samples_per_sec"]
             metrics["device"] = self.device
             metrics["world_size"] = self.dist_ctx.world_size
