@@ -20,6 +20,7 @@ from bench_parallel_transactions import (
     _format_metric_value,
     _format_profile_model_hook_summary,
     _format_scheduler_summary,
+    _format_setup_breakdown,
     _int_arg,
     _positive_sample_count_value,
     _profile_model_status_counts,
@@ -224,16 +225,13 @@ def _format_summary_row(row: dict) -> str:
     )
     setup_time_s = _measured_summary_value(row, "mean_setup_time_s")
     setup_text = f" setup={setup_time_s:.2f}s" if setup_time_s is not None else ""
-    setup_parts = []
-    for field, label in (
-        ("mean_dataset_setup_time_s", "dataset"),
-        ("mean_loader_setup_time_s", "loader"),
-        ("mean_model_setup_time_s", "model"),
-    ):
-        value = _measured_summary_value(row, field)
-        if value is not None and value > 0.0:
-            setup_parts.append(f"{label}={value:.2f}s")
-    setup_breakdown = f" init({','.join(setup_parts)})" if setup_parts else ""
+    setup_breakdown = _format_setup_breakdown({
+        "dataset_setup_time_s": _measured_summary_value(row, "mean_dataset_setup_time_s"),
+        "loader_setup_time_s": _measured_summary_value(row, "mean_loader_setup_time_s"),
+        "model_setup_time_s": _measured_summary_value(row, "mean_model_setup_time_s"),
+        "compile_init_time_s": _measured_summary_value(row, "mean_compile_init_time_s"),
+    })
+    setup_breakdown_text = f" {setup_breakdown}" if setup_breakdown else ""
     profile_parts = []
     forward_backward_pct = _measured_summary_value(row, "mean_profile_forward_backward_pct")
     if forward_backward_pct is not None:
@@ -301,7 +299,7 @@ def _format_summary_row(row: dict) -> str:
         f"reported={reported_text} "
         f"e2e={end_to_end_text}"
         f"{setup_text}"
-        f"{setup_breakdown}"
+        f"{setup_breakdown_text}"
         f"{profile_suffix}"
     )
 
@@ -317,6 +315,15 @@ def _format_run_row(dataset_mode: str, compile_mode: str, workers: int, run_inde
         precision=2,
         suffix="s",
     )
+    setup_parts = []
+    if "setup_time_s" in result:
+        setup_parts.append(
+            f"setup={_format_metric_value(result.get('setup_time_s'), precision=2, suffix='s')}"
+        )
+    setup_breakdown = _format_setup_breakdown(result)
+    if setup_breakdown:
+        setup_parts.append(setup_breakdown)
+    setup_prefix = f"{' '.join(setup_parts)} " if setup_parts else ""
     profile_model_summary = _format_profile_model_hook_summary(result)
     profile_suffix = f" profile_model({profile_model_summary})" if profile_model_summary else ""
     scheduler_summary = _format_scheduler_summary(result)
@@ -325,6 +332,7 @@ def _format_run_row(dataset_mode: str, compile_mode: str, workers: int, run_inde
         f"{dataset_mode:>12} {compile_mode:>10} workers={workers:<2} "
         f"run={run_index:<2} "
         f"steady={steady_text} "
+        f"{setup_prefix}"
         f"e2e={e2e_text}"
         f"{profile_suffix}"
         f"{scheduler_suffix}"

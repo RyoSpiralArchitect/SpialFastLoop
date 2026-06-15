@@ -138,12 +138,13 @@ def test_format_summary_row_includes_setup_breakdown_when_available() -> None:
         "mean_dataset_setup_time_s": 0.05,
         "mean_loader_setup_time_s": 0.07,
         "mean_model_setup_time_s": 0.13,
+        "mean_compile_init_time_s": 0.02,
     }
 
     formatted = _format_summary_row(row)
 
     assert "setup=0.25s" in formatted
-    assert "init(dataset=0.05s,loader=0.07s,model=0.13s)" in formatted
+    assert "init(dataset=0.05s,loader=0.07s,model=0.13s,compile=0.02s)" in formatted
 
 
 def test_format_summary_row_includes_open_timer_counts_when_positive() -> None:
@@ -512,6 +513,28 @@ def test_format_run_row_uses_reported_and_e2e_metrics() -> None:
     assert "steady=123.5/s" in row
     assert "e2e=1.23s" in row
     assert "profile_model(" not in row
+
+
+def test_format_run_row_includes_setup_breakdown_when_available() -> None:
+    row = _format_run_row(
+        "generated",
+        "no-compile",
+        0,
+        0,
+        {
+            "reported_samples_per_sec": 123.45,
+            "end_to_end_wall_time_s": 1.234,
+            "setup_time_s": 0.27,
+            "dataset_setup_time_s": 0.05,
+            "loader_setup_time_s": 0.07,
+            "model_setup_time_s": 0.13,
+            "compile_init_time_s": 0.02,
+        },
+    )
+
+    assert "setup=0.27s" in row
+    assert "init(dataset=0.05s,loader=0.07s,model=0.13s,compile=0.02s)" in row
+    assert "init(" in row.split("e2e=")[0]
 
 
 def test_format_run_row_falls_back_to_total_metrics() -> None:
