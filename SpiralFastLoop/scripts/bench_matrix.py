@@ -18,6 +18,7 @@ from bench_parallel_transactions import (
     _best_finite_row,
     _finite_summary_value,
     _format_metric_value,
+    _format_profile_bottleneck_candidate_counts,
     _format_profile_bottleneck_category_pressure,
     _format_profile_bottleneck_severity_counts,
     _format_profile_model_hook_summary,
@@ -440,6 +441,9 @@ def _format_summary_row(row: dict) -> str:
     bottleneck_severity_counts = _format_profile_bottleneck_severity_counts(row)
     if bottleneck_severity_counts:
         profile_parts.append(bottleneck_severity_counts)
+    bottleneck_candidate_counts = _format_profile_bottleneck_candidate_counts(row)
+    if bottleneck_candidate_counts:
+        profile_parts.append(bottleneck_candidate_counts)
     scheduler_failures = _measured_summary_value(row, "mean_scheduler_step_failures")
     if scheduler_failures is not None and scheduler_failures > 0.0:
         profile_parts.append(f"scheduler(failures={scheduler_failures:.1f})")
@@ -491,6 +495,9 @@ def _format_run_row(dataset_mode: str, compile_mode: str, workers: int, run_inde
     bottleneck_severity_counts = _format_profile_bottleneck_severity_counts(bottleneck_source)
     if bottleneck_severity_counts:
         profile_parts.append(bottleneck_severity_counts)
+    bottleneck_candidate_counts = _format_profile_bottleneck_candidate_counts(bottleneck_source)
+    if bottleneck_candidate_counts:
+        profile_parts.append(bottleneck_candidate_counts)
     profile_suffix = f" {' '.join(profile_parts)}" if profile_parts else ""
     return (
         f"{dataset_mode:>12} {compile_mode:>10} workers={workers:<2} "

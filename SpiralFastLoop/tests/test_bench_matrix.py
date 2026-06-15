@@ -433,6 +433,10 @@ def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
             "high": 2,
             "medium": 1,
         },
+        "profile_bottleneck_candidate_count": 3,
+        "profile_bottleneck_candidate_returned_count": 2,
+        "profile_bottleneck_candidate_limit": 2,
+        "profile_bottleneck_candidate_omitted_count": 1,
         "profile_bottleneck_category_summary": {
             "child_hotspot": {
                 "count": 1,
@@ -467,6 +471,7 @@ def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
         "#2 child_hotspot:forward_top_child=35.0%[high];sum=35.0%;omitted=1;top_omitted)"
     ) in formatted
     assert "severity_counts(high=2,medium=1)" in formatted
+    assert "candidates=2/3;omitted=1;limit=2" in formatted
 
 
 def test_format_summary_row_orders_bottleneck_pressure_by_total_score_and_skips_malformed() -> None:

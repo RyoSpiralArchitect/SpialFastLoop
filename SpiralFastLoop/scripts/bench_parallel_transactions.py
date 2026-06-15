@@ -1749,6 +1749,27 @@ def _format_profile_bottleneck_severity_counts(summary: dict[str, Any]) -> str:
     return f"severity_counts({','.join(parts)})"
 
 
+def _format_profile_bottleneck_candidate_counts(summary: dict[str, Any]) -> str:
+    total = _display_count_value(summary.get("profile_bottleneck_candidate_count"))
+    returned = _display_count_value(summary.get("profile_bottleneck_candidate_returned_count"))
+    if total is None or returned is None or total <= 0 or returned > total:
+        return ""
+
+    omitted = _display_count_value(summary.get("profile_bottleneck_candidate_omitted_count"))
+    if omitted is None:
+        omitted = total - returned
+    if omitted <= 0 and returned == total:
+        return ""
+
+    parts = [f"candidates={returned}/{total}"]
+    if omitted > 0:
+        parts.append(f"omitted={omitted}")
+    limit = _display_count_value(summary.get("profile_bottleneck_candidate_limit"))
+    if limit is not None and limit > 0 and returned >= limit and returned < total:
+        parts.append(f"limit={limit}")
+    return ";".join(parts)
+
+
 def _format_profile_bottleneck_category_pressure(
     category_name: str,
     entry: dict[str, object],
@@ -1809,6 +1830,9 @@ def _format_profile_bottleneck_summary(summary: dict[str, Any]) -> str:
     severity_counts = _format_profile_bottleneck_severity_counts(summary)
     if severity_counts:
         parts.append(severity_counts)
+    candidate_counts = _format_profile_bottleneck_candidate_counts(summary)
+    if candidate_counts:
+        parts.append(candidate_counts)
 
     category_summary = summary.get("profile_bottleneck_category_summary")
     category_parts = []

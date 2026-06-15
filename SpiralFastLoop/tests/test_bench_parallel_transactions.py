@@ -2932,6 +2932,43 @@ def test_format_profile_bottleneck_category_pressure_includes_omitted_count() ->
     assert text == "#4 coverage_gap:forward_untracked=12.5%[medium]/3;sum=20.0%;omitted=2;top_omitted"
 
 
+def test_format_profile_bottleneck_candidate_counts_marks_cap() -> None:
+    assert bpt._format_profile_bottleneck_candidate_counts({
+        "profile_bottleneck_candidate_count": 9,
+        "profile_bottleneck_candidate_returned_count": 8,
+        "profile_bottleneck_candidate_limit": 8,
+        "profile_bottleneck_candidate_omitted_count": 1,
+    }) == "candidates=8/9;omitted=1;limit=8"
+    assert bpt._format_profile_bottleneck_candidate_counts({
+        "profile_bottleneck_candidate_count": 4,
+        "profile_bottleneck_candidate_returned_count": 4,
+        "profile_bottleneck_candidate_limit": 8,
+    }) == ""
+    assert bpt._format_profile_bottleneck_candidate_counts({
+        "profile_bottleneck_candidate_count": 3,
+        "profile_bottleneck_candidate_returned_count": 4,
+    }) == ""
+
+
+def test_format_profile_bottleneck_summary_includes_candidate_cap_counts() -> None:
+    text = bpt._format_profile_bottleneck_summary({
+        "profile_bottleneck_top_candidate": {
+            "name": "forward_phase",
+            "score": 42.0,
+            "score_unit": "profile_pct",
+            "rank": 1,
+            "category": "phase_share",
+            "severity": "high",
+        },
+        "profile_bottleneck_candidate_count": 9,
+        "profile_bottleneck_candidate_returned_count": 8,
+        "profile_bottleneck_candidate_limit": 8,
+        "profile_bottleneck_candidate_omitted_count": 1,
+    })
+
+    assert "candidates=8/9;omitted=1;limit=8" in text
+
+
 def test_transaction_benchmark_records_run_seed() -> None:
     class Args:
         transactions = 64

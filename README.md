@@ -107,7 +107,8 @@ compact `hotspot=...` and strongest-first `pressure(...)` fragments, including
 the top hotspot severity, category-level severity suffixes such as `[high]`,
 category pressure ranks such as `#1`, category `sum=...`, and
 category `omitted=...` and `top_omitted` markers when the candidate list is capped, plus
-`severity_counts(...)`. The
+`severity_counts(...)` and global cap markers such as
+`candidates=8/9;omitted=1;limit=8`. The
 transactional benchmark prints the same severity-aware `Bottleneck:` line before
 the aggregate JSON when candidates are available.
 The ResNet drilldown script prints the same top-phase tail fields. Throughput
