@@ -948,6 +948,11 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
     assert summary["profile_bottleneck_candidate_returned_count"] == 8
     assert summary["profile_bottleneck_candidate_limit"] == 8
     assert summary["profile_bottleneck_candidate_omitted_count"] == 1
+    assert summary["profile_bottleneck_severity_counts"] == {
+        "high": 2,
+        "medium": 4,
+        "low": 3,
+    }
     assert len(candidates) == 8
     assert summary["profile_bottleneck_top_candidate"] == candidates[0]
     category_summary = summary["profile_bottleneck_category_summary"]
@@ -957,6 +962,7 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
         "score_unit": "profile_pct",
         "top_candidate": "backward_phase",
         "top_rank": 1,
+        "top_severity": "high",
     }
     assert category_summary["child_hotspot"] == {
         "count": 3,
@@ -964,6 +970,7 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
         "score_unit": "profile_pct",
         "top_candidate": "backward_ready_top_child",
         "top_rank": 4,
+        "top_severity": "medium",
     }
     assert category_summary["coverage_gap"] == {
         "count": 2,
@@ -971,6 +978,7 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
         "score_unit": "profile_pct",
         "top_candidate": "forward_untracked",
         "top_rank": 8,
+        "top_severity": "low",
     }
     assert [candidate["name"] for candidate in candidates[:4]] == [
         "backward_phase",
@@ -995,17 +1003,21 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
     assert backward_phase["next_step"] == "inspect gradient-ready span and backward top-child metrics"
     assert backward_phase["score"] == pytest.approx(50.0)
     assert backward_phase["score_unit"] == "profile_pct"
+    assert backward_phase["severity"] == "high"
     backward_span = candidates[1]
     assert backward_span["score"] == pytest.approx(40.0)
+    assert backward_span["severity"] == "high"
     assert backward_span["parent_metric"] == "profile_backward_pct"
     assert backward_span["parent_value"] == pytest.approx(50.0)
     assert backward_span["span_avg_ms"] == pytest.approx(8.0)
+    assert candidates[2]["severity"] == "medium"
     forward_top = next(
         candidate
         for candidate in candidates
         if candidate["name"] == "forward_top_child"
     )
     assert forward_top["score"] == pytest.approx(10.0)
+    assert forward_top["severity"] == "medium"
     assert forward_top["avg_ms"] == pytest.approx(5.0)
     json.dumps(summary, allow_nan=False)
 
@@ -1029,6 +1041,7 @@ def test_summarize_results_skips_invalid_profile_bottleneck_candidates() -> None
 
     assert "profile_bottleneck_candidate_count" not in summary
     assert "profile_bottleneck_category_summary" not in summary
+    assert "profile_bottleneck_severity_counts" not in summary
     assert "profile_bottleneck_top_candidate" not in summary
     assert "profile_bottleneck_candidates" not in summary
     json.dumps(summary, allow_nan=False)
@@ -2595,7 +2608,7 @@ def test_main_prints_backward_event_parent_position(
     assert "backward_grad_ready: model.0=3.5ms@35.0% p95=4.5ms calls=2 samples=2 window=2, model.2=1.2ms calls=1" in output
     assert "optimizer: optimizer.step=80.0% avg=3.25ms p95=4.50ms calls=1" in output
     assert (
-        "Bottleneck: #1 forward_phase=42.5% category=phase_share "
+        "Bottleneck: #1 forward_phase=42.5% category=phase_share severity=high "
         "next=inspect forward top-child and tail metrics"
     ) in output
     assert (

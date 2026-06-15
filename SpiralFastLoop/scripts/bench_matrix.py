@@ -278,9 +278,15 @@ def _format_top_bottleneck_candidate(row: dict) -> str:
         return ""
     suffix = "%" if candidate.get("score_unit") == "profile_pct" else ""
     text = f"hotspot={name}:{score:.1f}{suffix}"
+    qualifiers = []
     category = candidate.get("category")
     if isinstance(category, str) and category:
-        text = f"{text}({category})"
+        qualifiers.append(category)
+    severity = candidate.get("severity")
+    if isinstance(severity, str) and severity:
+        qualifiers.append(severity)
+    if qualifiers:
+        text = f"{text}({','.join(qualifiers)})"
     return text
 
 

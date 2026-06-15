@@ -579,6 +579,11 @@ PROFILE_MODEL_RESULT_FIELDS = frozenset({
     "profile_model_hook_last_error",
 })
 PROFILE_BOTTLENECK_CANDIDATE_LIMIT = 8
+PROFILE_BOTTLENECK_SEVERITY_LEVELS = (
+    ("high", 25.0),
+    ("medium", 10.0),
+    ("low", 0.0),
+)
 PROFILE_BOTTLENECK_CANDIDATE_SPECS = (
     {
         "name": "forward_phase",
@@ -775,6 +780,13 @@ def _finite_summary_value(raw: object) -> Optional[float]:
     return value
 
 
+def _profile_bottleneck_severity(score: float) -> str:
+    for severity, threshold in PROFILE_BOTTLENECK_SEVERITY_LEVELS:
+        if score >= threshold:
+            return severity
+    return "low"
+
+
 def _measured_summary_metric_value(summary: dict, metric: str) -> Optional[float]:
     field = f"mean_{metric}"
     if field not in summary:
@@ -835,6 +847,7 @@ def _profile_bottleneck_candidate(summary: dict, spec: dict[str, object]) -> Opt
         return None
     candidate["score"] = score
     candidate["score_unit"] = score_unit
+    candidate["severity"] = _profile_bottleneck_severity(score)
 
     details = spec.get("details", ())
     if isinstance(details, tuple):
@@ -891,6 +904,7 @@ def _profile_bottleneck_category_summary(
                 "score_unit": candidate.get("score_unit", ""),
                 "top_candidate": candidate.get("name", ""),
                 "top_rank": candidate.get("rank", 0),
+                "top_severity": candidate.get("severity", ""),
             },
         )
         entry["count"] = int(entry["count"]) + 1
@@ -900,7 +914,27 @@ def _profile_bottleneck_category_summary(
             entry["score_unit"] = candidate.get("score_unit", "")
             entry["top_candidate"] = candidate.get("name", "")
             entry["top_rank"] = candidate.get("rank", 0)
+            entry["top_severity"] = candidate.get("severity", "")
     return category_summary
+
+
+def _profile_bottleneck_severity_counts(
+    candidates: list[dict[str, object]],
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for candidate in candidates:
+        severity = candidate.get("severity")
+        if isinstance(severity, str) and severity:
+            counts[severity] = counts.get(severity, 0) + 1
+
+    ordered_counts = {
+        severity: counts[severity]
+        for severity, _threshold in PROFILE_BOTTLENECK_SEVERITY_LEVELS
+        if severity in counts
+    }
+    for severity in sorted(set(counts) - set(ordered_counts)):
+        ordered_counts[severity] = counts[severity]
+    return ordered_counts
 
 
 def _add_profile_bottleneck_candidates(summary: dict) -> None:
@@ -915,6 +949,9 @@ def _add_profile_bottleneck_candidates(summary: dict) -> None:
     if omitted_count > 0:
         summary["profile_bottleneck_candidate_omitted_count"] = omitted_count
     summary["profile_bottleneck_top_candidate"] = candidates[0]
+    summary["profile_bottleneck_severity_counts"] = _profile_bottleneck_severity_counts(
+        ranked_candidates
+    )
     summary["profile_bottleneck_category_summary"] = _profile_bottleneck_category_summary(ranked_candidates)
     summary["profile_bottleneck_candidates"] = candidates
 
@@ -1463,6 +1500,9 @@ def _format_profile_bottleneck_summary(summary: dict[str, Any]) -> str:
     category = top_candidate.get("category")
     if isinstance(category, str) and category:
         parts.append(f"category={category}")
+    severity = top_candidate.get("severity")
+    if isinstance(severity, str) and severity:
+        parts.append(f"severity={severity}")
     next_step = top_candidate.get("next_step")
     if isinstance(next_step, str) and next_step:
         parts.append(f"next={next_step}")
