@@ -914,6 +914,8 @@ def _profile_bottleneck_category_summary(
                 "max_score": score,
                 "total_score": 0.0,
                 "mean_score": 0.0,
+                "pressure_score": 0.0,
+                "pressure_score_unit": candidate.get("score_unit", ""),
                 "score_unit": candidate.get("score_unit", ""),
                 "top_candidate": candidate.get("name", ""),
                 "top_rank": candidate.get("rank", 0),
@@ -940,6 +942,10 @@ def _profile_bottleneck_category_summary(
         total_score = _finite_summary_value(entry.get("total_score"))
         if count > 0 and total_score is not None:
             entry["mean_score"] = total_score / count
+        pressure_score = _profile_bottleneck_category_pressure_score(entry)
+        if pressure_score is not None:
+            entry["pressure_score"] = pressure_score
+            entry["pressure_score_unit"] = entry.get("score_unit", "")
         severity_counts = entry.get("severity_counts")
         if isinstance(severity_counts, dict):
             entry["severity_counts"] = _ordered_profile_bottleneck_severity_counts(
@@ -972,22 +978,28 @@ def _ranked_profile_bottleneck_category_items(
     return ranked_items
 
 
+def _profile_bottleneck_category_pressure_score(
+    entry: dict[str, object],
+) -> Optional[float]:
+    total_score = _finite_summary_value(entry.get("total_score"))
+    if total_score is not None and total_score >= 0.0:
+        return total_score
+
+    max_score = _finite_summary_value(entry.get("max_score"))
+    if max_score is not None and max_score >= 0.0:
+        return max_score
+    return None
+
+
 def _profile_bottleneck_category_rank_key(
     category_name: str,
     entry: dict[str, object],
-) -> tuple[float, float, str]:
-    total_score = _finite_summary_value(entry.get("total_score"))
+) -> tuple[float, float, float, str]:
+    pressure_score = _profile_bottleneck_category_pressure_score(entry)
     max_score = _finite_summary_value(entry.get("max_score"))
     rank = _finite_summary_value(entry.get("top_rank"))
-    pressure_score = (
-        total_score
-        if total_score is not None
-        else max_score
-        if max_score is not None
-        else -1.0
-    )
     return (
-        -pressure_score,
+        -(pressure_score if pressure_score is not None else -1.0),
         -(max_score if max_score is not None else -1.0),
         rank if rank is not None else float("inf"),
         category_name,
