@@ -915,6 +915,89 @@ def test_summarize_results_preserves_backward_readiness_span_metrics() -> None:
     json.dumps(summary, allow_nan=False)
 
 
+def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
+    summary = summarize_results([
+        {
+            "run": 0,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 90.0,
+            "end_to_end_wall_time_s": 1.0,
+            "profile_forward_pct": 20.0,
+            "profile_forward_avg_ms": 2.0,
+            "profile_forward_untracked_pct": 25.0,
+            "profile_forward_coverage_pct": 75.0,
+            "profile_forward_top_pct_of_parent": 50.0,
+            "profile_forward_top_avg_ms": 5.0,
+            "profile_backward_pct": 50.0,
+            "profile_backward_grad_ready_span_pct": 80.0,
+            "profile_backward_grad_ready_span_avg_ms": 8.0,
+            "profile_backward_grad_ready_top_pct": 30.0,
+            "profile_backward_grad_ready_top_avg_ms": 3.0,
+            "profile_optimizer_pct": 10.0,
+            "profile_optimizer_top_pct_of_parent": 90.0,
+            "profile_optimizer_top_avg_ms": 3.0,
+        },
+    ])
+
+    candidates = summary["profile_bottleneck_candidates"]
+
+    assert summary["profile_bottleneck_candidate_count"] == 8
+    assert [candidate["name"] for candidate in candidates[:4]] == [
+        "backward_phase",
+        "backward_readiness_span",
+        "forward_phase",
+        "backward_ready_top_child",
+    ]
+    assert candidates == sorted(
+        candidates,
+        key=lambda candidate: (
+            -candidate["score"],
+            -candidate["value"],
+            candidate["name"],
+        ),
+    )
+    backward_phase = candidates[0]
+    assert backward_phase["metric"] == "profile_backward_pct"
+    assert backward_phase["score"] == pytest.approx(50.0)
+    assert backward_phase["score_unit"] == "profile_pct"
+    backward_span = candidates[1]
+    assert backward_span["score"] == pytest.approx(40.0)
+    assert backward_span["parent_metric"] == "profile_backward_pct"
+    assert backward_span["parent_value"] == pytest.approx(50.0)
+    assert backward_span["span_avg_ms"] == pytest.approx(8.0)
+    forward_top = next(
+        candidate
+        for candidate in candidates
+        if candidate["name"] == "forward_top_child"
+    )
+    assert forward_top["score"] == pytest.approx(10.0)
+    assert forward_top["avg_ms"] == pytest.approx(5.0)
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_results_skips_invalid_profile_bottleneck_candidates() -> None:
+    summary = summarize_results([
+        {
+            "run": 0,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 90.0,
+            "end_to_end_wall_time_s": 1.0,
+            "profile_forward_pct": float("inf"),
+            "profile_forward_untracked_pct": 50.0,
+            "profile_forward_top_pct_of_parent": 50.0,
+            "profile_backward_pct": -1.0,
+            "profile_backward_grad_ready_span_pct": 50.0,
+            "profile_optimizer_pct": 120.0,
+        },
+    ])
+
+    assert "profile_bottleneck_candidate_count" not in summary
+    assert "profile_bottleneck_candidates" not in summary
+    json.dumps(summary, allow_nan=False)
+
+
 def test_summarize_results_preserves_best_run_profile_model_failure_context() -> None:
     summary = summarize_results([
         {

@@ -21,6 +21,7 @@ from bench_parallel_transactions import (
     _format_profile_model_hook_summary,
     _format_scheduler_summary,
     _format_setup_breakdown,
+    _add_profile_bottleneck_candidates,
     _add_summary_diagnostic_totals,
     _int_arg,
     _positive_sample_count_value,
@@ -179,6 +180,7 @@ def summarize_rows(rows: list[dict]) -> dict:
             for stat_name, value in metric_stats.items():
                 summary[f"{stat_name}_{field}"] = value
         _add_summary_diagnostic_totals(summary, summary_diagnostics)
+        _add_profile_bottleneck_candidates(summary)
         summaries.append(summary)
 
     best_reported = None
@@ -257,6 +259,23 @@ def _format_phase_tail_parts(row: dict, *, aggregate: bool) -> list[str]:
         if tail_parts:
             parts.append(f"{label}_tail({','.join(tail_parts)})")
     return parts
+
+
+def _format_top_bottleneck_candidate(row: dict) -> str:
+    candidates = row.get("profile_bottleneck_candidates")
+    if not isinstance(candidates, list) or not candidates:
+        return ""
+    candidate = candidates[0]
+    if not isinstance(candidate, dict):
+        return ""
+    name = candidate.get("name")
+    if not isinstance(name, str) or not name:
+        return ""
+    score = _finite_summary_value(candidate.get("score"))
+    if score is None or score < 0.0:
+        return ""
+    suffix = "%" if candidate.get("score_unit") == "profile_pct" else ""
+    return f"hotspot={name}:{score:.1f}{suffix}"
 
 
 def _format_summary_row(row: dict) -> str:
@@ -374,6 +393,9 @@ def _format_summary_row(row: dict) -> str:
         status_parts.append(f"invalid={status_invalid_count}")
     if status_parts:
         profile_parts.append(f"status({','.join(status_parts)})")
+    bottleneck_text = _format_top_bottleneck_candidate(row)
+    if bottleneck_text:
+        profile_parts.append(bottleneck_text)
     scheduler_failures = _measured_summary_value(row, "mean_scheduler_step_failures")
     if scheduler_failures is not None and scheduler_failures > 0.0:
         profile_parts.append(f"scheduler(failures={scheduler_failures:.1f})")

@@ -332,6 +332,27 @@ def test_format_summary_row_includes_backward_ready_position() -> None:
     assert "bwd_ready=42.5%@3.25ms" in formatted
 
 
+def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "profile_bottleneck_candidates": [
+            {
+                "name": "backward_phase",
+                "score": 42.5,
+                "score_unit": "profile_pct",
+            },
+        ],
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "hotspot=backward_phase:42.5%" in formatted
+
+
 def test_format_summary_row_includes_scheduler_failures_when_positive() -> None:
     row = {
         "dataset_mode": "generated",
@@ -1252,6 +1273,8 @@ def test_summarize_rows_skips_profile_fields_when_absent() -> None:
     assert group["mean_reported_samples_per_sec"] == pytest.approx(100.0)
     assert "mean_profile_forward_backward_pct" not in group
     assert "mean_profile_forward_backward_pct" not in summary["best_reported"]
+    assert "profile_bottleneck_candidates" not in group
+    assert "profile_bottleneck_candidates" not in summary["best_reported"]
     assert "profiled_runs" not in group
 
 
@@ -1405,6 +1428,53 @@ def test_summarize_rows_preserves_backward_readiness_span_metrics() -> None:
     assert group["mean_profile_backward_grad_ready_span_pct"] == pytest.approx(60.0)
     assert summary["best_reported"]["mean_profile_backward_grad_ready_span_avg_ms"] == pytest.approx(6.0)
     assert summary["best_reported"]["mean_profile_backward_grad_ready_latest_pct"] == pytest.approx(90.0)
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 90.0,
+            "end_to_end_wall_time_s": 1.0,
+            "wall_time_s": 0.8,
+            "profile_forward_pct": 20.0,
+            "profile_forward_top_pct_of_parent": 50.0,
+            "profile_forward_top_avg_ms": 5.0,
+            "profile_backward_pct": 30.0,
+            "profile_backward_grad_ready_span_pct": 50.0,
+            "profile_backward_grad_ready_span_avg_ms": 4.0,
+        },
+        {
+            "matrix_dataset_mode": "materialized",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 300.0,
+            "samples_per_sec": 280.0,
+            "end_to_end_wall_time_s": 0.5,
+            "wall_time_s": 0.4,
+            "profile_forward_pct": 10.0,
+            "profile_backward_pct": 60.0,
+            "profile_optimizer_pct": 5.0,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    generated, materialized = summary["groups"]
+
+    assert generated["profile_bottleneck_candidates"][0]["name"] == "backward_phase"
+    assert generated["profile_bottleneck_candidates"][0]["score"] == pytest.approx(30.0)
+    assert generated["profile_bottleneck_candidates"][1]["name"] == "forward_phase"
+    assert generated["profile_bottleneck_candidates"][1]["score"] == pytest.approx(20.0)
+    assert generated["profile_bottleneck_candidates"][2]["name"] == "backward_readiness_span"
+    assert generated["profile_bottleneck_candidates"][2]["score"] == pytest.approx(15.0)
+    assert materialized["profile_bottleneck_candidates"][0]["name"] == "backward_phase"
+    assert materialized["profile_bottleneck_candidates"][0]["score"] == pytest.approx(60.0)
+    assert summary["best_reported"]["dataset_mode"] == "materialized"
+    assert summary["best_reported"]["profile_bottleneck_candidates"] == materialized["profile_bottleneck_candidates"]
     json.dumps(summary, allow_nan=False)
 
 

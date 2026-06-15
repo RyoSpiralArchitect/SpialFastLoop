@@ -578,6 +578,117 @@ PROFILE_MODEL_RESULT_FIELDS = frozenset({
     "profile_model_hook_failures",
     "profile_model_hook_last_error",
 })
+PROFILE_BOTTLENECK_CANDIDATE_LIMIT = 8
+PROFILE_BOTTLENECK_CANDIDATE_SPECS = (
+    {
+        "name": "forward_phase",
+        "metric": "profile_forward_pct",
+        "unit": "profile_pct",
+        "details": (
+            ("avg_ms", "profile_forward_avg_ms"),
+            ("p95_ms", "profile_forward_p95_ms"),
+            ("p99_ms", "profile_forward_p99_ms"),
+            ("std_ms", "profile_forward_std_ms"),
+        ),
+    },
+    {
+        "name": "backward_phase",
+        "metric": "profile_backward_pct",
+        "unit": "profile_pct",
+        "details": (
+            ("avg_ms", "profile_backward_avg_ms"),
+            ("p95_ms", "profile_backward_p95_ms"),
+            ("p99_ms", "profile_backward_p99_ms"),
+            ("std_ms", "profile_backward_std_ms"),
+        ),
+    },
+    {
+        "name": "optimizer_phase",
+        "metric": "profile_optimizer_pct",
+        "unit": "profile_pct",
+        "details": (
+            ("avg_ms", "profile_optimizer_avg_ms"),
+            ("p95_ms", "profile_optimizer_p95_ms"),
+            ("p99_ms", "profile_optimizer_p99_ms"),
+            ("std_ms", "profile_optimizer_std_ms"),
+        ),
+    },
+    {
+        "name": "forward_untracked",
+        "metric": "profile_forward_untracked_pct",
+        "parent_metric": "profile_forward_pct",
+        "unit": "pct_of_parent",
+        "details": (
+            ("coverage_pct", "profile_forward_coverage_pct"),
+            ("untracked_time_s", "profile_forward_untracked_time_s"),
+        ),
+    },
+    {
+        "name": "optimizer_untracked",
+        "metric": "profile_optimizer_untracked_pct",
+        "parent_metric": "profile_optimizer_pct",
+        "unit": "pct_of_parent",
+        "details": (
+            ("coverage_pct", "profile_optimizer_coverage_pct"),
+            ("untracked_time_s", "profile_optimizer_untracked_time_s"),
+        ),
+    },
+    {
+        "name": "forward_top_child",
+        "metric": "profile_forward_top_pct_of_parent",
+        "parent_metric": "profile_forward_pct",
+        "unit": "pct_of_parent",
+        "details": (
+            ("avg_ms", "profile_forward_top_avg_ms"),
+            ("p95_ms", "profile_forward_top_p95_ms"),
+            ("p99_ms", "profile_forward_top_p99_ms"),
+            ("calls", "profile_forward_top_calls"),
+            ("child_count", "profile_forward_child_count"),
+            ("overtracked_pct_of_parent", "profile_forward_overtracked_pct_of_parent"),
+        ),
+    },
+    {
+        "name": "backward_readiness_span",
+        "metric": "profile_backward_grad_ready_span_pct",
+        "parent_metric": "profile_backward_pct",
+        "unit": "pct_of_parent",
+        "details": (
+            ("span_avg_ms", "profile_backward_grad_ready_span_avg_ms"),
+            ("earliest_pct", "profile_backward_grad_ready_earliest_pct"),
+            ("latest_pct", "profile_backward_grad_ready_latest_pct"),
+            ("earliest_avg_ms", "profile_backward_grad_ready_earliest_avg_ms"),
+            ("latest_avg_ms", "profile_backward_grad_ready_latest_avg_ms"),
+            ("child_count", "profile_backward_grad_ready_child_count"),
+        ),
+    },
+    {
+        "name": "backward_ready_top_child",
+        "metric": "profile_backward_grad_ready_top_pct",
+        "parent_metric": "profile_backward_pct",
+        "unit": "pct_of_parent",
+        "details": (
+            ("avg_ms", "profile_backward_grad_ready_top_avg_ms"),
+            ("p95_ms", "profile_backward_grad_ready_top_p95_ms"),
+            ("p99_ms", "profile_backward_grad_ready_top_p99_ms"),
+            ("calls", "profile_backward_grad_ready_top_calls"),
+            ("child_count", "profile_backward_grad_ready_child_count"),
+        ),
+    },
+    {
+        "name": "optimizer_top_child",
+        "metric": "profile_optimizer_top_pct_of_parent",
+        "parent_metric": "profile_optimizer_pct",
+        "unit": "pct_of_parent",
+        "details": (
+            ("avg_ms", "profile_optimizer_top_avg_ms"),
+            ("p95_ms", "profile_optimizer_top_p95_ms"),
+            ("p99_ms", "profile_optimizer_top_p99_ms"),
+            ("calls", "profile_optimizer_top_calls"),
+            ("child_count", "profile_optimizer_child_count"),
+            ("overtracked_pct_of_parent", "profile_optimizer_overtracked_pct_of_parent"),
+        ),
+    },
+)
 
 
 @dataclass
@@ -626,6 +737,98 @@ def _finite_summary_value(raw: object) -> Optional[float]:
     if not math.isfinite(value):
         return None
     return value
+
+
+def _measured_summary_metric_value(summary: dict, metric: str) -> Optional[float]:
+    field = f"mean_{metric}"
+    if field not in summary:
+        field = metric
+    if field not in summary:
+        return None
+    value = _finite_summary_value(summary[field])
+    if value is None:
+        return None
+    if value < _summary_metric_min_value(metric):
+        return None
+    max_value = _summary_metric_max_value(metric)
+    if max_value is not None and value > max_value:
+        return None
+
+    sample_count_field = f"sample_count_{metric}"
+    if field.startswith("mean_") and sample_count_field in summary:
+        sample_count = _positive_sample_count_value(summary[sample_count_field])
+        if sample_count is None:
+            return None
+    return value
+
+
+def _profile_bottleneck_candidate(summary: dict, spec: dict[str, object]) -> Optional[dict[str, object]]:
+    metric = spec["metric"]
+    if not isinstance(metric, str):
+        return None
+    value = _measured_summary_metric_value(summary, metric)
+    if value is None or value <= 0.0:
+        return None
+
+    unit = spec.get("unit", "profile_pct")
+    score = value
+    score_unit = unit
+    candidate: dict[str, object] = {
+        "name": spec["name"],
+        "metric": metric,
+        "value": value,
+        "unit": unit,
+    }
+    parent_metric = spec.get("parent_metric")
+    if isinstance(parent_metric, str):
+        parent_value = _measured_summary_metric_value(summary, parent_metric)
+        if parent_value is None or parent_value <= 0.0:
+            return None
+        score = parent_value * value / 100.0
+        score_unit = "profile_pct"
+        candidate["parent_metric"] = parent_metric
+        candidate["parent_value"] = parent_value
+    if score <= 0.0:
+        return None
+    candidate["score"] = score
+    candidate["score_unit"] = score_unit
+
+    details = spec.get("details", ())
+    if isinstance(details, tuple):
+        for detail in details:
+            if not isinstance(detail, tuple) or len(detail) != 2:
+                continue
+            key, detail_metric = detail
+            if not isinstance(key, str) or not isinstance(detail_metric, str):
+                continue
+            detail_value = _measured_summary_metric_value(summary, detail_metric)
+            if detail_value is not None:
+                candidate[key] = detail_value
+    return candidate
+
+
+def profile_bottleneck_candidates_for_summary(summary: dict) -> list[dict[str, object]]:
+    candidates = []
+    for spec in PROFILE_BOTTLENECK_CANDIDATE_SPECS:
+        candidate = _profile_bottleneck_candidate(summary, spec)
+        if candidate is not None:
+            candidates.append(candidate)
+    candidates.sort(
+        key=lambda candidate: (
+            -float(candidate["score"]),
+            -float(candidate["value"]),
+            str(candidate["name"]),
+        )
+    )
+    return candidates[:PROFILE_BOTTLENECK_CANDIDATE_LIMIT]
+
+
+def _add_profile_bottleneck_candidates(summary: dict) -> None:
+    candidates = profile_bottleneck_candidates_for_summary(summary)
+    if not candidates:
+        return
+    summary["profile_bottleneck_candidate_count"] = len(candidates)
+    summary["profile_bottleneck_candidates"] = candidates
 
 
 def _summary_choice(raw: object, allowed: frozenset[str], name: str) -> str:
@@ -999,6 +1202,7 @@ def summarize_results(rows: list[dict]) -> dict:
         for stat_name, value in metric_stats.items():
             summary[f"{stat_name}_{field}"] = value
     _add_summary_diagnostic_totals(summary, summary_diagnostics)
+    _add_profile_bottleneck_candidates(summary)
 
     if summary_rows:
         best_reported = _best_finite_row(
