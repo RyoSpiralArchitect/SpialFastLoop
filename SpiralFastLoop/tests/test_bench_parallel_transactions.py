@@ -25,6 +25,7 @@ from scripts.bench_parallel_transactions import (
     _format_profile_event_timing,
     _format_profile_model_hook_summary,
     _format_profile_open_timer_summary,
+    _format_profile_phase_timing,
     _format_scheduler_summary,
     _format_setup_breakdown,
     _has_positive_display_value,
@@ -1683,6 +1684,30 @@ def test_format_profile_event_timing_includes_parent_position() -> None:
     }) == "n/a"
 
 
+def test_format_profile_phase_timing_includes_tail_latency() -> None:
+    formatted = _format_profile_phase_timing({
+        "pct": 42.5,
+        "avg_ms": 1.25,
+        "p95_ms": 2.5,
+        "p99_ms": 3.5,
+        "std_ms": 0.25,
+    })
+
+    assert formatted == "42.5% avg=1.25ms p95=2.50ms p99=3.50ms std=0.25ms"
+
+
+def test_format_profile_phase_timing_omits_malformed_tail_latency() -> None:
+    formatted = _format_profile_phase_timing({
+        "pct": "slow",
+        "avg_ms": -1.0,
+        "p95_ms": True,
+        "p99_ms": "fast",
+        "std_ms": float("nan"),
+    })
+
+    assert formatted == "n/a"
+
+
 def test_format_profile_open_timer_summary_reports_open_work() -> None:
     profile = {
         "profile_open_phase_count": 2,
@@ -2007,6 +2032,16 @@ def test_main_prints_backward_event_parent_position(
                 "setup_time_s": 0.0,
                 "end_to_end_wall_time_s": 0.50,
                 "profile": {
+                    "top_phases": [
+                        {
+                            "name": "forward",
+                            "pct": 42.5,
+                            "avg_ms": 1.25,
+                            "p95_ms": 2.5,
+                            "p99_ms": 3.5,
+                            "std_ms": 0.25,
+                        },
+                    ],
                     "phase_events": {
                         "backward_grad_ready": {
                             "top_children": [
@@ -2029,9 +2064,9 @@ def test_main_prints_backward_event_parent_position(
 
     bpt.main()
 
-    assert (
-        "backward_grad_ready: model.0=3.5ms@35.0%, model.2=1.2ms"
-    ) in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "phases: forward=42.5% avg=1.25ms p95=2.50ms p99=3.50ms std=0.25ms" in output
+    assert "backward_grad_ready: model.0=3.5ms@35.0%, model.2=1.2ms" in output
 
 
 def test_transaction_benchmark_records_run_seed() -> None:

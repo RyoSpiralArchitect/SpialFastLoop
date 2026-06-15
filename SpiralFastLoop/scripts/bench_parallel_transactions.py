@@ -1117,6 +1117,22 @@ def _format_profile_event_timing(row: dict[str, Any], *, precision: int = 1) -> 
     return f"{avg_text}@{pct_text}"
 
 
+def _format_profile_phase_timing(row: dict[str, Any]) -> str:
+    parts = [_format_metric_value(row.get("pct"), precision=1, suffix="%")]
+    avg_text = _format_non_negative_metric_value(row.get("avg_ms"), precision=2, suffix="ms")
+    if avg_text is not None:
+        parts.append(f"avg={avg_text}")
+    for field, label in (
+        ("p95_ms", "p95"),
+        ("p99_ms", "p99"),
+        ("std_ms", "std"),
+    ):
+        value_text = _format_non_negative_metric_value(row.get(field), precision=2, suffix="ms")
+        if value_text is not None:
+            parts.append(f"{label}={value_text}")
+    return " ".join(parts)
+
+
 def _profile_breakdown(profile: dict[str, Any], group: str) -> dict[str, Any]:
     breakdowns = _dict_value(profile.get("phase_breakdowns"))
     return _dict_value(breakdowns.get(group))
@@ -1477,7 +1493,7 @@ def main() -> None:
             if open_timer_summary:
                 print(f"  open_timers: {open_timer_summary}")
             top_phases = ", ".join(
-                f"{_profile_row_name(row)}={_format_metric_value(row.get('pct'), precision=1, suffix='%')}"
+                f"{_profile_row_name(row)}={_format_profile_phase_timing(row)}"
                 for row in _list_value(profile.get("top_phases"))[:4]
                 if isinstance(row, dict)
             )
