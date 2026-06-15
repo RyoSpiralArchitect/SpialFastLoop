@@ -597,6 +597,52 @@ def test_summarize_results_omits_non_finite_best_run_fields() -> None:
     json.dumps(summary, allow_nan=False)
 
 
+def test_summarize_results_normalizes_best_run_dataset_mode() -> None:
+    rows = [
+        {
+            "run": 0,
+            "seed": 10,
+            "dataset_mode": " materialized ",
+            "reported_samples_per_sec": 300.0,
+            "samples_per_sec": 280.0,
+            "steady_samples_per_sec": 300.0,
+            "wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "end_to_end_wall_time_s": 1.25,
+        },
+    ]
+
+    summary = summarize_results(rows)
+
+    assert summary["best_reported"]["dataset_mode"] == "materialized"
+    assert summary["best_end_to_end"]["dataset_mode"] == "materialized"
+
+
+@pytest.mark.parametrize(
+    "dataset_mode",
+    [None, True, "", "   ", "cached"],
+)
+def test_summarize_results_rejects_invalid_best_run_dataset_mode(
+    dataset_mode: object,
+) -> None:
+    rows = [
+        {
+            "run": 0,
+            "seed": 10,
+            "dataset_mode": dataset_mode,
+            "reported_samples_per_sec": 300.0,
+            "samples_per_sec": 280.0,
+            "steady_samples_per_sec": 300.0,
+            "wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "end_to_end_wall_time_s": 1.25,
+        },
+    ]
+
+    with pytest.raises(ValueError, match="dataset_mode"):
+        summarize_results(rows)
+
+
 def test_best_finite_row_requires_positive_sample_count() -> None:
     rows = [
         {"run": 0, "mean_score": 300.0, "sample_count_score": float("nan")},

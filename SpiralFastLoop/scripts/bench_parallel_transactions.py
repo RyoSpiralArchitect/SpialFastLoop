@@ -194,6 +194,7 @@ BEST_RUN_FIELDS = (
 )
 
 DEVICE_CHOICES = ("auto", "cpu", "cuda", "mps")
+DATASET_MODE_CHOICES = frozenset({"generated", "materialized"})
 BEST_RUN_TEXT_FIELDS = frozenset({"dataset_mode"})
 
 
@@ -231,13 +232,25 @@ def _finite_summary_value(raw: object) -> Optional[float]:
     return value
 
 
+def _summary_choice(raw: object, allowed: frozenset[str], name: str) -> str:
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    value = raw.strip()
+    if value not in allowed:
+        raise ValueError(f"{name} has unsupported value: {value}")
+    return value
+
+
 def _compact_run(row: dict) -> dict:
     compact = {}
     for field in BEST_RUN_FIELDS:
         if field not in row:
             continue
         value = row[field]
-        if field not in BEST_RUN_TEXT_FIELDS and _finite_summary_value(value) is None:
+        if field in BEST_RUN_TEXT_FIELDS:
+            if field == "dataset_mode":
+                value = _summary_choice(value, DATASET_MODE_CHOICES, field)
+        elif _finite_summary_value(value) is None:
             continue
         compact[field] = value
     return compact
