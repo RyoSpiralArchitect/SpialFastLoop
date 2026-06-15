@@ -624,8 +624,8 @@ def test_summarize_rows_skips_groups_with_no_finite_best_rank_values() -> None:
 def test_summarize_rows_accepts_string_integer_metadata() -> None:
     rows = [
         {
-            "matrix_dataset_mode": "materialized",
-            "matrix_compile_mode": "no-compile",
+            "matrix_dataset_mode": " materialized ",
+            "matrix_compile_mode": " no-compile ",
             "matrix_workers": "2",
             "reported_samples_per_sec": 100.0,
             "samples_per_sec": 80.0,
@@ -642,6 +642,8 @@ def test_summarize_rows_accepts_string_integer_metadata() -> None:
 
     assert group["workers"] == 2
     assert group["dataset_materialized_bytes"] == 1024
+    assert group["dataset_mode"] == "materialized"
+    assert group["compile_mode"] == "no-compile"
 
 
 @pytest.mark.parametrize(
@@ -656,6 +658,42 @@ def test_summarize_rows_accepts_string_integer_metadata() -> None:
     ],
 )
 def test_summarize_rows_rejects_ambiguous_integer_metadata(
+    field: str,
+    value: object,
+    match: str,
+) -> None:
+    row = {
+        "matrix_dataset_mode": "generated",
+        "matrix_compile_mode": "no-compile",
+        "matrix_workers": 0,
+        "reported_samples_per_sec": 100.0,
+        "samples_per_sec": 80.0,
+        "steady_samples_per_sec": 100.0,
+        "end_to_end_wall_time_s": 1.0,
+        "setup_time_s": 0.25,
+        "wall_time_s": 0.75,
+        "dataset_materialized_bytes": 0,
+    }
+    row[field] = value
+
+    with pytest.raises(ValueError, match=match):
+        summarize_rows([row])
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("matrix_dataset_mode", None, "matrix_dataset_mode"),
+        ("matrix_dataset_mode", True, "matrix_dataset_mode"),
+        ("matrix_dataset_mode", "", "matrix_dataset_mode"),
+        ("matrix_dataset_mode", "archive", "matrix_dataset_mode"),
+        ("matrix_compile_mode", None, "matrix_compile_mode"),
+        ("matrix_compile_mode", True, "matrix_compile_mode"),
+        ("matrix_compile_mode", "   ", "matrix_compile_mode"),
+        ("matrix_compile_mode", "maybe", "matrix_compile_mode"),
+    ],
+)
+def test_summarize_rows_rejects_invalid_group_metadata(
     field: str,
     value: object,
     match: str,

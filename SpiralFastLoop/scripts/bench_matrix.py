@@ -79,10 +79,27 @@ def _non_negative_summary_int(raw: object, name: str) -> int:
         raise ValueError(f"{name} {exc}") from exc
 
 
+def _summary_choice(raw: object, allowed: set[str], name: str) -> str:
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    value = raw.strip()
+    if value not in allowed:
+        raise ValueError(f"{name} has unsupported value: {value}")
+    return value
+
+
 def _group_key(row: dict) -> tuple[str, str, int]:
     return (
-        str(row["matrix_dataset_mode"]),
-        str(row["matrix_compile_mode"]),
+        _summary_choice(
+            row["matrix_dataset_mode"],
+            {"generated", "materialized"},
+            "matrix_dataset_mode",
+        ),
+        _summary_choice(
+            row["matrix_compile_mode"],
+            {"compile", "no-compile"},
+            "matrix_compile_mode",
+        ),
         _non_negative_summary_int(row["matrix_workers"], "matrix_workers"),
     )
 
