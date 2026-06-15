@@ -21,6 +21,16 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.dataset import Dataset
 
 SampleWindow = Union[deque[float], Tuple[()], list[float]]
+PROFILE_COMPACT_DISTRIBUTION_FIELDS = (
+    "sample_count",
+    "window_sample_count",
+    "p50_ms",
+    "p95_ms",
+    "p99_ms",
+    "std_ms",
+    "min_ms",
+    "max_ms",
+)
 
 
 @dataclass(frozen=True)
@@ -1008,9 +1018,10 @@ class PhaseProfiler:
         return row
 
     @staticmethod
-    def _with_optional_p95(row: Dict[str, Any], source: Mapping[str, Any]) -> Dict[str, Any]:
-        if "p95_ms" in source:
-            row["p95_ms"] = source["p95_ms"]
+    def _with_optional_distribution_fields(row: Dict[str, Any], source: Mapping[str, Any]) -> Dict[str, Any]:
+        for field in PROFILE_COMPACT_DISTRIBUTION_FIELDS:
+            if field in source:
+                row[field] = source[field]
         return row
 
     def start(self, name: str) -> None:
@@ -1127,7 +1138,7 @@ class PhaseProfiler:
             }
             top_children = sorted(
                 (
-                    self._with_optional_p95(
+                    self._with_optional_distribution_fields(
                         {
                             "name": name,
                             "total_s": row["total_s"],
@@ -1184,7 +1195,7 @@ class PhaseProfiler:
                 }
                 if "avg_pct_of_parent" in row:
                     compact["avg_pct_of_parent"] = row["avg_pct_of_parent"]
-                return self._with_optional_p95(compact, row)
+                return self._with_optional_distribution_fields(compact, row)
 
             top_children = sorted(
                 (compact_event_child(name, row) for name, row in children.items()),
@@ -1200,7 +1211,7 @@ class PhaseProfiler:
             phase_events[group] = event_group
         top_phases = sorted(
             (
-                self._with_optional_p95(
+                self._with_optional_distribution_fields(
                     {
                         "name": name,
                         "total_s": row["total_s"],

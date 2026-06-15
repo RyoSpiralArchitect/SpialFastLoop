@@ -1,3 +1,4 @@
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -3325,6 +3326,44 @@ def test_phase_profiler_top_children_omit_distribution_fields_when_disabled() ->
     assert "p95_ms" not in profile["top_phases"][0]
     assert "p95_ms" not in profile["phase_breakdowns"]["forward"]["top_children"][0]
     assert "p95_ms" not in profile["phase_events"]["backward_grad_ready"]["top_children"][0]
+
+
+def test_phase_profiler_top_rows_include_distribution_fields_when_enabled() -> None:
+    profiler = PhaseProfiler(enabled=True, track_distribution=True, window=8)
+
+    profiler._record("forward", 0.001)
+    profiler._record("forward", 0.003)
+    profiler._record("forward", 0.005)
+    profiler._record_detail("forward", "model.0", 0.002)
+    profiler._record_detail("forward", "model.0", 0.004)
+    profiler._record_event("backward_grad_ready", "model.0", 0.006)
+    profiler._record_event("backward_grad_ready", "model.0", 0.008)
+
+    profile = profiler.summary()
+    top_phase = profile["top_phases"][0]
+    top_detail = profile["phase_breakdowns"]["forward"]["top_children"][0]
+    top_event = profile["phase_events"]["backward_grad_ready"]["top_children"][0]
+
+    assert top_phase["sample_count"] == 3
+    assert top_phase["p50_ms"] == pytest.approx(3.0)
+    assert top_phase["p95_ms"] == pytest.approx(5.0)
+    assert top_phase["p99_ms"] == pytest.approx(5.0)
+    assert top_phase["std_ms"] == pytest.approx(2.0)
+    assert top_phase["min_ms"] == pytest.approx(1.0)
+    assert top_phase["max_ms"] == pytest.approx(5.0)
+
+    assert top_detail["sample_count"] == 2
+    assert top_detail["p50_ms"] == pytest.approx(2.0)
+    assert top_detail["p95_ms"] == pytest.approx(4.0)
+    assert top_detail["p99_ms"] == pytest.approx(4.0)
+    assert top_detail["std_ms"] == pytest.approx(math.sqrt(2.0))
+
+    assert top_event["sample_count"] == 2
+    assert top_event["window_sample_count"] == 2
+    assert top_event["p50_ms"] == pytest.approx(6.0)
+    assert top_event["p95_ms"] == pytest.approx(8.0)
+    assert top_event["p99_ms"] == pytest.approx(8.0)
+    assert top_event["std_ms"] == pytest.approx(math.sqrt(2.0))
 
 
 def test_train_one_epoch_rejects_non_callable_trigger_observe() -> None:
