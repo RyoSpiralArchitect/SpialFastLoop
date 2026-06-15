@@ -733,6 +733,7 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_forward_top_time_s": 0.03,
             "profile_forward_top_pct_of_parent": 30.0,
             "profile_forward_top_avg_ms": 3.0,
+            "profile_forward_top_p95_ms": 3.5,
             "profile_forward_top_calls": 1,
             "profile_loss_pct": 4.0,
             "profile_loss_reduce_pct": 1.0,
@@ -741,6 +742,7 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_backward_grad_ready_parent_avg_ms": 10.0,
             "profile_backward_grad_ready_top_avg_ms": 3.0,
             "profile_backward_grad_ready_top_pct": 30.0,
+            "profile_backward_grad_ready_top_p95_ms": 3.5,
             "profile_backward_grad_ready_top_calls": 1,
             "profile_optimizer_child_count": 1,
             "profile_optimizer_tracked_time_s": 0.02,
@@ -749,6 +751,7 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_optimizer_top_time_s": 0.015,
             "profile_optimizer_top_pct_of_parent": 15.0,
             "profile_optimizer_top_avg_ms": 1.5,
+            "profile_optimizer_top_p95_ms": 2.0,
             "profile_optimizer_top_calls": 1,
             "profile_user_metrics_pct": 2.0,
             "profile_postprocess_pct": 4.0,
@@ -824,6 +827,7 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_forward_top_time_s": 0.07,
             "profile_forward_top_pct_of_parent": 70.0,
             "profile_forward_top_avg_ms": 7.0,
+            "profile_forward_top_p95_ms": 7.5,
             "profile_forward_top_calls": 3,
             "profile_loss_pct": 8.0,
             "profile_loss_reduce_pct": 3.0,
@@ -832,6 +836,7 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_backward_grad_ready_parent_avg_ms": 14.0,
             "profile_backward_grad_ready_top_avg_ms": 7.0,
             "profile_backward_grad_ready_top_pct": 50.0,
+            "profile_backward_grad_ready_top_p95_ms": 7.5,
             "profile_backward_grad_ready_top_calls": 3,
             "profile_optimizer_child_count": 3,
             "profile_optimizer_tracked_time_s": 0.04,
@@ -840,6 +845,7 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_optimizer_top_time_s": 0.035,
             "profile_optimizer_top_pct_of_parent": 35.0,
             "profile_optimizer_top_avg_ms": 3.5,
+            "profile_optimizer_top_p95_ms": 4.0,
             "profile_optimizer_top_calls": 3,
             "profile_user_metrics_pct": 6.0,
             "profile_postprocess_pct": 8.0,
@@ -899,6 +905,7 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_forward_top_time_s": 0.055,
             "profile_forward_top_pct_of_parent": 55.0,
             "profile_forward_top_avg_ms": 5.5,
+            "profile_forward_top_p95_ms": 6.0,
             "profile_forward_top_calls": 2,
             "profile_loss_pct": 6.0,
             "profile_loss_reduce_pct": 2.0,
@@ -907,6 +914,7 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_backward_grad_ready_parent_avg_ms": 12.0,
             "profile_backward_grad_ready_top_avg_ms": 4.0,
             "profile_backward_grad_ready_top_pct": 45.0,
+            "profile_backward_grad_ready_top_p95_ms": 4.5,
             "profile_backward_grad_ready_top_calls": 2,
             "profile_optimizer_child_count": 2,
             "profile_optimizer_tracked_time_s": 0.03,
@@ -915,6 +923,7 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_optimizer_top_time_s": 0.025,
             "profile_optimizer_top_pct_of_parent": 25.0,
             "profile_optimizer_top_avg_ms": 2.5,
+            "profile_optimizer_top_p95_ms": 3.0,
             "profile_optimizer_top_calls": 2,
             "profile_metrics_pct": 1.0,
         },
@@ -985,6 +994,7 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["mean_profile_forward_top_time_s"] == pytest.approx(0.05)
     assert generated["mean_profile_forward_top_pct_of_parent"] == pytest.approx(50.0)
     assert generated["mean_profile_forward_top_avg_ms"] == pytest.approx(5.0)
+    assert generated["mean_profile_forward_top_p95_ms"] == pytest.approx(5.5)
     assert generated["mean_profile_forward_top_calls"] == pytest.approx(2.0)
     assert generated["mean_profile_loss_pct"] == pytest.approx(6.0)
     assert generated["mean_profile_loss_reduce_pct"] == pytest.approx(2.0)
@@ -997,6 +1007,7 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["mean_profile_backward_grad_ready_parent_avg_ms"] == pytest.approx(12.0)
     assert generated["mean_profile_backward_grad_ready_top_avg_ms"] == pytest.approx(5.0)
     assert generated["mean_profile_backward_grad_ready_top_pct"] == pytest.approx(40.0)
+    assert generated["mean_profile_backward_grad_ready_top_p95_ms"] == pytest.approx(5.5)
     assert generated["mean_profile_backward_grad_ready_top_calls"] == pytest.approx(2.0)
     assert generated["mean_profile_optimizer_child_count"] == pytest.approx(2.0)
     assert generated["mean_profile_optimizer_tracked_time_s"] == pytest.approx(0.03)
@@ -1005,6 +1016,7 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["mean_profile_optimizer_top_time_s"] == pytest.approx(0.025)
     assert generated["mean_profile_optimizer_top_pct_of_parent"] == pytest.approx(25.0)
     assert generated["mean_profile_optimizer_top_avg_ms"] == pytest.approx(2.5)
+    assert generated["mean_profile_optimizer_top_p95_ms"] == pytest.approx(3.0)
     assert generated["mean_profile_optimizer_top_calls"] == pytest.approx(2.0)
     assert generated["mean_cuda_current_mem_bytes"] == pytest.approx(1024.0)
     assert generated["sample_count_cuda_current_mem_bytes"] == pytest.approx(1.0)
@@ -1020,13 +1032,16 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert summary["best_reported"]["mean_profile_forward_backward_pct"] == pytest.approx(55.0)
     assert summary["best_reported"]["mean_profile_forward_top_pct_of_parent"] == pytest.approx(55.0)
     assert summary["best_reported"]["mean_profile_forward_top_avg_ms"] == pytest.approx(5.5)
+    assert summary["best_reported"]["mean_profile_forward_top_p95_ms"] == pytest.approx(6.0)
     assert summary["best_reported"]["mean_profile_forward_top_calls"] == pytest.approx(2.0)
     assert summary["best_reported"]["mean_profile_optimizer_top_pct_of_parent"] == pytest.approx(25.0)
     assert summary["best_reported"]["mean_profile_optimizer_top_avg_ms"] == pytest.approx(2.5)
+    assert summary["best_reported"]["mean_profile_optimizer_top_p95_ms"] == pytest.approx(3.0)
     assert summary["best_reported"]["mean_profile_optimizer_top_calls"] == pytest.approx(2.0)
     assert summary["best_reported"]["mean_profile_loss_pct"] == pytest.approx(6.0)
     assert summary["best_reported"]["mean_profile_backward_grad_ready_top_pct"] == pytest.approx(45.0)
     assert summary["best_reported"]["mean_profile_backward_grad_ready_top_avg_ms"] == pytest.approx(4.0)
+    assert summary["best_reported"]["mean_profile_backward_grad_ready_top_p95_ms"] == pytest.approx(4.5)
     assert summary["best_reported"]["mean_profile_backward_grad_ready_top_calls"] == pytest.approx(2.0)
     assert summary["best_reported"]["mean_steps"] == pytest.approx(3.0)
     assert summary["best_reported"]["mean_steady_p99_s"] == pytest.approx(0.02)

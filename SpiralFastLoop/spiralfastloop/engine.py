@@ -288,6 +288,13 @@ def _add_profile_breakdown_metrics(
         "avg_ms",
         invalid_fields,
     )
+    _set_profile_metric_if_present(
+        metrics,
+        f"{metric_prefix}_top_p95_ms",
+        top_child,
+        "p95_ms",
+        invalid_fields,
+    )
     _set_profile_count_metric_if_present(
         metrics,
         f"{metric_prefix}_top_calls",
@@ -342,6 +349,13 @@ def _add_profile_backward_event_metrics(
         "avg_pct_of_parent",
         invalid_fields,
         max_value=100.0,
+    )
+    _set_profile_metric_if_present(
+        metrics,
+        "profile_backward_grad_ready_top_p95_ms",
+        top_child,
+        "p95_ms",
+        invalid_fields,
     )
     _set_profile_count_metric_if_present(
         metrics,

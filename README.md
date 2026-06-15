@@ -69,11 +69,12 @@ print(metrics["profile"]["phase_events"]["backward_grad_ready"]["top_children"][
 with `profile_model_depth=2` to drill into selected blocks without hooking the
 entire model. Benchmark summaries also flatten the forward drilldown into
 fields such as `profile_forward_child_count`, `profile_forward_top_avg_ms`,
-and `profile_forward_top_pct_of_parent`, plus backward gradient-ready fields
-such as `profile_backward_grad_ready_top_avg_ms` and
+`profile_forward_top_pct_of_parent`, and `profile_forward_top_p95_ms`, plus
+backward gradient-ready fields such as `profile_backward_grad_ready_top_avg_ms` and
 `profile_backward_grad_ready_top_pct`. Optimizer drilldowns are available under
 `phase_breakdowns.optimizer` and flattened as `profile_optimizer_top_avg_ms`,
-`profile_optimizer_top_pct_of_parent`, and related tracked/untracked fields.
+`profile_optimizer_top_pct_of_parent`, `profile_optimizer_top_p95_ms`, and
+related tracked/untracked fields.
 The top-level phases include `data_wait`, so loader stalls can be separated from
 compute time. Throughput summaries include `p99_s` and `std_batch_s`. Set
 `profile_sync=True` only when you need stricter

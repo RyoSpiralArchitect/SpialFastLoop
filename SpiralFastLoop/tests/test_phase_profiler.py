@@ -2749,6 +2749,7 @@ def test_profile_flat_metrics_include_forward_drilldown_position() -> None:
                         "total_s": 0.04,
                         "pct_of_parent": 40.0,
                         "avg_ms": 4.0,
+                        "p95_ms": 4.5,
                         "calls": 2,
                     },
                 ],
@@ -2765,6 +2766,7 @@ def test_profile_flat_metrics_include_forward_drilldown_position() -> None:
     assert metrics["profile_forward_top_time_s"] == pytest.approx(0.04)
     assert metrics["profile_forward_top_pct_of_parent"] == pytest.approx(40.0)
     assert metrics["profile_forward_top_avg_ms"] == pytest.approx(4.0)
+    assert metrics["profile_forward_top_p95_ms"] == pytest.approx(4.5)
     assert metrics["profile_forward_top_calls"] == 2
     assert metrics["profile_flat_metric_invalid_count"] == 0
     assert "profile_flat_metric_invalid_fields" not in metrics
@@ -2797,6 +2799,7 @@ def test_profile_flat_metrics_tolerate_partial_forward_drilldown_rows() -> None:
     assert "profile_forward_overtracked_time_s" not in metrics
     assert "profile_forward_top_time_s" not in metrics
     assert "profile_forward_top_pct_of_parent" not in metrics
+    assert "profile_forward_top_p95_ms" not in metrics
     assert "profile_forward_top_calls" not in metrics
     assert metrics["profile_flat_metric_invalid_count"] == 0
     assert "profile_flat_metric_invalid_fields" not in metrics
@@ -2819,6 +2822,7 @@ def test_profile_flat_metrics_reject_invalid_forward_drilldown_values() -> None:
                         "total_s": float("nan"),
                         "pct_of_parent": "bad",
                         "avg_ms": -4.0,
+                        "p95_ms": True,
                         "calls": 1.5,
                     },
                 ],
@@ -2835,8 +2839,9 @@ def test_profile_flat_metrics_reject_invalid_forward_drilldown_values() -> None:
     assert "profile_forward_top_time_s" not in metrics
     assert "profile_forward_top_pct_of_parent" not in metrics
     assert "profile_forward_top_avg_ms" not in metrics
+    assert "profile_forward_top_p95_ms" not in metrics
     assert "profile_forward_top_calls" not in metrics
-    assert metrics["profile_flat_metric_invalid_count"] == 7
+    assert metrics["profile_flat_metric_invalid_count"] == 8
     assert metrics["profile_flat_metric_invalid_fields"] == [
         "profile_forward_tracked_time_s",
         "profile_forward_untracked_time_s",
@@ -2844,6 +2849,7 @@ def test_profile_flat_metrics_reject_invalid_forward_drilldown_values() -> None:
         "profile_forward_top_time_s",
         "profile_forward_top_pct_of_parent",
         "profile_forward_top_avg_ms",
+        "profile_forward_top_p95_ms",
         "profile_forward_top_calls",
     ]
 
@@ -2870,6 +2876,7 @@ def test_profile_flat_metrics_include_optimizer_drilldown_position() -> None:
                         "total_s": 0.03,
                         "pct_of_parent": 60.0,
                         "avg_ms": 3.0,
+                        "p95_ms": 3.5,
                         "calls": 2,
                     },
                 ],
@@ -2886,6 +2893,7 @@ def test_profile_flat_metrics_include_optimizer_drilldown_position() -> None:
     assert metrics["profile_optimizer_top_time_s"] == pytest.approx(0.03)
     assert metrics["profile_optimizer_top_pct_of_parent"] == pytest.approx(60.0)
     assert metrics["profile_optimizer_top_avg_ms"] == pytest.approx(3.0)
+    assert metrics["profile_optimizer_top_p95_ms"] == pytest.approx(3.5)
     assert metrics["profile_optimizer_top_calls"] == 2
     assert metrics["profile_flat_metric_invalid_count"] == 0
     assert "profile_flat_metric_invalid_fields" not in metrics
@@ -2918,6 +2926,7 @@ def test_profile_flat_metrics_tolerate_partial_optimizer_drilldown_rows() -> Non
     assert "profile_optimizer_overtracked_time_s" not in metrics
     assert "profile_optimizer_top_time_s" not in metrics
     assert "profile_optimizer_top_pct_of_parent" not in metrics
+    assert "profile_optimizer_top_p95_ms" not in metrics
     assert "profile_optimizer_top_calls" not in metrics
     assert metrics["profile_flat_metric_invalid_count"] == 0
     assert "profile_flat_metric_invalid_fields" not in metrics
@@ -2940,6 +2949,7 @@ def test_profile_flat_metrics_reject_invalid_optimizer_drilldown_values() -> Non
                         "total_s": float("nan"),
                         "pct_of_parent": "bad",
                         "avg_ms": -3.0,
+                        "p95_ms": True,
                         "calls": 1.5,
                     },
                 ],
@@ -2956,8 +2966,9 @@ def test_profile_flat_metrics_reject_invalid_optimizer_drilldown_values() -> Non
     assert "profile_optimizer_top_time_s" not in metrics
     assert "profile_optimizer_top_pct_of_parent" not in metrics
     assert "profile_optimizer_top_avg_ms" not in metrics
+    assert "profile_optimizer_top_p95_ms" not in metrics
     assert "profile_optimizer_top_calls" not in metrics
-    assert metrics["profile_flat_metric_invalid_count"] == 7
+    assert metrics["profile_flat_metric_invalid_count"] == 8
     assert metrics["profile_flat_metric_invalid_fields"] == [
         "profile_optimizer_tracked_time_s",
         "profile_optimizer_untracked_time_s",
@@ -2965,6 +2976,7 @@ def test_profile_flat_metrics_reject_invalid_optimizer_drilldown_values() -> Non
         "profile_optimizer_top_time_s",
         "profile_optimizer_top_pct_of_parent",
         "profile_optimizer_top_avg_ms",
+        "profile_optimizer_top_p95_ms",
         "profile_optimizer_top_calls",
     ]
 
@@ -2989,6 +3001,7 @@ def test_profile_flat_metrics_include_backward_event_position() -> None:
                         "name": "model.0",
                         "avg_ms": 8.0,
                         "avg_pct_of_parent": 40.0,
+                        "p95_ms": 9.0,
                         "calls": 2,
                     },
                 ],
@@ -3002,6 +3015,7 @@ def test_profile_flat_metrics_include_backward_event_position() -> None:
     assert metrics["profile_backward_grad_ready_parent_avg_ms"] == pytest.approx(20.0)
     assert metrics["profile_backward_grad_ready_top_avg_ms"] == pytest.approx(8.0)
     assert metrics["profile_backward_grad_ready_top_pct"] == pytest.approx(40.0)
+    assert metrics["profile_backward_grad_ready_top_p95_ms"] == pytest.approx(9.0)
     assert metrics["profile_backward_grad_ready_top_calls"] == 2
     assert metrics["profile_flat_metric_invalid_count"] == 0
     assert "profile_flat_metric_invalid_fields" not in metrics
@@ -3031,6 +3045,7 @@ def test_profile_flat_metrics_tolerate_partial_backward_event_rows() -> None:
     assert metrics["profile_backward_grad_ready_top_avg_ms"] == pytest.approx(8.0)
     assert "profile_backward_grad_ready_parent_avg_ms" not in metrics
     assert "profile_backward_grad_ready_top_pct" not in metrics
+    assert "profile_backward_grad_ready_top_p95_ms" not in metrics
     assert "profile_backward_grad_ready_top_calls" not in metrics
     assert metrics["profile_flat_metric_invalid_count"] == 0
     assert "profile_flat_metric_invalid_fields" not in metrics
@@ -3050,6 +3065,7 @@ def test_profile_flat_metrics_reject_invalid_backward_event_values() -> None:
                         "name": "model.0",
                         "avg_ms": float("nan"),
                         "avg_pct_of_parent": 125.0,
+                        "p95_ms": True,
                         "calls": 1.5,
                     },
                 ],
@@ -3063,12 +3079,14 @@ def test_profile_flat_metrics_reject_invalid_backward_event_values() -> None:
     assert "profile_backward_grad_ready_parent_avg_ms" not in metrics
     assert "profile_backward_grad_ready_top_avg_ms" not in metrics
     assert "profile_backward_grad_ready_top_pct" not in metrics
+    assert "profile_backward_grad_ready_top_p95_ms" not in metrics
     assert "profile_backward_grad_ready_top_calls" not in metrics
-    assert metrics["profile_flat_metric_invalid_count"] == 4
+    assert metrics["profile_flat_metric_invalid_count"] == 5
     assert metrics["profile_flat_metric_invalid_fields"] == [
         "profile_backward_grad_ready_parent_avg_ms",
         "profile_backward_grad_ready_top_avg_ms",
         "profile_backward_grad_ready_top_pct",
+        "profile_backward_grad_ready_top_p95_ms",
         "profile_backward_grad_ready_top_calls",
     ]
 

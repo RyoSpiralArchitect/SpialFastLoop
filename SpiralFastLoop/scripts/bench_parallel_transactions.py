@@ -173,6 +173,7 @@ PROFILE_FORWARD_BREAKDOWN_SUMMARY_FIELDS = (
     "profile_forward_top_time_s",
     "profile_forward_top_pct_of_parent",
     "profile_forward_top_avg_ms",
+    "profile_forward_top_p95_ms",
     "profile_forward_top_calls",
 )
 
@@ -184,6 +185,7 @@ PROFILE_OPTIMIZER_BREAKDOWN_SUMMARY_FIELDS = (
     "profile_optimizer_top_time_s",
     "profile_optimizer_top_pct_of_parent",
     "profile_optimizer_top_avg_ms",
+    "profile_optimizer_top_p95_ms",
     "profile_optimizer_top_calls",
 )
 
@@ -192,6 +194,7 @@ PROFILE_EVENT_SUMMARY_FIELDS = (
     "profile_backward_grad_ready_parent_avg_ms",
     "profile_backward_grad_ready_top_avg_ms",
     "profile_backward_grad_ready_top_pct",
+    "profile_backward_grad_ready_top_p95_ms",
     "profile_backward_grad_ready_top_calls",
 )
 
@@ -338,6 +341,7 @@ BEST_RUN_FIELDS = (
     "profile_forward_top_time_s",
     "profile_forward_top_pct_of_parent",
     "profile_forward_top_avg_ms",
+    "profile_forward_top_p95_ms",
     "profile_forward_top_calls",
     "profile_loss_pct",
     "profile_loss_reduce_pct",
@@ -350,6 +354,7 @@ BEST_RUN_FIELDS = (
     "profile_optimizer_top_time_s",
     "profile_optimizer_top_pct_of_parent",
     "profile_optimizer_top_avg_ms",
+    "profile_optimizer_top_p95_ms",
     "profile_optimizer_top_calls",
     "profile_user_metrics_pct",
     "profile_postprocess_pct",
@@ -359,6 +364,7 @@ BEST_RUN_FIELDS = (
     "profile_backward_grad_ready_parent_avg_ms",
     "profile_backward_grad_ready_top_avg_ms",
     "profile_backward_grad_ready_top_pct",
+    "profile_backward_grad_ready_top_p95_ms",
     "profile_backward_grad_ready_top_calls",
     "cuda_current_mem_bytes",
     "cuda_max_mem_bytes",
