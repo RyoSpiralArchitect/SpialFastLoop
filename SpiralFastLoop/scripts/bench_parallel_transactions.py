@@ -929,6 +929,53 @@ def _profile_bottleneck_category_summary(
     return category_summary
 
 
+def _ranked_profile_bottleneck_category_items(
+    category_summary: dict[str, object],
+) -> list[tuple[str, dict[str, object]]]:
+    ranked_items: list[tuple[str, dict[str, object]]] = []
+    for category_name, raw_entry in category_summary.items():
+        if not isinstance(category_name, str) or not isinstance(raw_entry, dict):
+            continue
+        max_score = _finite_summary_value(raw_entry.get("max_score"))
+        top_candidate = raw_entry.get("top_candidate")
+        if (
+            max_score is None
+            or max_score < 0.0
+            or not isinstance(top_candidate, str)
+            or not top_candidate
+        ):
+            continue
+        ranked_items.append((category_name, raw_entry))
+
+    ranked_items.sort(
+        key=lambda item: _profile_bottleneck_category_rank_key(item[0], item[1])
+    )
+    return ranked_items
+
+
+def _profile_bottleneck_category_rank_key(
+    category_name: str,
+    entry: dict[str, object],
+) -> tuple[float, float, str]:
+    max_score = _finite_summary_value(entry.get("max_score"))
+    rank = _finite_summary_value(entry.get("top_rank"))
+    return (
+        -(max_score if max_score is not None else -1.0),
+        rank if rank is not None else float("inf"),
+        category_name,
+    )
+
+
+def _profile_bottleneck_top_category(
+    category_summary: dict[str, dict[str, object]],
+) -> Optional[dict[str, object]]:
+    ranked_items = _ranked_profile_bottleneck_category_items(category_summary)
+    if not ranked_items:
+        return None
+    category_name, entry = ranked_items[0]
+    return {**entry, "category": category_name}
+
+
 def _profile_bottleneck_severity_counts(
     candidates: list[dict[str, object]],
 ) -> dict[str, int]:
@@ -964,7 +1011,11 @@ def _add_profile_bottleneck_candidates(summary: dict) -> None:
     summary["profile_bottleneck_severity_counts"] = _profile_bottleneck_severity_counts(
         ranked_candidates
     )
-    summary["profile_bottleneck_category_summary"] = _profile_bottleneck_category_summary(ranked_candidates)
+    category_summary = _profile_bottleneck_category_summary(ranked_candidates)
+    top_category = _profile_bottleneck_top_category(category_summary)
+    if top_category is not None:
+        summary["profile_bottleneck_top_category"] = top_category
+    summary["profile_bottleneck_category_summary"] = category_summary
     summary["profile_bottleneck_candidates"] = candidates
 
 
@@ -1548,8 +1599,7 @@ def _format_profile_bottleneck_summary(summary: dict[str, Any]) -> str:
     category_summary = summary.get("profile_bottleneck_category_summary")
     category_parts = []
     if isinstance(category_summary, dict):
-        for category_name in sorted(category_summary):
-            entry = _dict_value(category_summary.get(category_name))
+        for category_name, entry in _ranked_profile_bottleneck_category_items(category_summary):
             top_name = entry.get("top_candidate")
             max_score = _non_negative_display_value(entry.get("max_score"))
             count = _display_count_value(entry.get("count"))
@@ -1557,7 +1607,11 @@ def _format_profile_bottleneck_summary(summary: dict[str, Any]) -> str:
                 continue
             entry_suffix = "%" if entry.get("score_unit") == "profile_pct" else ""
             top_severity = entry.get("top_severity")
-            severity_suffix = f"[{top_severity}]" if isinstance(top_severity, str) and top_severity else ""
+            severity_suffix = (
+                f"[{top_severity}]"
+                if isinstance(top_severity, str) and top_severity
+                else ""
+            )
             category_parts.append(
                 f"{category_name}:{top_name}={max_score:.1f}{entry_suffix}{severity_suffix}/{count}"
             )

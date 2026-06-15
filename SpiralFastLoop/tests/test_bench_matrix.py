@@ -383,10 +383,53 @@ def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
 
     assert "hotspot=forward_phase:55.0%(phase_share,high)" in formatted
     assert (
-        "pressure(child_hotspot:forward_top_child=35.0%[high],"
-        "phase_share:forward_phase=55.0%[high])"
+        "pressure(phase_share:forward_phase=55.0%[high],"
+        "child_hotspot:forward_top_child=35.0%[high])"
     ) in formatted
     assert "severity_counts(high=2,medium=1)" in formatted
+
+
+def test_format_summary_row_orders_bottleneck_pressure_by_score_and_skips_malformed() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "profile_bottleneck_category_summary": {
+            "phase_share": {
+                "count": 2,
+                "max_score": 20.0,
+                "score_unit": "profile_pct",
+                "top_candidate": "forward_phase",
+                "top_rank": 2,
+            },
+            "child_hotspot": {
+                "count": 1,
+                "max_score": 30.0,
+                "score_unit": "profile_pct",
+                "top_candidate": "forward_top_child",
+                "top_rank": "bad",
+            },
+            "bad_score": {
+                "max_score": "bad",
+                "top_candidate": "ignored",
+            },
+            "bad_candidate": {
+                "max_score": 99.0,
+                "top_candidate": "",
+            },
+        },
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert (
+        "pressure(child_hotspot:forward_top_child=30.0%,"
+        "phase_share:forward_phase=20.0%)"
+    ) in formatted
+    assert "bad_score" not in formatted
+    assert "bad_candidate" not in formatted
 
 
 def test_format_summary_row_includes_scheduler_failures_when_positive() -> None:
@@ -1515,6 +1558,15 @@ def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
     }
     assert generated["profile_bottleneck_severity_counts"] == {"high": 1, "medium": 3}
     assert generated["profile_bottleneck_top_candidate"] == generated["profile_bottleneck_candidates"][0]
+    assert generated["profile_bottleneck_top_category"] == {
+        "category": "phase_share",
+        "count": 2,
+        "max_score": pytest.approx(30.0),
+        "score_unit": "profile_pct",
+        "top_candidate": "backward_phase",
+        "top_rank": 1,
+        "top_severity": "high",
+    }
     assert generated["profile_bottleneck_category_summary"]["phase_share"] == {
         "count": 2,
         "max_score": pytest.approx(30.0),
@@ -1555,7 +1607,12 @@ def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
     assert materialized["profile_bottleneck_candidates"][0]["severity"] == "high"
     assert summary["best_reported"]["dataset_mode"] == "materialized"
     assert summary["best_reported"]["profile_bottleneck_candidates"] == materialized["profile_bottleneck_candidates"]
-    assert summary["best_reported"]["profile_bottleneck_top_candidate"] == materialized["profile_bottleneck_top_candidate"]
+    assert summary["best_reported"]["profile_bottleneck_top_candidate"] == materialized[
+        "profile_bottleneck_top_candidate"
+    ]
+    assert summary["best_reported"]["profile_bottleneck_top_category"] == materialized[
+        "profile_bottleneck_top_category"
+    ]
     assert summary["best_reported"]["profile_bottleneck_severity_counts"] == materialized[
         "profile_bottleneck_severity_counts"
     ]

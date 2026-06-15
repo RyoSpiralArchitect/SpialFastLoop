@@ -964,6 +964,15 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
     assert len(candidates) == 8
     assert summary["profile_bottleneck_top_candidate"] == candidates[0]
     category_summary = summary["profile_bottleneck_category_summary"]
+    assert summary["profile_bottleneck_top_category"] == {
+        "category": "phase_share",
+        "count": 3,
+        "max_score": pytest.approx(50.0),
+        "score_unit": "profile_pct",
+        "top_candidate": "backward_phase",
+        "top_rank": 1,
+        "top_severity": "high",
+    }
     assert category_summary["phase_share"] == {
         "count": 3,
         "max_score": pytest.approx(50.0),
@@ -1051,6 +1060,7 @@ def test_summarize_results_skips_invalid_profile_bottleneck_candidates() -> None
     assert "profile_bottleneck_category_summary" not in summary
     assert "profile_bottleneck_severity_thresholds" not in summary
     assert "profile_bottleneck_severity_counts" not in summary
+    assert "profile_bottleneck_top_category" not in summary
     assert "profile_bottleneck_top_candidate" not in summary
     assert "profile_bottleneck_candidates" not in summary
     json.dumps(summary, allow_nan=False)
@@ -2622,8 +2632,8 @@ def test_main_prints_backward_event_parent_position(
     ) in output
     assert (
         "severity_counts(high=3,medium=1,low=1) "
-        "categories=child_hotspot:forward_top_child=29.8%[high]/1,"
-        "phase_share:forward_phase=42.5%[high]/3,"
+        "categories=phase_share:forward_phase=42.5%[high]/3,"
+        "child_hotspot:forward_top_child=29.8%[high]/1,"
         "readiness_span:backward_readiness_span=6.9%[low]/1"
     ) in output
 
