@@ -948,6 +948,14 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
     assert summary["profile_bottleneck_candidate_returned_count"] == 8
     assert summary["profile_bottleneck_candidate_limit"] == 8
     assert summary["profile_bottleneck_candidate_omitted_count"] == 1
+    assert summary["profile_bottleneck_severity_thresholds"] == {
+        "score_unit": "profile_pct",
+        "levels": [
+            {"severity": "high", "min_score": pytest.approx(25.0)},
+            {"severity": "medium", "min_score": pytest.approx(10.0)},
+            {"severity": "low", "min_score": pytest.approx(0.0)},
+        ],
+    }
     assert summary["profile_bottleneck_severity_counts"] == {
         "high": 2,
         "medium": 4,
@@ -1041,6 +1049,7 @@ def test_summarize_results_skips_invalid_profile_bottleneck_candidates() -> None
 
     assert "profile_bottleneck_candidate_count" not in summary
     assert "profile_bottleneck_category_summary" not in summary
+    assert "profile_bottleneck_severity_thresholds" not in summary
     assert "profile_bottleneck_severity_counts" not in summary
     assert "profile_bottleneck_top_candidate" not in summary
     assert "profile_bottleneck_candidates" not in summary

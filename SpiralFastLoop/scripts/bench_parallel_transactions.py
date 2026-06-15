@@ -584,6 +584,7 @@ PROFILE_BOTTLENECK_SEVERITY_LEVELS = (
     ("medium", 10.0),
     ("low", 0.0),
 )
+PROFILE_BOTTLENECK_SEVERITY_SCORE_UNIT = "profile_pct"
 PROFILE_BOTTLENECK_CANDIDATE_SPECS = (
     {
         "name": "forward_phase",
@@ -787,6 +788,16 @@ def _profile_bottleneck_severity(score: float) -> str:
     return "low"
 
 
+def _profile_bottleneck_severity_thresholds() -> dict[str, object]:
+    return {
+        "score_unit": PROFILE_BOTTLENECK_SEVERITY_SCORE_UNIT,
+        "levels": [
+            {"severity": severity, "min_score": threshold}
+            for severity, threshold in PROFILE_BOTTLENECK_SEVERITY_LEVELS
+        ],
+    }
+
+
 def _measured_summary_metric_value(summary: dict, metric: str) -> Optional[float]:
     field = f"mean_{metric}"
     if field not in summary:
@@ -949,6 +960,7 @@ def _add_profile_bottleneck_candidates(summary: dict) -> None:
     if omitted_count > 0:
         summary["profile_bottleneck_candidate_omitted_count"] = omitted_count
     summary["profile_bottleneck_top_candidate"] = candidates[0]
+    summary["profile_bottleneck_severity_thresholds"] = _profile_bottleneck_severity_thresholds()
     summary["profile_bottleneck_severity_counts"] = _profile_bottleneck_severity_counts(
         ranked_candidates
     )
