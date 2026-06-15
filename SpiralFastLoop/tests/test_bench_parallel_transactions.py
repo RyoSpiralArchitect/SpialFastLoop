@@ -520,6 +520,10 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "profile_forward_p95_ms": 2.0,
             "profile_forward_p99_ms": 3.0,
             "profile_forward_std_ms": 0.2,
+            "profile_forward_min_ms": 0.8,
+            "profile_forward_max_ms": 3.5,
+            "profile_forward_sample_count": 2,
+            "profile_forward_window_sample_count": 2,
             "profile_forward_child_count": 1,
             "profile_forward_tracked_time_s": 0.05,
             "profile_forward_untracked_time_s": 0.01,
@@ -629,6 +633,10 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "profile_forward_p95_ms": 4.0,
             "profile_forward_p99_ms": 6.0,
             "profile_forward_std_ms": 0.4,
+            "profile_forward_min_ms": 1.5,
+            "profile_forward_max_ms": 7.0,
+            "profile_forward_sample_count": 3,
+            "profile_forward_window_sample_count": 3,
             "profile_forward_child_count": 2,
             "profile_forward_tracked_time_s": 0.08,
             "profile_forward_untracked_time_s": 0.02,
@@ -720,6 +728,10 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["mean_profile_forward_p95_ms"] == pytest.approx(3.0)
     assert summary["mean_profile_forward_p99_ms"] == pytest.approx(4.5)
     assert summary["mean_profile_forward_std_ms"] == pytest.approx(0.3)
+    assert summary["mean_profile_forward_min_ms"] == pytest.approx(1.15)
+    assert summary["mean_profile_forward_max_ms"] == pytest.approx(5.25)
+    assert summary["mean_profile_forward_sample_count"] == pytest.approx(2.5)
+    assert summary["mean_profile_forward_window_sample_count"] == pytest.approx(2.5)
     assert summary["mean_profile_forward_child_count"] == pytest.approx(1.5)
     assert summary["mean_profile_forward_tracked_time_s"] == pytest.approx(0.065)
     assert summary["mean_profile_forward_untracked_time_s"] == pytest.approx(0.015)
@@ -770,6 +782,10 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["best_reported"]["profile_forward_p95_ms"] == pytest.approx(4.0)
     assert summary["best_reported"]["profile_forward_p99_ms"] == pytest.approx(6.0)
     assert summary["best_reported"]["profile_forward_std_ms"] == pytest.approx(0.4)
+    assert summary["best_reported"]["profile_forward_min_ms"] == pytest.approx(1.5)
+    assert summary["best_reported"]["profile_forward_max_ms"] == pytest.approx(7.0)
+    assert summary["best_reported"]["profile_forward_sample_count"] == 3
+    assert summary["best_reported"]["profile_forward_window_sample_count"] == 3
     assert summary["best_reported"]["profile_forward_child_count"] == 2
     assert summary["best_reported"]["profile_forward_tracked_time_s"] == pytest.approx(0.08)
     assert summary["best_reported"]["profile_forward_untracked_time_s"] == pytest.approx(0.02)

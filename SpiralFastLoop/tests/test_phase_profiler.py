@@ -2216,12 +2216,20 @@ def test_train_one_epoch_collects_phase_and_model_profile() -> None:
     assert "optimizer" in phases
     assert "p99_ms" in phases["forward"]
     assert "std_ms" in phases["forward"]
+    assert "min_ms" in phases["forward"]
+    assert "max_ms" in phases["forward"]
+    assert "sample_count" in phases["forward"]
+    assert "window_sample_count" in phases["forward"]
     assert metrics["profile_total_s"] == pytest.approx(profile["profile_total_s"])
     assert metrics["profile_forward_time_s"] == pytest.approx(phases["forward"]["total_s"])
     assert metrics["profile_forward_pct"] == pytest.approx(phases["forward"]["pct"])
     assert metrics["profile_forward_avg_ms"] == pytest.approx(phases["forward"]["avg_ms"])
     assert metrics["profile_forward_p99_ms"] == pytest.approx(phases["forward"]["p99_ms"])
     assert metrics["profile_forward_std_ms"] == pytest.approx(phases["forward"]["std_ms"])
+    assert metrics["profile_forward_min_ms"] == pytest.approx(phases["forward"]["min_ms"])
+    assert metrics["profile_forward_max_ms"] == pytest.approx(phases["forward"]["max_ms"])
+    assert metrics["profile_forward_sample_count"] == phases["forward"]["sample_count"]
+    assert metrics["profile_forward_window_sample_count"] == phases["forward"]["window_sample_count"]
     assert metrics["profile_backward_time_s"] == pytest.approx(phases["backward"]["total_s"])
     assert metrics["profile_backward_pct"] == pytest.approx(phases["backward"]["pct"])
     assert metrics["profile_optimizer_time_s"] == pytest.approx(phases["optimizer"]["total_s"])
@@ -2772,6 +2780,10 @@ def test_profile_flat_metrics_include_phase_distribution_values() -> None:
                 "p95_ms": 12.0,
                 "p99_ms": 13.0,
                 "std_ms": 1.5,
+                "min_ms": 8.0,
+                "max_ms": 14.0,
+                "sample_count": 4,
+                "window_sample_count": 3,
             },
         },
     }
@@ -2782,6 +2794,10 @@ def test_profile_flat_metrics_include_phase_distribution_values() -> None:
     assert metrics["profile_forward_p95_ms"] == pytest.approx(12.0)
     assert metrics["profile_forward_p99_ms"] == pytest.approx(13.0)
     assert metrics["profile_forward_std_ms"] == pytest.approx(1.5)
+    assert metrics["profile_forward_min_ms"] == pytest.approx(8.0)
+    assert metrics["profile_forward_max_ms"] == pytest.approx(14.0)
+    assert metrics["profile_forward_sample_count"] == 4
+    assert metrics["profile_forward_window_sample_count"] == 3
     assert metrics["profile_flat_metric_invalid_count"] == 0
     assert "profile_flat_metric_invalid_fields" not in metrics
 
@@ -2799,6 +2815,10 @@ def test_profile_flat_metrics_reject_invalid_phase_distribution_values() -> None
                 "p95_ms": "slow",
                 "p99_ms": float("inf"),
                 "std_ms": True,
+                "min_ms": None,
+                "max_ms": -2.0,
+                "sample_count": 1.5,
+                "window_sample_count": "3",
             },
         },
     }
@@ -2809,12 +2829,20 @@ def test_profile_flat_metrics_reject_invalid_phase_distribution_values() -> None
     assert "profile_forward_p95_ms" not in metrics
     assert "profile_forward_p99_ms" not in metrics
     assert "profile_forward_std_ms" not in metrics
-    assert metrics["profile_flat_metric_invalid_count"] == 4
+    assert "profile_forward_min_ms" not in metrics
+    assert "profile_forward_max_ms" not in metrics
+    assert "profile_forward_sample_count" not in metrics
+    assert "profile_forward_window_sample_count" not in metrics
+    assert metrics["profile_flat_metric_invalid_count"] == 8
     assert metrics["profile_flat_metric_invalid_fields"] == [
         "profile_forward_p50_ms",
         "profile_forward_p95_ms",
         "profile_forward_p99_ms",
         "profile_forward_std_ms",
+        "profile_forward_min_ms",
+        "profile_forward_max_ms",
+        "profile_forward_sample_count",
+        "profile_forward_window_sample_count",
     ]
 
 

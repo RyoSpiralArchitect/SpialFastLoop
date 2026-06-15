@@ -60,7 +60,7 @@ _PROFILE_PHASE_METRIC_NAMES = (
     "metrics",
 )
 _PROFILE_METRIC_MISSING = object()
-_PROFILE_TOP_DISTRIBUTION_METRIC_NAMES = (
+_PROFILE_DISTRIBUTION_METRIC_NAMES = (
     "p50_ms",
     "p95_ms",
     "p99_ms",
@@ -68,7 +68,7 @@ _PROFILE_TOP_DISTRIBUTION_METRIC_NAMES = (
     "min_ms",
     "max_ms",
 )
-_PROFILE_TOP_COUNT_METRIC_NAMES = (
+_PROFILE_DISTRIBUTION_COUNT_METRIC_NAMES = (
     "sample_count",
     "window_sample_count",
 )
@@ -252,7 +252,7 @@ def _add_profile_top_distribution_metrics(
     top_child: Mapping[str, Any],
     invalid_fields: list[str],
 ) -> None:
-    for field_name in _PROFILE_TOP_DISTRIBUTION_METRIC_NAMES:
+    for field_name in _PROFILE_DISTRIBUTION_METRIC_NAMES:
         _set_profile_metric_if_present(
             metrics,
             f"{metric_prefix}_top_{field_name}",
@@ -260,7 +260,7 @@ def _add_profile_top_distribution_metrics(
             field_name,
             invalid_fields,
         )
-    for field_name in _PROFILE_TOP_COUNT_METRIC_NAMES:
+    for field_name in _PROFILE_DISTRIBUTION_COUNT_METRIC_NAMES:
         _set_profile_count_metric_if_present(
             metrics,
             f"{metric_prefix}_top_{field_name}",
@@ -434,8 +434,16 @@ def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, An
             row.get("avg_ms", _PROFILE_METRIC_MISSING),
             invalid_fields,
         )
-        for field_name in ("p50_ms", "p95_ms", "p99_ms", "std_ms"):
+        for field_name in _PROFILE_DISTRIBUTION_METRIC_NAMES:
             _set_profile_metric_if_present(
+                metrics,
+                f"profile_{phase_name}_{field_name}",
+                row,
+                field_name,
+                invalid_fields,
+            )
+        for field_name in _PROFILE_DISTRIBUTION_COUNT_METRIC_NAMES:
+            _set_profile_count_metric_if_present(
                 metrics,
                 f"profile_{phase_name}_{field_name}",
                 row,

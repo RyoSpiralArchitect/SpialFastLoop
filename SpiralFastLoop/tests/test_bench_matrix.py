@@ -792,6 +792,10 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_forward_p95_ms": 2.0,
             "profile_forward_p99_ms": 3.0,
             "profile_forward_std_ms": 0.2,
+            "profile_forward_min_ms": 1.0,
+            "profile_forward_max_ms": 3.5,
+            "profile_forward_sample_count": 1,
+            "profile_forward_window_sample_count": 1,
             "profile_forward_child_count": 1,
             "profile_forward_tracked_time_s": 0.05,
             "profile_forward_untracked_time_s": 0.01,
@@ -890,6 +894,10 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_forward_p95_ms": 4.0,
             "profile_forward_p99_ms": 6.0,
             "profile_forward_std_ms": 0.4,
+            "profile_forward_min_ms": 2.0,
+            "profile_forward_max_ms": 7.5,
+            "profile_forward_sample_count": 3,
+            "profile_forward_window_sample_count": 2,
             "profile_forward_child_count": 3,
             "profile_forward_tracked_time_s": 0.09,
             "profile_forward_untracked_time_s": 0.02,
@@ -972,6 +980,10 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_forward_p95_ms": 5.0,
             "profile_forward_p99_ms": 7.0,
             "profile_forward_std_ms": 0.5,
+            "profile_forward_min_ms": 2.5,
+            "profile_forward_max_ms": 8.0,
+            "profile_forward_sample_count": 2,
+            "profile_forward_window_sample_count": 2,
             "profile_forward_child_count": 2,
             "profile_forward_tracked_time_s": 0.06,
             "profile_forward_untracked_time_s": 0.02,
@@ -1065,6 +1077,10 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["mean_profile_forward_p95_ms"] == pytest.approx(3.0)
     assert generated["mean_profile_forward_p99_ms"] == pytest.approx(4.5)
     assert generated["mean_profile_forward_std_ms"] == pytest.approx(0.3)
+    assert generated["mean_profile_forward_min_ms"] == pytest.approx(1.5)
+    assert generated["mean_profile_forward_max_ms"] == pytest.approx(5.5)
+    assert generated["mean_profile_forward_sample_count"] == pytest.approx(2.0)
+    assert generated["mean_profile_forward_window_sample_count"] == pytest.approx(1.5)
     assert generated["mean_profile_forward_child_count"] == pytest.approx(2.0)
     assert generated["mean_profile_forward_tracked_time_s"] == pytest.approx(0.07)
     assert generated["mean_profile_forward_untracked_time_s"] == pytest.approx(0.015)
@@ -1112,6 +1128,10 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert summary["best_reported"]["mean_profile_forward_p95_ms"] == pytest.approx(5.0)
     assert summary["best_reported"]["mean_profile_forward_p99_ms"] == pytest.approx(7.0)
     assert summary["best_reported"]["mean_profile_forward_std_ms"] == pytest.approx(0.5)
+    assert summary["best_reported"]["mean_profile_forward_min_ms"] == pytest.approx(2.5)
+    assert summary["best_reported"]["mean_profile_forward_max_ms"] == pytest.approx(8.0)
+    assert summary["best_reported"]["mean_profile_forward_sample_count"] == pytest.approx(2.0)
+    assert summary["best_reported"]["mean_profile_forward_window_sample_count"] == pytest.approx(2.0)
     assert summary["best_reported"]["mean_profile_forward_top_pct_of_parent"] == pytest.approx(55.0)
     assert summary["best_reported"]["mean_profile_forward_top_avg_ms"] == pytest.approx(5.5)
     assert summary["best_reported"]["mean_profile_forward_top_p95_ms"] == pytest.approx(6.0)

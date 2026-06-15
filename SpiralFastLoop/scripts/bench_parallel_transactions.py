@@ -165,27 +165,7 @@ PROFILE_PHASE_SUMMARY_FIELDS = (
     "profile_metrics_avg_ms",
 )
 
-PROFILE_PHASE_DISTRIBUTION_SUMMARY_FIELDS = tuple(
-    f"profile_{phase_name}_{field_name}"
-    for phase_name in (
-        "data_wait",
-        "transfer",
-        "forward",
-        "loss",
-        "loss_reduce",
-        "trigger",
-        "inject_transfer",
-        "backward",
-        "optimizer",
-        "user_metrics",
-        "postprocess",
-        "collect_output",
-        "metrics",
-    )
-    for field_name in ("p50_ms", "p95_ms", "p99_ms", "std_ms")
-)
-
-PROFILE_TOP_DISTRIBUTION_SUMMARY_FIELD_NAMES = (
+PROFILE_DISTRIBUTION_SUMMARY_FIELD_NAMES = (
     "p50_ms",
     "p95_ms",
     "p99_ms",
@@ -193,16 +173,41 @@ PROFILE_TOP_DISTRIBUTION_SUMMARY_FIELD_NAMES = (
     "min_ms",
     "max_ms",
 )
-PROFILE_TOP_COUNT_SUMMARY_FIELD_NAMES = (
+PROFILE_DISTRIBUTION_COUNT_SUMMARY_FIELD_NAMES = (
     "sample_count",
     "window_sample_count",
+)
+PROFILE_PHASE_SUMMARY_FIELD_NAMES = (
+    "data_wait",
+    "transfer",
+    "forward",
+    "loss",
+    "loss_reduce",
+    "trigger",
+    "inject_transfer",
+    "backward",
+    "optimizer",
+    "user_metrics",
+    "postprocess",
+    "collect_output",
+    "metrics",
+)
+PROFILE_PHASE_DISTRIBUTION_SUMMARY_FIELDS = tuple(
+    f"profile_{phase_name}_{field_name}"
+    for phase_name in PROFILE_PHASE_SUMMARY_FIELD_NAMES
+    for field_name in PROFILE_DISTRIBUTION_SUMMARY_FIELD_NAMES + PROFILE_DISTRIBUTION_COUNT_SUMMARY_FIELD_NAMES
+)
+PROFILE_PHASE_COUNT_SUMMARY_FIELDS = tuple(
+    f"profile_{phase_name}_{field_name}"
+    for phase_name in PROFILE_PHASE_SUMMARY_FIELD_NAMES
+    for field_name in PROFILE_DISTRIBUTION_COUNT_SUMMARY_FIELD_NAMES
 )
 
 
 def _profile_top_summary_fields(prefix: str) -> tuple[str, ...]:
     return tuple(
         f"{prefix}_top_{field_name}"
-        for field_name in PROFILE_TOP_DISTRIBUTION_SUMMARY_FIELD_NAMES + PROFILE_TOP_COUNT_SUMMARY_FIELD_NAMES
+        for field_name in PROFILE_DISTRIBUTION_SUMMARY_FIELD_NAMES + PROFILE_DISTRIBUTION_COUNT_SUMMARY_FIELD_NAMES
     )
 
 
@@ -266,6 +271,7 @@ DEVICE_MEMORY_SUMMARY_FIELDS = (
 )
 SUMMARY_INTEGER_FIELDS = (
     WORKLOAD_INTEGER_SUMMARY_FIELDS
+    | frozenset(PROFILE_PHASE_COUNT_SUMMARY_FIELDS)
     | frozenset({
         "batches",
         "batch_size",
@@ -496,6 +502,7 @@ BEST_RUN_INTEGER_FIELDS = frozenset({
     "steady_steps",
     "steady_samples",
     "steady_optimizer_steps",
+    *PROFILE_PHASE_COUNT_SUMMARY_FIELDS,
     "profile_flat_metric_invalid_count",
     "profile_open_phase_count",
     "profile_open_detail_count",
