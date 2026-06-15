@@ -44,6 +44,11 @@ class _FailingFloat:
         raise RuntimeError("float conversion failed")
 
 
+class BrokenStrError(Exception):
+    def __str__(self) -> str:
+        raise RuntimeError("string conversion failed")
+
+
 def test_distributed_context_reads_valid_env_values(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(utils_mod.torch.distributed, "is_available", lambda: False)
     monkeypatch.setenv("RANK", "2")
@@ -484,6 +489,23 @@ def test_safe_compile_with_diagnostics_reports_exception(monkeypatch: pytest.Mon
     assert result.model is model
     assert result.compiled is False
     assert result.fallback_reason == "RuntimeError: compile exploded"
+
+
+def test_safe_compile_with_diagnostics_handles_unstringifiable_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = torch.nn.Linear(1, 1)
+
+    def fake_compile(_: torch.nn.Module, mode: str) -> object:
+        raise BrokenStrError()
+
+    monkeypatch.setattr(torch, "compile", fake_compile, raising=False)
+
+    result = safe_compile_with_diagnostics(model)
+
+    assert result.model is model
+    assert result.compiled is False
+    assert result.fallback_reason == "BrokenStrError"
 
 
 def test_safe_compile_with_diagnostics_reports_non_module_result(monkeypatch: pytest.MonkeyPatch) -> None:

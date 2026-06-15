@@ -26,6 +26,11 @@ class _FailingFloat:
         raise RuntimeError("float conversion failed")
 
 
+class BrokenStrError(Exception):
+    def __str__(self) -> str:
+        raise RuntimeError("string conversion failed")
+
+
 def _make_supervised_components() -> tuple[
     DataLoader[tuple[torch.Tensor, torch.Tensor]],
     nn.Module,
@@ -1056,6 +1061,42 @@ def test_evaluate_logs_metrics_fn_failures_before_reraising() -> None:
     assert metrics["eval_failure_last_error"] == "RuntimeError: metrics boom"
     assert metrics["user_metric_valid_count"] == 0
     assert metrics["user_metric_skipped_count"] == 0
+
+
+def test_evaluate_failure_metrics_handle_unstringifiable_exceptions() -> None:
+    inputs = torch.randn(2, 4)
+    targets = torch.randint(0, 3, (2,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    logger = _CapturingLogger()
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        logger=logger,
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        log_interval=999,
+    )
+
+    def metrics_fn(
+        _outputs: torch.Tensor,
+        _batch_targets: torch.Tensor,
+        _inputs: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        raise BrokenStrError()
+
+    with pytest.raises(BrokenStrError):
+        trainer.evaluate(loader, nn.CrossEntropyLoss(), metrics_fn=metrics_fn, steps=1)
+
+    assert len(logger.rows) == 1
+    stage, metrics, mode = logger.rows[0]
+    assert stage == "eval"
+    assert mode == "error"
+    assert metrics["metrics_fn_last_error"] == "BrokenStrError"
+    assert metrics["eval_failure_last_error"] == "BrokenStrError"
+    assert metrics["eval_failure_stage"] == "user_metrics"
 
 
 def test_evaluate_logs_forward_failures_before_reraising() -> None:
@@ -2127,7 +2168,7 @@ def test_train_one_epoch_logs_loss_reduce_failures_before_reraising(
 def test_profile_flat_metrics_skip_invalid_values() -> None:
     metrics: dict[str, object] = {}
     profile = {
-        "profile_total_s": "slow",
+        "profile_total_s": _FailingFloat(),
         "phases": {
             "forward": {"total_s": 0.1, "pct": float("nan"), "avg_ms": "bad"},
             "backward": {"total_s": float("inf"), "pct": 30.0, "avg_ms": True},

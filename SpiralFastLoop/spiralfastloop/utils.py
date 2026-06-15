@@ -1168,7 +1168,10 @@ def safe_compile(model: nn.Module, mode: str = "reduce-overhead") -> Tuple[nn.Mo
 
 
 def _format_compile_exception(exc: Exception) -> str:
-    message = str(exc).strip()
+    try:
+        message = str(exc).strip()
+    except Exception:
+        message = ""
     if len(message) > 200:
         message = f"{message[:197]}..."
     if message:

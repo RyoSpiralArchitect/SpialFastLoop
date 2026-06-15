@@ -83,7 +83,10 @@ _BATCH_SIZE_INFERENCE_FAILURE_MESSAGES = {
 
 
 def _format_exception_reason(exc: Exception, limit: int = 200) -> str:
-    message = str(exc).strip()
+    try:
+        message = str(exc).strip()
+    except Exception:
+        message = ""
     if len(message) > limit:
         message = f"{message[:limit - 3]}..."
     if message:
@@ -96,7 +99,7 @@ def _finite_profile_value(raw: Any) -> Optional[float]:
         return None
     try:
         value = float(raw)
-    except (TypeError, ValueError):
+    except Exception:
         return None
     if not math.isfinite(value):
         return None
