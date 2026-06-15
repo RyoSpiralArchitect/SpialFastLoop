@@ -9,6 +9,12 @@ from spiralfastloop.extras import surprisal_sandwich as sr
 from spiralfastloop.extras.surprisal_sandwich import AntiTopKMiddle, CoherenceTailBoost
 
 
+class _FailingIterable:
+    def __iter__(self):
+        yield 0.1
+        raise RuntimeError("iteration failed")
+
+
 def test_anti_topk_middle_rejects_invalid_window() -> None:
     for kwargs in (
         {"start_frac": -0.1, "end_frac": 0.7},
@@ -90,6 +96,15 @@ def test_coherence_tail_boost_rejects_invalid_fraction_or_mu() -> None:
         CoherenceTailBoost(mu="0.5")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="mu"):
         CoherenceTailBoost(mu=object())  # type: ignore[arg-type]
+
+
+def test_surprise_repair_generate_rejects_malformed_middle_before_loading_models() -> None:
+    with pytest.raises(ValueError, match="middle"):
+        sr.surprise_repair_generate(
+            "hello",
+            "main-model",
+            middle=_FailingIterable(),  # type: ignore[arg-type]
+        )
 
 
 def test_coherence_tail_boost_skips_mismatched_vocab_logits() -> None:

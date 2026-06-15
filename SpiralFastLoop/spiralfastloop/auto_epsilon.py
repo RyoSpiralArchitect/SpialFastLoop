@@ -198,7 +198,7 @@ def _epsilon_bounds_setting(bounds: Any) -> Tuple[float, float]:
         raise ValueError("epsilon bounds must contain exactly two values")
     try:
         values = tuple(bounds)
-    except TypeError as exc:
+    except Exception as exc:
         raise ValueError("epsilon bounds must contain exactly two values") from exc
     if len(values) != 2:
         raise ValueError("epsilon bounds must contain exactly two values")
@@ -224,7 +224,12 @@ def _residual_values_setting(residuals: Any) -> List[float]:
         iterator = iter(residuals)
     except TypeError as exc:
         raise ValueError("residuals must be an iterable of finite numbers") from exc
-    return [abs(_strict_finite_float_setting(residual, "residual")) for residual in iterator]
+    try:
+        return [abs(_strict_finite_float_setting(residual, "residual")) for residual in iterator]
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError("residuals must be an iterable of finite numbers") from exc
 
 
 def _simulate_objective(

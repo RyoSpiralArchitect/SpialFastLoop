@@ -96,7 +96,7 @@ def _validate_middle(middle: Any) -> tuple[float, float]:
         raise ValueError("middle must contain exactly two fractions.")
     try:
         values = tuple(middle)
-    except TypeError as exc:
+    except Exception as exc:
         raise ValueError("middle must contain exactly two fractions.") from exc
     if len(values) != 2:
         raise ValueError("middle must contain exactly two fractions.")

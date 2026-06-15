@@ -14,6 +14,12 @@ from spiralfastloop.metrics import (
 )
 
 
+class _FailingEventIterable:
+    def __iter__(self):
+        yield NormalizationEvent(timestamp=5.0, before=0.2, after=0.0, context="valid")
+        raise RuntimeError("iteration failed")
+
+
 @pytest.mark.parametrize("history_limit", [-1, 1.5, "2", True])
 def test_collector_rejects_invalid_history_limit(history_limit: object):
     with pytest.raises(ValueError, match="history_limit"):
@@ -145,6 +151,7 @@ def test_collector_can_merge_events():
             NormalizationEvent(timestamp=5.0, before=0.2, after=0.0, context="valid"),
             NormalizationEvent(timestamp=6.0, before=0.1, after=0.0, context=True),
         ],
+        _FailingEventIterable(),
     ],
 )
 def test_collector_merge_rejects_invalid_events_without_mutating_state(events: object):
