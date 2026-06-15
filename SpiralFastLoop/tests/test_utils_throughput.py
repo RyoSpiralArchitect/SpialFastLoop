@@ -365,6 +365,20 @@ def test_throughput_meter_can_skip_window_tracking():
     assert summary["window_samples_per_sec"] == 0.0
 
 
+def test_throughput_meter_reports_window_untracked_when_window_is_zero():
+    meter = ThroughputMeter(window=0)
+    meter.record(0.1, 4)
+
+    summary = meter.summary()
+
+    assert meter.window_tracked is False
+    assert summary["window_tracked"] is False
+    assert summary["window_batches"] == 0.0
+    assert summary["window_samples"] == 0.0
+    assert summary["window_time_s"] == 0.0
+    assert summary["window_samples_per_sec"] == 0.0
+
+
 def test_throughput_meter_fast_mode_tracks_best_speed_and_headroom():
     meter = ThroughputMeter(fast_mode=True)
     meter.record(0.2, 4)  # 20 samples/s

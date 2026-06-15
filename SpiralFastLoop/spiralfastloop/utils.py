@@ -567,6 +567,9 @@ class ThroughputMeter:
 
     Set ``track_window=False`` to skip the moving window book-keeping when you
     only care about global throughput.
+
+    Set ``window=0`` to disable moving-window stats while retaining streaming
+    percentile tracking.
     """
 
     class _BatchTimer(AbstractContextManager["ThroughputMeter._BatchTimer"]):
@@ -635,6 +638,7 @@ class ThroughputMeter:
             if smoothing_value is not None and not (0.0 < smoothing_value <= 1.0):
                 raise ValueError("smoothing must be in the interval (0, 1].")
         window_int = _non_negative_int_setting(window, "window")
+        track_window_value = track_window_value and window_int > 0
         self._track_distribution = track_distribution_value
         self._track_window = track_window_value
         self._fast_mode = fast_mode_value
