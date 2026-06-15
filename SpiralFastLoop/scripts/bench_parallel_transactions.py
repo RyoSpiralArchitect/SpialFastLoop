@@ -1205,7 +1205,23 @@ def _format_profile_event_timing(
             )
             if value_text is not None:
                 parts.append(f"{label}={value_text}")
+    parts.extend(_profile_count_fields(row))
     return " ".join(parts)
+
+
+def _profile_count_fields(row: dict[str, Any]) -> list[str]:
+    parts = []
+    for field, label in (
+        ("calls", "calls"),
+        ("sample_count", "samples"),
+        ("window_sample_count", "window"),
+    ):
+        if field not in row:
+            continue
+        count = _display_count_value(row.get(field))
+        if count is not None:
+            parts.append(f"{label}={count}")
+    return parts
 
 
 def _format_profile_breakdown_child_timing(row: dict[str, Any]) -> str:
@@ -1221,6 +1237,7 @@ def _format_profile_breakdown_child_timing(row: dict[str, Any]) -> str:
         value_text = _format_non_negative_metric_value(row.get(field), precision=2, suffix="ms")
         if value_text is not None:
             parts.append(f"{label}={value_text}")
+    parts.extend(_profile_count_fields(row))
     return " ".join(parts)
 
 
@@ -1237,6 +1254,7 @@ def _format_profile_phase_timing(row: dict[str, Any]) -> str:
         value_text = _format_non_negative_metric_value(row.get(field), precision=2, suffix="ms")
         if value_text is not None:
             parts.append(f"{label}={value_text}")
+    parts.extend(_profile_count_fields(row))
     return " ".join(parts)
 
 

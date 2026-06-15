@@ -173,7 +173,8 @@ and run-context stats across repeated runs.
 With `--profile-model`, backward grad-ready rows print `avg_ms@pct`, where
 `pct` is the average event position within the parent backward phase. Aggregate
 summaries also expose backward grad-ready top timing and position fields for
-matrix comparisons.
+matrix comparisons. Human profile summaries include `calls`, timing `samples`,
+and bounded `window` counts when distribution samples are available.
 
 ```bash
 python3 scripts/bench_matrix.py \

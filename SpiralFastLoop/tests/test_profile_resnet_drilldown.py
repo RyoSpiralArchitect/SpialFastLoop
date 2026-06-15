@@ -316,6 +316,9 @@ def test_print_summary_shows_top_phase_tail_latency(
                     "p95_ms": 2.5,
                     "p99_ms": 3.5,
                     "std_ms": 0.25,
+                    "calls": 3,
+                    "sample_count": 3,
+                    "window_sample_count": 2,
                 },
             ],
         },
@@ -324,7 +327,7 @@ def test_print_summary_shows_top_phase_tail_latency(
     drilldown._print_summary(metrics, topk=4)
 
     output = capsys.readouterr().out
-    assert "forward: 42.5% avg=1.25ms p95=2.50ms p99=3.50ms std=0.25ms" in output
+    assert "forward: 42.5% avg=1.25ms p95=2.50ms p99=3.50ms std=0.25ms calls=3 samples=3 window=2" in output
 
 
 def test_print_summary_shows_backward_parent_position(
@@ -343,6 +346,9 @@ def test_print_summary_shows_backward_parent_position(
                             "p95_ms": 3.5,
                             "p99_ms": 4.5,
                             "std_ms": 0.4,
+                            "calls": 2,
+                            "sample_count": 2,
+                            "window_sample_count": 2,
                         },
                     ],
                 },
@@ -353,7 +359,7 @@ def test_print_summary_shows_backward_parent_position(
     drilldown._print_summary(metrics, topk=4)
 
     output = capsys.readouterr().out
-    assert "layer4: avg=2.25ms@45.0% p95=3.50ms p99=4.50ms std=0.40ms" in output
+    assert "layer4: avg=2.25ms@45.0% p95=3.50ms p99=4.50ms std=0.40ms calls=2 samples=2 window=2" in output
 
 
 def test_print_summary_shows_open_profile_timers(

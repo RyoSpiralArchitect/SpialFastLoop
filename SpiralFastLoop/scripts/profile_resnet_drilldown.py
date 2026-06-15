@@ -34,6 +34,7 @@ from scripts.bench_parallel_transactions import (
     _list_value,
     _optional_path_setting,
     _path_setting,
+    _profile_count_fields,
     _profile_child_rows,
     _profile_row_name,
     device_arg,
@@ -119,6 +120,7 @@ def _format_phase_timing(row: dict[str, Any]) -> str:
             continue
         value_text = _format_non_negative_metric_value(row.get(field), precision=2, suffix="ms")
         parts.append(f"{label}={value_text if value_text is not None else 'n/a'}")
+    parts.extend(_profile_count_fields(row))
     return " ".join(parts)
 
 

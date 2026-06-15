@@ -30,6 +30,7 @@ from scripts.bench_parallel_transactions import (
     _format_scheduler_summary,
     _format_setup_breakdown,
     _has_positive_display_value,
+    _profile_count_fields,
     _profile_row_name,
     build_model,
     device_arg,
@@ -1767,9 +1768,12 @@ def test_format_profile_breakdown_child_timing_includes_avg_and_tail() -> None:
         "p95_ms": 2.5,
         "p99_ms": 3.5,
         "std_ms": 0.25,
+        "calls": 3,
+        "sample_count": 3,
+        "window_sample_count": 2,
     })
 
-    assert formatted == "42.5% avg=1.25ms p95=2.50ms p99=3.50ms std=0.25ms"
+    assert formatted == "42.5% avg=1.25ms p95=2.50ms p99=3.50ms std=0.25ms calls=3 samples=3 window=2"
 
 
 def test_format_profile_breakdown_child_timing_omits_malformed_tail() -> None:
@@ -1803,7 +1807,10 @@ def test_format_profile_event_timing_can_include_tail() -> None:
         "p95_ms": 6.5,
         "p99_ms": 7.5,
         "std_ms": 0.5,
-    }, include_p95=True) == "4.2ms@42.5% p95=6.5ms p99=7.5ms std=0.5ms"
+        "calls": 4,
+        "sample_count": 4,
+        "window_sample_count": 3,
+    }, include_p95=True) == "4.2ms@42.5% p95=6.5ms p99=7.5ms std=0.5ms calls=4 samples=4 window=3"
     assert _format_profile_event_timing({
         "avg_ms": 4.25,
         "p95_ms": 6.5,
@@ -1819,9 +1826,25 @@ def test_format_profile_phase_timing_includes_tail_latency() -> None:
         "p95_ms": 2.5,
         "p99_ms": 3.5,
         "std_ms": 0.25,
+        "calls": 3,
+        "sample_count": 3,
+        "window_sample_count": 2,
     })
 
-    assert formatted == "42.5% avg=1.25ms p95=2.50ms p99=3.50ms std=0.25ms"
+    assert formatted == "42.5% avg=1.25ms p95=2.50ms p99=3.50ms std=0.25ms calls=3 samples=3 window=2"
+
+
+def test_profile_count_fields_omit_malformed_values() -> None:
+    assert _profile_count_fields({
+        "calls": 3,
+        "sample_count": 3,
+        "window_sample_count": 2,
+    }) == ["calls=3", "samples=3", "window=2"]
+    assert _profile_count_fields({
+        "calls": True,
+        "sample_count": "3",
+        "window_sample_count": -1,
+    }) == []
 
 
 def test_format_profile_phase_timing_omits_malformed_tail_latency() -> None:
@@ -2177,6 +2200,9 @@ def test_main_prints_backward_event_parent_position(
                             "p95_ms": 2.5,
                             "p99_ms": 3.5,
                             "std_ms": 0.25,
+                            "calls": 4,
+                            "sample_count": 4,
+                            "window_sample_count": 3,
                         },
                     ],
                     "phase_breakdowns": {
@@ -2189,6 +2215,9 @@ def test_main_prints_backward_event_parent_position(
                                     "pct_of_parent": 70.0,
                                     "avg_ms": 1.25,
                                     "p95_ms": 2.5,
+                                    "calls": 2,
+                                    "sample_count": 2,
+                                    "window_sample_count": 2,
                                 },
                             ],
                         },
@@ -2200,6 +2229,7 @@ def test_main_prints_backward_event_parent_position(
                                     "pct_of_parent": 80.0,
                                     "avg_ms": 3.25,
                                     "p95_ms": 4.5,
+                                    "calls": 1,
                                 },
                             ],
                         },
@@ -2212,8 +2242,11 @@ def test_main_prints_backward_event_parent_position(
                                     "avg_ms": 3.5,
                                     "avg_pct_of_parent": 35.0,
                                     "p95_ms": 4.5,
+                                    "calls": 2,
+                                    "sample_count": 2,
+                                    "window_sample_count": 2,
                                 },
-                                {"name": "model.2", "avg_ms": 1.2},
+                                {"name": "model.2", "avg_ms": 1.2, "calls": 1},
                             ],
                         },
                     },
@@ -2228,10 +2261,10 @@ def test_main_prints_backward_event_parent_position(
     bpt.main()
 
     output = capsys.readouterr().out
-    assert "phases: forward=42.5% avg=1.25ms p95=2.50ms p99=3.50ms std=0.25ms" in output
-    assert "forward: model.0=70.0% avg=1.25ms p95=2.50ms" in output
-    assert "backward_grad_ready: model.0=3.5ms@35.0% p95=4.5ms, model.2=1.2ms" in output
-    assert "optimizer: optimizer.step=80.0% avg=3.25ms p95=4.50ms" in output
+    assert "phases: forward=42.5% avg=1.25ms p95=2.50ms p99=3.50ms std=0.25ms calls=4 samples=4 window=3" in output
+    assert "forward: model.0=70.0% avg=1.25ms p95=2.50ms calls=2 samples=2 window=2" in output
+    assert "backward_grad_ready: model.0=3.5ms@35.0% p95=4.5ms calls=2 samples=2 window=2, model.2=1.2ms calls=1" in output
+    assert "optimizer: optimizer.step=80.0% avg=3.25ms p95=4.50ms calls=1" in output
 
 
 def test_transaction_benchmark_records_run_seed() -> None:
