@@ -454,7 +454,7 @@ def _metric_to_float(value: Any) -> tuple[Optional[float], str]:
             return None, "invalid"
         try:
             normalized = float(value)
-        except (TypeError, ValueError):
+        except Exception:
             return None, "invalid"
     if not math.isfinite(normalized):
         return None, "non_finite"

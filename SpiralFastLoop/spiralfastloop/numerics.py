@@ -85,7 +85,7 @@ def _finite_float_value(value: Any, name: str) -> float:
         raise ValueError(f"{name} must be a finite float")
     try:
         normalized = float(value)
-    except (TypeError, ValueError) as exc:
+    except Exception as exc:
         raise ValueError(f"{name} must be a finite float") from exc
     if not math.isfinite(normalized):
         raise ValueError(f"{name} must be a finite float")

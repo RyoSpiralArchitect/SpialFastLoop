@@ -21,6 +21,11 @@ from spiralfastloop.engine import (
 from spiralfastloop.utils import PhaseProfiler
 
 
+class _FailingFloat:
+    def __float__(self) -> float:
+        raise RuntimeError("float conversion failed")
+
+
 def _make_supervised_components() -> tuple[
     DataLoader[tuple[torch.Tensor, torch.Tensor]],
     nn.Module,
@@ -941,6 +946,7 @@ def test_evaluate_rejects_coerced_user_metrics_and_bad_names() -> None:
             "numeric_bytes": b"0.5",
             "bool_tensor": torch.tensor([True, False]),
             "complex_tensor": torch.tensor([1.0 + 0.0j]),
+            "broken_float": _FailingFloat(),
             "": 1.0,
             ("tuple", "key"): 1.0,
         }
@@ -959,10 +965,11 @@ def test_evaluate_rejects_coerced_user_metrics_and_bad_names() -> None:
     assert "numeric_bytes" not in metrics
     assert "bool_tensor" not in metrics
     assert "complex_tensor" not in metrics
+    assert "broken_float" not in metrics
     assert metrics["user_metric_valid_count"] == 2
-    assert metrics["user_metric_invalid_count"] == 7
+    assert metrics["user_metric_invalid_count"] == 8
     assert metrics["user_metric_non_finite_count"] == 0
-    assert metrics["user_metric_skipped_count"] == 7
+    assert metrics["user_metric_skipped_count"] == 8
 
 
 def test_evaluate_reports_non_mapping_user_metrics_as_invalid() -> None:

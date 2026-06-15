@@ -13,6 +13,11 @@ if str(PACKAGE_ROOT) not in sys.path:
 from spiralfastloop.numerics import HybridCompensatedAccumulator
 
 
+class _FailingFloat:
+    def __float__(self) -> float:
+        raise RuntimeError("float conversion failed")
+
+
 def test_accumulator_tracks_total_with_compensation() -> None:
     acc = HybridCompensatedAccumulator(unit=0.01, rng=random.Random(123))
     # Sequence designed to trigger cancellation when accumulated naïvely.
@@ -94,12 +99,15 @@ def test_restore_rejects_non_finite() -> None:
         ({"unit": float("inf")}, "unit"),
         ({"unit": True}, "unit"),
         ({"unit": "0.01"}, "unit"),
+        ({"unit": _FailingFloat()}, "unit"),
         ({"initial_total": float("inf")}, "initial_total"),
         ({"initial_total": True}, "initial_total"),
         ({"initial_total": "1.0"}, "initial_total"),
+        ({"initial_total": _FailingFloat()}, "initial_total"),
         ({"initial_compensation": float("nan")}, "initial_compensation"),
         ({"initial_compensation": False}, "initial_compensation"),
         ({"initial_compensation": "0.0"}, "initial_compensation"),
+        ({"initial_compensation": _FailingFloat()}, "initial_compensation"),
         ({"rng": True}, "rng"),
     ],
 )
@@ -108,7 +116,7 @@ def test_initial_state_validation(kwargs: dict, field: str) -> None:
         HybridCompensatedAccumulator(**kwargs)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("value", [float("nan"), float("inf"), True, "1.0", b"1.0", object()])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), True, "1.0", b"1.0", object(), _FailingFloat()])
 def test_add_rejects_invalid_values_before_mutating_state(value: object) -> None:
     acc = HybridCompensatedAccumulator(unit=0.01, rng=random.Random(11))
     acc.add(0.25)
@@ -140,6 +148,7 @@ def test_extend_rejects_non_iterable_values_before_mutating_state() -> None:
         [0.05, "0.1"],
         [0.05, b"0.1"],
         [0.05, object()],
+        [0.05, _FailingFloat()],
     ],
 )
 def test_extend_rejects_invalid_items_without_mutating_state(values: list[object]) -> None:
@@ -175,10 +184,12 @@ def test_extend_rolls_back_when_iterator_raises_mid_stream() -> None:
         (float("inf"), 0.0, "total"),
         (True, 0.0, "total"),
         ("0.0", 0.0, "total"),
+        (_FailingFloat(), 0.0, "total"),
         (0.0, float("nan"), "compensation"),
         (0.0, float("-inf"), "compensation"),
         (0.0, False, "compensation"),
         (0.0, "0.0", "compensation"),
+        (0.0, _FailingFloat(), "compensation"),
     ],
 )
 def test_restore_rejects_invalid_values_before_mutating_state(
