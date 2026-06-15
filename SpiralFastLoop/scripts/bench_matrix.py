@@ -406,6 +406,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--runs", type=positive_int_arg, default=1)
     parser.add_argument("--learning-rate", type=positive_float_arg, default=3e-4)
     parser.add_argument("--seed", type=_int_arg, default=1234)
+    parser.add_argument("--meter-fast-mode", action="store_true")
     parser.add_argument("--device", type=device_arg, default="auto")
     parser.add_argument("--prefetch-factor", type=positive_int_arg, default=4)
     parser.add_argument("--log-interval", type=non_negative_int_arg, default=0)
@@ -458,6 +459,7 @@ def _run_args(args: argparse.Namespace, dataset_mode: str, compile_mode: str, wo
         runs=args.runs,
         learning_rate=args.learning_rate,
         seed=args.seed,
+        meter_fast_mode=args.meter_fast_mode,
         collect_profile=args.collect_profile or args.profile_model,
         profile_sync=args.profile_sync,
         profile_distribution=args.profile_distribution,

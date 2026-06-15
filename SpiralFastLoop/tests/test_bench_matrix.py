@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from scripts.bench_matrix import (
     _measured_summary_value,
     _parse_csv_choices,
     _parse_worker_counts,
+    _run_args,
     parse_args,
     summarize_rows,
 )
@@ -86,6 +88,45 @@ def test_parse_args_rejects_invalid_device(monkeypatch: pytest.MonkeyPatch) -> N
         parse_args()
 
     assert exc_info.value.code == 2
+
+
+def test_parse_args_accepts_meter_fast_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["bench_matrix.py", "--meter-fast-mode"])
+
+    args = parse_args()
+
+    assert args.meter_fast_mode is True
+
+
+def test_run_args_preserves_meter_fast_mode() -> None:
+    args = Namespace(
+        transactions=128,
+        feature_dim=16,
+        num_classes=4,
+        batch_size=32,
+        grad_accum=2,
+        steps=4,
+        warmup_steps=1,
+        runs=1,
+        learning_rate=3e-4,
+        seed=1234,
+        meter_fast_mode=True,
+        device="cpu",
+        prefetch_factor=2,
+        log_interval=0,
+        collect_profile=False,
+        profile_sync=False,
+        profile_distribution=True,
+        profile_window=16,
+        profile_model=False,
+        profile_model_depth=1,
+        profile_model_max_modules=8,
+        profile_model_include=None,
+    )
+
+    run_args = _run_args(args, "generated", "no-compile", 0)
+
+    assert run_args.meter_fast_mode is True
 
 
 @pytest.mark.parametrize(

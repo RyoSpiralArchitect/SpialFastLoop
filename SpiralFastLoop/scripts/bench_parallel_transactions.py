@@ -1306,7 +1306,14 @@ def validate_benchmark_args(args: argparse.Namespace) -> None:
         _int_setting(args.seed, "seed")
     if hasattr(args, "learning_rate"):
         _positive_float_setting(args.learning_rate, "learning_rate")
-    for field in ("compile", "collect_profile", "profile_sync", "profile_distribution", "profile_model"):
+    for field in (
+        "compile",
+        "collect_profile",
+        "meter_fast_mode",
+        "profile_sync",
+        "profile_distribution",
+        "profile_model",
+    ):
         if hasattr(args, field):
             _bool_setting(getattr(args, field), field)
     if hasattr(args, "profile_model_include"):
@@ -1440,6 +1447,7 @@ def run_once(args, run_index: int) -> BenchmarkResult:
         use_compile=args.compile,
         grad_accum=args.grad_accum,
         log_interval=args.log_interval,
+        meter_fast_mode=getattr(args, "meter_fast_mode", False),
     )
     model_setup_time_s = _non_negative_finite_float_setting(
         time.perf_counter() - model_start,
@@ -1515,6 +1523,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--runs", type=positive_int_arg, default=3, help="How many repeated runs to execute.")
     parser.add_argument("--learning-rate", type=positive_float_arg, default=3e-4, help="Learning rate for the synthetic model.")
     parser.add_argument("--seed", type=_int_arg, default=1234, help="Base random seed for synthetic data.")
+    parser.add_argument("--meter-fast-mode", action="store_true", help="Use lighter throughput meters without tail/window stats.")
     parser.add_argument("--collect-profile", action="store_true", help="Collect train-loop phase timings.")
     parser.add_argument("--profile-sync", action="store_true", help="Synchronize accelerator around profiled phases.")
     parser.add_argument(

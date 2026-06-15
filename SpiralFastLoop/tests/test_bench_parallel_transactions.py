@@ -2000,6 +2000,7 @@ def test_validate_benchmark_args_rejects_invalid_direct_values(
         ("learning_rate", float("nan"), "learning_rate"),
         ("compile", 1, "compile"),
         ("collect_profile", "yes", "collect_profile"),
+        ("meter_fast_mode", "yes", "meter_fast_mode"),
         ("profile_sync", 0, "profile_sync"),
         ("profile_distribution", "true", "profile_distribution"),
         ("profile_model", 1, "profile_model"),
@@ -2089,6 +2090,14 @@ def test_parse_args_rejects_invalid_device(monkeypatch: pytest.MonkeyPatch) -> N
         parse_args()
 
     assert exc_info.value.code == 2
+
+
+def test_parse_args_accepts_meter_fast_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["bench_parallel_transactions.py", "--meter-fast-mode"])
+
+    args = parse_args()
+
+    assert args.meter_fast_mode is True
 
 
 def test_main_prints_setup_breakdown(
@@ -2237,6 +2246,7 @@ def test_transaction_benchmark_records_run_seed() -> None:
         workers = 0
         prefetch_factor = 2
         learning_rate = 3e-4
+        meter_fast_mode = True
         compile = False
         grad_accum = 2
         log_interval = 0
@@ -2256,6 +2266,8 @@ def test_transaction_benchmark_records_run_seed() -> None:
     assert result["seed"] == 103
     assert result["dataset_mode"] == "materialized"
     assert result["dataset_materialized_bytes"] == (64 * 8 * 4) + (64 * 8)
+    assert result["distribution_tracked"] is False
+    assert result["window_tracked"] is False
 
 
 @pytest.mark.parametrize(
