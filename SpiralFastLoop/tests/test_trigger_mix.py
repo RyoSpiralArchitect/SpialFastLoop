@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import namedtuple
 import math
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -739,7 +740,7 @@ def test_near_zero_mean_losses_still_trigger_injection() -> None:
     )
     trigger = LossStdTrigger(provider=provider, cfg=cfg)
 
-    tiny = torch.tensor([1e-10, -1e-10], dtype=torch.float64)
+    tiny = torch.tensor([1e-10, -1e-10], dtype=torch.float64, device="cpu")
     ctx = {"loss_vec": tiny, "device": "cpu", "step": 1}
 
     expected_coefvar = tiny.std(unbiased=False) / (tiny.mean().abs() + COEFVAR_STABILIZER)
@@ -765,6 +766,21 @@ def test_concatenate_batches_mismatched_keys_raises() -> None:
     base = {"a": torch.zeros((2, 3))}
     extra = {"b": torch.zeros((1, 3))}
     with pytest.raises(KeyError):
+        _concatenate_batches(base, extra)
+
+
+def test_concatenate_batches_rejects_sequence_type_mismatch() -> None:
+    with pytest.raises(TypeError, match="list structure"):
+        _concatenate_batches([torch.zeros((2, 3))], (torch.ones((1, 3)),))
+
+
+def test_concatenate_batches_rejects_namedtuple_type_mismatch() -> None:
+    pair = namedtuple("Pair", ["left", "right"])
+    other_pair = namedtuple("OtherPair", ["left", "right"])
+    base = pair(torch.zeros((2, 3)), torch.ones((2, 1)))
+    extra = other_pair(torch.ones((1, 3)), torch.zeros((1, 1)))
+
+    with pytest.raises(TypeError, match="namedtuple structure"):
         _concatenate_batches(base, extra)
 
 

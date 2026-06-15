@@ -34,7 +34,7 @@ if HAVE_HYPOTHESIS:
         """Generate rank-1 to rank-3 tensors with a fixed batch dimension."""
 
         rest = st.lists(st.integers(min_value=1, max_value=4), min_size=0, max_size=2)
-        return rest.map(lambda dims: torch.randn((batch_dim, *dims), dtype=torch.float32))
+        return rest.map(lambda dims: torch.randn((batch_dim, *dims), dtype=torch.float32, device="cpu"))
 
     @st.composite
     def batch_structure(draw, depth: int = 0, batch_dim: Optional[int] = None):

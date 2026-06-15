@@ -26,7 +26,7 @@ from typing import Any, Callable, Deque, Dict, Optional, Sequence, Tuple
 
 import torch
 
-from ..engine import TriggerResult
+from ..engine import TriggerResult, _infer_batch_size
 from ..metrics import GLOBAL_NORMALIZATION_METRICS, NormalizationMetricsCollector
 from ..utils import (
     _device_setting,
@@ -169,6 +169,13 @@ class HardSampleBuffer:
         batch_size = loss_vec.shape[0]
         if batch_size == 0:
             return
+        try:
+            input_batch_size = _infer_batch_size(inputs)
+            target_batch_size = _infer_batch_size(targets)
+        except Exception as exc:
+            raise ValueError("inputs and targets must match loss_vec batch dimension") from exc
+        if input_batch_size != batch_size or target_batch_size != batch_size:
+            raise ValueError("inputs and targets must match loss_vec batch dimension")
         requested_top_k = _optional_positive_int_setting(top_k, "top_k")
         k = batch_size if requested_top_k is None else min(batch_size, requested_top_k)
         _, indices = torch.topk(loss_vec, k=k, largest=True)

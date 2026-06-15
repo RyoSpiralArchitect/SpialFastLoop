@@ -323,15 +323,19 @@ def _concatenate_batches(base: Any, extra: Any) -> Any:
         cast(MutableMapping[Any, Any], new_mapping).update(merged)
         return new_mapping
     if isinstance(base, list):
-        if not isinstance(extra, (list, tuple)) or len(base) != len(extra):
+        if not isinstance(extra, list) or len(base) != len(extra):
             raise TypeError("Trigger extra batch must match the list structure of the original batch.")
         concatenated = [_concatenate_batches(b, e) for b, e in zip(base, extra)]
         return type(base)(concatenated)
     if isinstance(base, tuple):
-        if not isinstance(extra, (list, tuple)) or len(base) != len(extra):
+        if not isinstance(extra, tuple) or len(base) != len(extra):
             raise TypeError("Trigger extra batch must match the tuple structure of the original batch.")
+        base_namedtuple = hasattr(base, "_fields")
+        extra_namedtuple = hasattr(extra, "_fields")
+        if base_namedtuple != extra_namedtuple or (base_namedtuple and type(base) is not type(extra)):
+            raise TypeError("Trigger extra batch must match the namedtuple structure of the original batch.")
         concatenated = [_concatenate_batches(b, e) for b, e in zip(base, extra)]
-        if hasattr(base, "_fields"):
+        if base_namedtuple:
             return type(base)(*concatenated)
         return tuple(concatenated)
     if base is None and extra is None:
