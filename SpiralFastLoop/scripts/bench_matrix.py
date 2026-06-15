@@ -311,6 +311,11 @@ def _format_bottleneck_pressure(row: dict) -> str:
     return f"pressure({','.join(parts)})"
 
 
+def _annotate_profile_bottleneck_candidates(row: dict) -> dict:
+    _add_profile_bottleneck_candidates(row)
+    return row
+
+
 def _format_summary_row(row: dict) -> str:
     reported_samples_per_sec = _measured_summary_value(row, "mean_reported_samples_per_sec")
     reported_text = (
@@ -476,8 +481,7 @@ def _format_run_row(dataset_mode: str, compile_mode: str, workers: int, run_inde
     scheduler_summary = _format_scheduler_summary(result)
     if scheduler_summary:
         profile_parts.append(f"scheduler({scheduler_summary})")
-    bottleneck_source = dict(result)
-    _add_profile_bottleneck_candidates(bottleneck_source)
+    bottleneck_source = _annotate_profile_bottleneck_candidates(dict(result))
     bottleneck_text = _format_top_bottleneck_candidate(bottleneck_source)
     if bottleneck_text:
         profile_parts.append(bottleneck_text)
@@ -602,7 +606,7 @@ def main() -> None:
                         "matrix_compile_mode": compile_mode,
                         "matrix_workers": workers,
                     })
-                    _add_profile_bottleneck_candidates(result)
+                    _annotate_profile_bottleneck_candidates(result)
                     rows.append(result)
                     print(_format_run_row(dataset_mode, compile_mode, workers, run_index, result))
 

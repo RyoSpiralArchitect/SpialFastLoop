@@ -9,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scripts import bench_matrix as bm
 from scripts.bench_matrix import (
     _compile_requested,
     _format_run_row,
@@ -20,6 +21,7 @@ from scripts.bench_matrix import (
     parse_args,
     summarize_rows,
 )
+from scripts.bench_parallel_transactions import BenchmarkResult
 
 
 def test_parse_csv_choices_trims_and_validates_values() -> None:
@@ -127,6 +129,78 @@ def test_run_args_preserves_meter_fast_mode() -> None:
     run_args = _run_args(args, "generated", "no-compile", 0)
 
     assert run_args.meter_fast_mode is True
+
+
+def test_main_writes_run_and_summary_bottleneck_annotations(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    json_out = tmp_path / "rows.json"
+    summary_out = tmp_path / "summary.json"
+    args = Namespace(
+        transactions=128,
+        feature_dim=16,
+        num_classes=4,
+        batch_size=32,
+        grad_accum=2,
+        steps=4,
+        warmup_steps=1,
+        runs=1,
+        learning_rate=3e-4,
+        seed=1234,
+        meter_fast_mode=True,
+        device="cpu",
+        prefetch_factor=2,
+        log_interval=0,
+        dataset_modes="generated",
+        compile_modes="no-compile",
+        worker_counts="0",
+        collect_profile=True,
+        profile_sync=False,
+        profile_distribution=True,
+        profile_window=16,
+        profile_model=False,
+        profile_model_depth=1,
+        profile_model_max_modules=8,
+        profile_model_include=None,
+        json_out=json_out,
+        summary_out=summary_out,
+    )
+
+    def fake_run_once(_args: Namespace, run_index: int) -> BenchmarkResult:
+        return BenchmarkResult(
+            wall_time_s=0.50,
+            trainer_metrics={
+                "run": run_index,
+                "reported_samples_per_sec": 200.0,
+                "samples_per_sec": 180.0,
+                "end_to_end_wall_time_s": 0.50,
+                "wall_time_s": 0.50,
+                "profile_forward_pct": 55.0,
+                "profile_forward_top_pct_of_parent": 50.0,
+                "profile_backward_pct": 20.0,
+            },
+            run_index=run_index,
+        )
+
+    monkeypatch.setattr(bm, "parse_args", lambda: args)
+    monkeypatch.setattr(bm, "run_once", fake_run_once)
+
+    bm.main()
+
+    output = capsys.readouterr().out
+    assert "hotspot=forward_phase:55.0%(phase_share,high)" in output
+
+    rows = json.loads(json_out.read_text())
+    assert rows[0]["profile_bottleneck_top_candidate"]["name"] == "forward_phase"
+    assert rows[0]["profile_bottleneck_candidates"][1]["name"] == "forward_top_child"
+    assert rows[0]["matrix_dataset_mode"] == "generated"
+
+    summary = json.loads(summary_out.read_text())
+    group = summary["groups"][0]
+    assert group["profile_bottleneck_top_candidate"]["name"] == "forward_phase"
+    assert summary["best_reported"]["profile_bottleneck_top_candidate"]["name"] == "forward_phase"
 
 
 @pytest.mark.parametrize(
