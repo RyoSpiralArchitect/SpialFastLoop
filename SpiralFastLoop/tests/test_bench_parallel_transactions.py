@@ -978,10 +978,13 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
         "mean_score": pytest.approx(80.0 / 3.0),
         "pressure_score": pytest.approx(80.0),
         "pressure_score_unit": "profile_pct",
+        "returned_count": 3,
+        "omitted_count": 0,
         "score_unit": "profile_pct",
         "top_candidate": "backward_phase",
         "top_rank": 1,
         "top_severity": "high",
+        "top_candidate_returned": True,
         "top_score": pytest.approx(50.0),
         "top_score_unit": "profile_pct",
         "top_metric": "profile_backward_pct",
@@ -1002,10 +1005,13 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
         "mean_score": pytest.approx(80.0 / 3.0),
         "pressure_score": pytest.approx(80.0),
         "pressure_score_unit": "profile_pct",
+        "returned_count": 3,
+        "omitted_count": 0,
         "score_unit": "profile_pct",
         "top_candidate": "backward_phase",
         "top_rank": 1,
         "top_severity": "high",
+        "top_candidate_returned": True,
         "top_score": pytest.approx(50.0),
         "top_score_unit": "profile_pct",
         "top_metric": "profile_backward_pct",
@@ -1026,10 +1032,13 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
         "mean_score": pytest.approx(34.0 / 3.0),
         "pressure_score": pytest.approx(34.0),
         "pressure_score_unit": "profile_pct",
+        "returned_count": 3,
+        "omitted_count": 0,
         "score_unit": "profile_pct",
         "top_candidate": "backward_ready_top_child",
         "top_rank": 4,
         "top_severity": "medium",
+        "top_candidate_returned": True,
         "top_score": pytest.approx(15.0),
         "top_score_unit": "profile_pct",
         "top_metric": "profile_backward_grad_ready_top_pct",
@@ -1052,10 +1061,13 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
         "mean_score": pytest.approx(3.5),
         "pressure_score": pytest.approx(7.0),
         "pressure_score_unit": "profile_pct",
+        "returned_count": 1,
+        "omitted_count": 1,
         "score_unit": "profile_pct",
         "top_candidate": "forward_untracked",
         "top_rank": 8,
         "top_severity": "low",
+        "top_candidate_returned": True,
         "top_score": pytest.approx(5.0),
         "top_score_unit": "profile_pct",
         "top_metric": "profile_forward_untracked_pct",
@@ -1114,6 +1126,37 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
     assert forward_top["score"] == pytest.approx(10.0)
     assert forward_top["severity"] == "medium"
     assert forward_top["avg_ms"] == pytest.approx(5.0)
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_results_marks_omitted_profile_bottleneck_category_top(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(bpt, "PROFILE_BOTTLENECK_CANDIDATE_LIMIT", 1)
+
+    summary = summarize_results([
+        {
+            "run": 0,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 90.0,
+            "end_to_end_wall_time_s": 1.0,
+            "profile_forward_pct": 50.0,
+            "profile_forward_top_pct_of_parent": 20.0,
+            "profile_forward_top_avg_ms": 2.0,
+        },
+    ])
+
+    category = summary["profile_bottleneck_category_summary"]["child_hotspot"]
+
+    assert summary["profile_bottleneck_candidate_count"] == 2
+    assert summary["profile_bottleneck_candidate_returned_count"] == 1
+    assert summary["profile_bottleneck_candidate_omitted_count"] == 1
+    assert category["top_candidate"] == "forward_top_child"
+    assert category["top_rank"] == 2
+    assert category["top_candidate_returned"] is False
+    assert category["returned_count"] == 0
+    assert category["omitted_count"] == 1
     json.dumps(summary, allow_nan=False)
 
 
