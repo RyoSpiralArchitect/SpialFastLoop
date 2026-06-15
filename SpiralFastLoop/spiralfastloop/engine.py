@@ -130,6 +130,21 @@ def _set_profile_metric(
     return value
 
 
+def _set_profile_count_metric(
+    metrics: Dict[str, Any],
+    name: str,
+    raw: Any,
+    invalid_fields: list[str],
+) -> Optional[int]:
+    value = _finite_profile_value(raw)
+    if value is None or value < 0.0 or not value.is_integer():
+        invalid_fields.append(name)
+        return None
+    count = int(value)
+    metrics[name] = count
+    return count
+
+
 def _record_profile_flat_metric_invalids(metrics: Dict[str, Any], invalid_fields: list[str]) -> None:
     metrics["profile_flat_metric_invalid_count"] = len(invalid_fields)
     if invalid_fields:
@@ -145,6 +160,9 @@ def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, An
         profile.get("profile_total_s", _PROFILE_METRIC_MISSING),
         invalid_fields,
     )
+    for count_name in ("profile_open_phase_count", "profile_open_detail_count"):
+        if count_name in profile:
+            _set_profile_count_metric(metrics, count_name, profile[count_name], invalid_fields)
     phases = profile.get("phases", {})
     if not isinstance(phases, Mapping):
         _record_profile_flat_metric_invalids(metrics, invalid_fields)

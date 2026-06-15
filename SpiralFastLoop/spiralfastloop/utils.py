@@ -1183,11 +1183,21 @@ class PhaseProfiler:
             key=lambda row: row["total_s"],
             reverse=True,
         )
+        open_details = [
+            {"parent": parent, "name": name, "count": len(starts)}
+            for (parent, name), starts in sorted(self._detail_starts.items())
+            if starts
+        ]
+        open_detail_count = sum(len(starts) for starts in self._detail_starts.values() if starts)
         return {
             "profile_sync": self.sync,
             "profile_distribution": self.track_distribution,
             "profile_window": self.window if self.track_distribution else 0,
             "profile_total_s": denom,
+            "profile_open_phase_count": len(self._starts),
+            "profile_open_detail_count": open_detail_count,
+            "profile_open_phases": sorted(self._starts.keys()),
+            "profile_open_details": open_details,
             "phases": phases,
             "phase_breakdowns": phase_breakdowns,
             "phase_events": phase_events,

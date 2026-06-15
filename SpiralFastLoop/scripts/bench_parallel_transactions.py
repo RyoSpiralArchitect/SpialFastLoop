@@ -92,6 +92,8 @@ WORKLOAD_INTEGER_SUMMARY_FIELDS = frozenset({
 PROFILE_SUMMARY_FIELDS = (
     "profile_total_s",
     "profile_flat_metric_invalid_count",
+    "profile_open_phase_count",
+    "profile_open_detail_count",
     "profile_data_wait_time_s",
     "profile_data_wait_pct",
     "profile_data_wait_avg_ms",
@@ -147,7 +149,11 @@ DEVICE_MEMORY_SUMMARY_FIELDS = (
 )
 SUMMARY_INTEGER_FIELDS = (
     WORKLOAD_INTEGER_SUMMARY_FIELDS
-    | frozenset({"profile_flat_metric_invalid_count"})
+    | frozenset({
+        "profile_flat_metric_invalid_count",
+        "profile_open_phase_count",
+        "profile_open_detail_count",
+    })
     | frozenset(DEVICE_MEMORY_SUMMARY_FIELDS)
 )
 
@@ -194,6 +200,8 @@ BEST_RUN_FIELDS = (
     "steady_total_time_s",
     "steady_p99_s",
     "profile_flat_metric_invalid_count",
+    "profile_open_phase_count",
+    "profile_open_detail_count",
     "profile_forward_backward_pct",
     "profile_forward_backward_time_s",
     "profile_forward_pct",
@@ -234,6 +242,8 @@ BEST_RUN_INTEGER_FIELDS = frozenset({
     "steady_samples",
     "steady_optimizer_steps",
     "profile_flat_metric_invalid_count",
+    "profile_open_phase_count",
+    "profile_open_detail_count",
     "cuda_current_mem_bytes",
     "cuda_max_mem_bytes",
     "cuda_reserved_mem_bytes",

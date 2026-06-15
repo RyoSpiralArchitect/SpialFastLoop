@@ -277,6 +277,43 @@ def test_phase_profiler_respects_exact_distribution_window() -> None:
     assert forward["p50_ms"] == pytest.approx(3.0)
 
 
+def test_phase_profiler_reports_open_timers_in_summary() -> None:
+    profiler = PhaseProfiler(enabled=True)
+
+    profiler.start("forward")
+    profiler.start_detail("forward", "model.0")
+    profiler.start_detail("forward", "model.0")
+
+    profile = profiler.summary()
+
+    assert profile["profile_open_phase_count"] == 1
+    assert profile["profile_open_detail_count"] == 2
+    assert profile["profile_open_phases"] == ["forward"]
+    assert profile["profile_open_details"] == [
+        {"parent": "forward", "name": "model.0", "count": 2},
+    ]
+
+
+def test_phase_profiler_reports_zero_open_timers_after_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamps = iter([1.0, 1.01, 1.02, 1.03])
+    monkeypatch.setattr(utils_mod.time, "perf_counter", lambda: next(timestamps))
+    profiler = PhaseProfiler(enabled=True)
+
+    profiler.start("forward")
+    profiler.stop("forward")
+    profiler.start_detail("forward", "model.0")
+    profiler.stop_detail("forward", "model.0")
+
+    profile = profiler.summary()
+
+    assert profile["profile_open_phase_count"] == 0
+    assert profile["profile_open_detail_count"] == 0
+    assert profile["profile_open_phases"] == []
+    assert profile["profile_open_details"] == []
+
+
 def test_phase_profiler_reports_non_negative_untracked_breakdown_time() -> None:
     profiler = PhaseProfiler(enabled=True)
 
@@ -407,7 +444,10 @@ def test_phase_profiler_stop_preserves_body_exception_on_invalid_elapsed(
             profiler.stop("forward")
 
     assert profiler._starts == {}
-    assert profiler.summary() == profile_before
+    profile_after = profiler.summary()
+    assert profile_after["phases"] == profile_before["phases"]
+    assert profile_after["profile_open_phase_count"] == 0
+    assert profile_after["profile_open_phases"] == []
 
 
 def test_phase_profiler_stop_detail_preserves_body_exception_on_invalid_elapsed(
@@ -427,7 +467,10 @@ def test_phase_profiler_stop_detail_preserves_body_exception_on_invalid_elapsed(
             profiler.stop_detail("forward", "model.0")
 
     assert profiler._detail_starts == {}
-    assert profiler.summary() == profile_before
+    profile_after = profiler.summary()
+    assert profile_after["phase_breakdowns"] == profile_before["phase_breakdowns"]
+    assert profile_after["profile_open_detail_count"] == 0
+    assert profile_after["profile_open_details"] == []
 
 
 def test_phase_profiler_event_preserves_body_exception_on_invalid_elapsed(
@@ -2420,6 +2463,44 @@ def test_profile_flat_metrics_skip_invalid_values() -> None:
         "profile_backward_avg_ms",
         "profile_optimizer_time_s",
         "profile_optimizer_pct",
+    ]
+
+
+def test_profile_flat_metrics_include_open_timer_counts() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "profile_total_s": 1.0,
+        "profile_open_phase_count": 1.0,
+        "profile_open_detail_count": 2,
+        "phases": {},
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert metrics["profile_total_s"] == pytest.approx(1.0)
+    assert metrics["profile_open_phase_count"] == 1
+    assert metrics["profile_open_detail_count"] == 2
+    assert metrics["profile_flat_metric_invalid_count"] == 0
+    assert "profile_flat_metric_invalid_fields" not in metrics
+
+
+def test_profile_flat_metrics_reject_invalid_open_timer_counts() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "profile_total_s": 1.0,
+        "profile_open_phase_count": 0.5,
+        "profile_open_detail_count": True,
+        "phases": {},
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert "profile_open_phase_count" not in metrics
+    assert "profile_open_detail_count" not in metrics
+    assert metrics["profile_flat_metric_invalid_count"] == 2
+    assert metrics["profile_flat_metric_invalid_fields"] == [
+        "profile_open_phase_count",
+        "profile_open_detail_count",
     ]
 
 
