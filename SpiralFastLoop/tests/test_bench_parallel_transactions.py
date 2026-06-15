@@ -238,6 +238,29 @@ def test_dumps_json_normalizes_artifact_payload_values() -> None:
     assert normalized["['tuple', 'key']"] == "value"
 
 
+@pytest.mark.parametrize(
+    ("payload", "match"),
+    [
+        ({1: "int", "1": "str"}, "unique after normalization at \\$"),
+        ({"": "blank"}, "non-empty after normalization at \\$"),
+        ({"nested": {1: "int", "1": "str"}}, "unique after normalization at \\$.nested"),
+        ({"items": [{1: "int", "1": "str"}]}, "unique after normalization at \\$.items"),
+    ],
+)
+def test_dumps_json_rejects_ambiguous_artifact_keys(payload: dict, match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        dumps_json(payload)
+
+
+def test_dump_json_rejects_ambiguous_artifact_keys_before_writing() -> None:
+    buffer = io.StringIO()
+
+    with pytest.raises(ValueError, match="unique after normalization"):
+        dump_json({1: "int", "1": "str"}, buffer)
+
+    assert buffer.getvalue() == ""
+
+
 def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     rows = [
         {
