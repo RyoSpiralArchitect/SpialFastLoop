@@ -235,6 +235,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning-rate", type=positive_float_arg, default=3e-4)
     parser.add_argument("--meter-fast-mode", action="store_true", help="Use lighter throughput meters without tail/window stats.")
     parser.add_argument("--profile-sync", action="store_true")
+    parser.add_argument(
+        "--no-profile-distribution",
+        dest="profile_distribution",
+        action="store_false",
+        help="Skip p50/p95/p99/std samples and collect phase totals only.",
+    )
     parser.add_argument("--profile-window", type=positive_int_arg, default=256)
     parser.add_argument("--profile-model-depth", type=positive_int_arg, default=2)
     parser.add_argument("--profile-model-max-modules", type=positive_int_arg, default=16)
@@ -282,6 +288,7 @@ def main() -> None:
         steps=args.steps,
         collect_profile=True,
         profile_sync=args.profile_sync,
+        profile_distribution=args.profile_distribution,
         profile_window=args.profile_window,
         profile_model=True,
         profile_model_depth=args.profile_model_depth,
@@ -299,6 +306,7 @@ def main() -> None:
         "warmup_steps": args.warmup_steps,
         "compile": args.compile,
         "meter_fast_mode": args.meter_fast_mode,
+        "profile_distribution": args.profile_distribution,
         "profile_model_include": args.profile_model_include,
         "profile_model_depth": args.profile_model_depth,
         "metrics": metrics,

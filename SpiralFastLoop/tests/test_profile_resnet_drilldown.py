@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 from argparse import Namespace
 from pathlib import Path
 
 import pytest
+import torch
+import torch.nn as nn
+from torch.utils.data import TensorDataset
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -116,6 +120,7 @@ def test_validate_resnet_profile_args_rejects_unknown_direct_dataset() -> None:
         ("topk", True, "topk"),
         ("download", 1, "download"),
         ("download", "true", "download"),
+        ("profile_distribution", "false", "profile_distribution"),
         ("data_root", "", "data_root"),
         ("data_root", "   ", "data_root"),
         ("data_root", True, "data_root"),
@@ -413,6 +418,7 @@ def test_resnet_drilldown_parse_args_accepts_valid_fake_run(
             "--learning-rate",
             "0.001",
             "--meter-fast-mode",
+            "--no-profile-distribution",
             "--profile-window",
             "8",
             "--profile-model-depth",
@@ -432,7 +438,82 @@ def test_resnet_drilldown_parse_args_accepts_valid_fake_run(
     assert args.steps == 1
     assert args.warmup_steps == 1
     assert args.meter_fast_mode is True
+    assert args.profile_distribution is False
     assert args.topk == 2
+
+
+def test_resnet_drilldown_main_forwards_lightweight_profile_options(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+    json_out = tmp_path / "profile.json"
+
+    class CapturingTrainer:
+        def __init__(self, *_args: object, **kwargs: object) -> None:
+            captured["init_kwargs"] = kwargs
+
+        def train_one_epoch(self, *_args: object, **kwargs: object) -> dict[str, object]:
+            captured["train_kwargs"] = kwargs
+            return {
+                "samples_per_sec": 1.0,
+                "reported_samples_per_sec": 1.0,
+                "p99_s": 0.001,
+                "std_batch_s": 0.0,
+                "steps": 1,
+                "samples": 4,
+            }
+
+    monkeypatch.setattr(drilldown, "FastTrainer", CapturingTrainer)
+    monkeypatch.setattr(
+        drilldown,
+        "_build_dataset",
+        lambda _args: (
+            TensorDataset(torch.randn(4, 2), torch.tensor([0, 1, 0, 1])),
+            2,
+        ),
+    )
+    monkeypatch.setattr(
+        drilldown,
+        "_build_resnet18",
+        lambda num_classes: nn.Linear(2, num_classes),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "profile_resnet_drilldown.py",
+            "--dataset",
+            "fake",
+            "--dataset-size",
+            "4",
+            "--batch-size",
+            "2",
+            "--workers",
+            "0",
+            "--steps",
+            "1",
+            "--meter-fast-mode",
+            "--no-profile-distribution",
+            "--profile-window",
+            "8",
+            "--json-out",
+            str(json_out),
+        ],
+    )
+
+    drilldown.main()
+
+    init_kwargs = captured["init_kwargs"]
+    train_kwargs = captured["train_kwargs"]
+    assert isinstance(init_kwargs, dict)
+    assert isinstance(train_kwargs, dict)
+    assert init_kwargs["meter_fast_mode"] is True
+    assert train_kwargs["profile_distribution"] is False
+    assert train_kwargs["profile_window"] == 8
+    payload = json.loads(json_out.read_text(encoding="utf-8"))
+    assert payload["meter_fast_mode"] is True
+    assert payload["profile_distribution"] is False
 
 
 @pytest.mark.parametrize(
