@@ -2433,11 +2433,12 @@ def main() -> None:
     args = parse_args()
     if args.profile_model:
         args.collect_profile = True
-    results = []
+    payload = []
     for run_index in range(args.runs):
         result = run_once(args, run_index)
-        results.append(result)
         metrics = result.as_dict()
+        _add_profile_bottleneck_candidates(metrics)
+        payload.append(metrics)
         setup_breakdown = _format_setup_breakdown(metrics)
         setup_breakdown_text = f"{setup_breakdown} " if setup_breakdown else ""
         print(
@@ -2470,6 +2471,9 @@ def main() -> None:
         scheduler_summary = _format_scheduler_summary(metrics)
         if scheduler_summary:
             print(f"  scheduler: {scheduler_summary}")
+        bottleneck_summary = _format_profile_bottleneck_summary(metrics)
+        if bottleneck_summary:
+            print(f"  bottleneck: {bottleneck_summary}")
         profile = _dict_value(metrics.get("profile"))
         if profile:
             open_timer_summary = _format_profile_open_timer_summary(profile)
@@ -2516,7 +2520,6 @@ def main() -> None:
                 suffix = f" ({optimizer_summary})" if optimizer_summary else ""
                 print(f"  optimizer: {top_optimizer}{suffix}")
 
-    payload = [result.as_dict() for result in results]
     aggregate = summarize_results(payload)
 
     if args.json_out:

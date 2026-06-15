@@ -99,7 +99,9 @@ summaries include max, total, mean, ranking `pressure_score`, `pressure_rank`,
 top-candidate score, label/reason/next-step, metric/value/provenance, and
 returned/omitted candidate counts plus severity-count pressure per category.
 Compact best-run snapshots preserve these bottleneck fields when they are present
-on the selected run.
+on the selected run. Individual benchmark runs and raw JSON rows are annotated
+with the same candidate fields, so dashboards can compare per-run and aggregate
+bottlenecks without recomputing them.
 Matrix summaries surface the same signal as
 compact `hotspot=...` and strongest-first `pressure(...)` fragments, including
 the top hotspot severity, category-level severity suffixes such as `[high]`,

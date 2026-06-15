@@ -2833,6 +2833,10 @@ def test_main_prints_backward_event_parent_position(
     assert "backward_grad_ready: model.0=3.5ms@35.0% p95=4.5ms calls=2 samples=2 window=2, model.2=1.2ms calls=1" in output
     assert "optimizer: optimizer.step=80.0% avg=3.25ms p95=4.50ms calls=1" in output
     assert (
+        "  bottleneck: #1 forward_phase=42.5% category=phase_share severity=high "
+        "next=inspect forward top-child and tail metrics"
+    ) in output
+    assert (
         "Bottleneck: #1 forward_phase=42.5% category=phase_share severity=high "
         "next=inspect forward top-child and tail metrics"
     ) in output
@@ -2842,6 +2846,49 @@ def test_main_prints_backward_event_parent_position(
         "#2 child_hotspot:forward_top_child=29.8%[high]/1;sum=29.8%,"
         "#3 readiness_span:backward_readiness_span=6.9%[low]/1;sum=6.9%"
     ) in output
+
+
+def test_main_writes_run_level_profile_bottleneck_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    json_out = tmp_path / "rows.json"
+    args = Namespace(
+        profile_model=False,
+        collect_profile=True,
+        runs=1,
+        json_out=json_out,
+        summary_out=None,
+    )
+
+    def fake_run_once(_args: Namespace, run_index: int) -> BenchmarkResult:
+        return BenchmarkResult(
+            wall_time_s=0.50,
+            trainer_metrics={
+                "run": run_index,
+                "reported_samples_per_sec": 200.0,
+                "samples_per_sec": 180.0,
+                "p99_s": 0.010,
+                "std_batch_s": 0.002,
+                "avg_loss": 0.1234,
+                "setup_time_s": 0.0,
+                "end_to_end_wall_time_s": 0.50,
+                "profile_forward_pct": 55.0,
+                "profile_forward_top_pct_of_parent": 50.0,
+                "profile_backward_pct": 20.0,
+            },
+            run_index=run_index,
+        )
+
+    monkeypatch.setattr(bpt, "parse_args", lambda: args)
+    monkeypatch.setattr(bpt, "run_once", fake_run_once)
+
+    bpt.main()
+
+    rows = json.loads(json_out.read_text())
+    assert rows[0]["profile_bottleneck_top_candidate"]["name"] == "forward_phase"
+    assert rows[0]["profile_bottleneck_candidates"][1]["name"] == "forward_top_child"
+    assert rows[0]["profile_bottleneck_severity_counts"] == {"high": 2, "medium": 1}
 
 
 def test_format_profile_bottleneck_category_pressure_includes_omitted_count() -> None:

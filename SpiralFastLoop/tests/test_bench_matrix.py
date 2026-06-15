@@ -813,6 +813,29 @@ def test_format_run_row_includes_phase_tail_latency() -> None:
     assert "opt_tail(std=0.75ms)" in row
 
 
+def test_format_run_row_includes_profile_bottleneck_summary() -> None:
+    row = _format_run_row(
+        "generated",
+        "no-compile",
+        0,
+        0,
+        {
+            "reported_samples_per_sec": 123.45,
+            "end_to_end_wall_time_s": 1.234,
+            "profile_forward_pct": 55.0,
+            "profile_forward_top_pct_of_parent": 50.0,
+            "profile_backward_pct": 20.0,
+        },
+    )
+
+    assert "hotspot=forward_phase:55.0%(phase_share,high)" in row
+    assert (
+        "pressure(#1 phase_share:forward_phase=55.0%[high];sum=75.0%,"
+        "#2 child_hotspot:forward_top_child=27.5%[high];sum=27.5%)"
+    ) in row
+    assert "severity_counts(high=2,medium=1)" in row
+
+
 def test_format_run_row_falls_back_to_total_metrics() -> None:
     row = _format_run_row(
         "materialized",

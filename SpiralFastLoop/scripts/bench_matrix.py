@@ -476,6 +476,17 @@ def _format_run_row(dataset_mode: str, compile_mode: str, workers: int, run_inde
     scheduler_summary = _format_scheduler_summary(result)
     if scheduler_summary:
         profile_parts.append(f"scheduler({scheduler_summary})")
+    bottleneck_source = dict(result)
+    _add_profile_bottleneck_candidates(bottleneck_source)
+    bottleneck_text = _format_top_bottleneck_candidate(bottleneck_source)
+    if bottleneck_text:
+        profile_parts.append(bottleneck_text)
+    bottleneck_pressure = _format_bottleneck_pressure(bottleneck_source)
+    if bottleneck_pressure:
+        profile_parts.append(bottleneck_pressure)
+    bottleneck_severity_counts = _format_profile_bottleneck_severity_counts(bottleneck_source)
+    if bottleneck_severity_counts:
+        profile_parts.append(bottleneck_severity_counts)
     profile_suffix = f" {' '.join(profile_parts)}" if profile_parts else ""
     return (
         f"{dataset_mode:>12} {compile_mode:>10} workers={workers:<2} "
@@ -591,6 +602,7 @@ def main() -> None:
                         "matrix_compile_mode": compile_mode,
                         "matrix_workers": workers,
                     })
+                    _add_profile_bottleneck_candidates(result)
                     rows.append(result)
                     print(_format_run_row(dataset_mode, compile_mode, workers, run_index, result))
 
