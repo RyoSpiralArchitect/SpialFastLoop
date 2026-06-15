@@ -25,6 +25,7 @@ from scripts.bench_parallel_transactions import (
     _format_profile_model_hook_summary,
     _format_profile_open_timer_summary,
     _format_scheduler_summary,
+    _format_setup_breakdown,
     _has_positive_display_value,
     _profile_row_name,
     build_model,
@@ -427,6 +428,24 @@ def test_dumps_json_falls_back_for_unreadable_tensor_values() -> None:
 
     assert "tensor" in normalized["tensor"]
     assert "meta" in normalized["tensor"]
+
+
+def test_format_setup_breakdown_includes_positive_setup_parts() -> None:
+    assert _format_setup_breakdown({
+        "dataset_setup_time_s": 0.05,
+        "loader_setup_time_s": 0.07,
+        "model_setup_time_s": 0.13,
+        "compile_init_time_s": 0.02,
+    }) == "init(dataset=0.05s,loader=0.07s,model=0.13s,compile=0.02s)"
+
+
+def test_format_setup_breakdown_omits_zero_and_invalid_parts() -> None:
+    assert _format_setup_breakdown({
+        "dataset_setup_time_s": 0.0,
+        "loader_setup_time_s": -0.01,
+        "model_setup_time_s": "slow",
+        "compile_init_time_s": False,
+    }) == ""
 
 
 def test_dumps_json_falls_back_for_failed_pathlike_values() -> None:
@@ -1786,6 +1805,50 @@ def test_parse_args_rejects_invalid_device(monkeypatch: pytest.MonkeyPatch) -> N
         parse_args()
 
     assert exc_info.value.code == 2
+
+
+def test_main_prints_setup_breakdown(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    args = Namespace(
+        profile_model=False,
+        collect_profile=False,
+        runs=1,
+        json_out=None,
+        summary_out=None,
+    )
+
+    def fake_run_once(_args: Namespace, run_index: int) -> BenchmarkResult:
+        return BenchmarkResult(
+            wall_time_s=0.50,
+            trainer_metrics={
+                "run": run_index,
+                "reported_samples_per_sec": 200.0,
+                "samples_per_sec": 180.0,
+                "p99_s": 0.010,
+                "std_batch_s": 0.002,
+                "avg_loss": 0.1234,
+                "setup_time_s": 0.27,
+                "dataset_setup_time_s": 0.05,
+                "loader_setup_time_s": 0.07,
+                "model_setup_time_s": 0.13,
+                "compile_init_time_s": 0.02,
+                "end_to_end_wall_time_s": 0.77,
+            },
+            run_index=run_index,
+        )
+
+    monkeypatch.setattr(bpt, "parse_args", lambda: args)
+    monkeypatch.setattr(bpt, "run_once", fake_run_once)
+
+    bpt.main()
+
+    assert (
+        "setup=0.27s "
+        "init(dataset=0.05s,loader=0.07s,model=0.13s,compile=0.02s) "
+        "e2e=0.77s"
+    ) in capsys.readouterr().out
 
 
 def test_transaction_benchmark_records_run_seed() -> None:

@@ -943,6 +943,20 @@ def _format_profile_open_timer_summary(profile: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+def _format_setup_breakdown(metrics: dict[str, Any]) -> str:
+    parts = []
+    for field, label in (
+        ("dataset_setup_time_s", "dataset"),
+        ("loader_setup_time_s", "loader"),
+        ("model_setup_time_s", "model"),
+        ("compile_init_time_s", "compile"),
+    ):
+        value = _non_negative_display_value(metrics.get(field))
+        if value is not None and value > 0.0:
+            parts.append(f"{label}={value:.2f}s")
+    return f"init({','.join(parts)})" if parts else ""
+
+
 def _format_profile_model_hook_summary(metrics: dict[str, Any]) -> str:
     requested = metrics.get("profile_model_requested")
     status_present = "profile_model_status" in metrics
@@ -1314,10 +1328,13 @@ def main() -> None:
         result = run_once(args, run_index)
         results.append(result)
         metrics = result.as_dict()
+        setup_breakdown = _format_setup_breakdown(metrics)
+        setup_breakdown_text = f"{setup_breakdown} " if setup_breakdown else ""
         print(
             f"Run {run_index}: "
             f"wall={_format_metric_value(metrics.get('wall_time_s'), precision=2, suffix='s')} "
             f"setup={_format_metric_value(metrics.get('setup_time_s'), precision=2, suffix='s')} "
+            f"{setup_breakdown_text}"
             f"e2e={_format_metric_value(metrics.get('end_to_end_wall_time_s', metrics.get('wall_time_s')), precision=2, suffix='s')} "
             f"thr={_format_metric_value(metrics.get('reported_samples_per_sec', metrics.get('samples_per_sec')), precision=1, suffix='/s')} "
             f"total_thr={_format_metric_value(metrics.get('samples_per_sec'), precision=1, suffix='/s')} "
