@@ -230,6 +230,18 @@ def _format_summary_row(row: dict) -> str:
         open_parts.append(f"details={open_detail_count:.1f}")
     if open_parts:
         profile_parts.append(f"open({','.join(open_parts)})")
+    profile_model_modules = _measured_summary_value(row, "mean_profile_model_modules_selected")
+    profile_model_hooks = _measured_summary_value(row, "mean_profile_model_hook_count")
+    profile_model_failures = _measured_summary_value(row, "mean_profile_model_hook_failures")
+    model_parts = []
+    if profile_model_modules is not None and profile_model_modules > 0.0:
+        model_parts.append(f"modules={profile_model_modules:.1f}")
+    if profile_model_hooks is not None and profile_model_hooks > 0.0:
+        model_parts.append(f"hooks={profile_model_hooks:.1f}")
+    if profile_model_failures is not None and profile_model_failures > 0.0:
+        model_parts.append(f"failures={profile_model_failures:.1f}")
+    if model_parts:
+        profile_parts.append(f"model({','.join(model_parts)})")
     profile_suffix = f" {' '.join(profile_parts)}" if profile_parts else ""
     return (
         f"{row['dataset_mode']} {row['compile_mode']} workers={row['workers']} "

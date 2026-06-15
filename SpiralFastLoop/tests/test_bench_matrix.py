@@ -145,6 +145,26 @@ def test_format_summary_row_includes_open_timer_counts_when_positive() -> None:
     assert "open(phases=0.5,details=2.0)" in formatted
 
 
+def test_format_summary_row_includes_profile_model_hook_counts_when_positive() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_model_modules_selected": 2.0,
+        "sample_count_profile_model_modules_selected": 2.0,
+        "mean_profile_model_hook_count": 4.0,
+        "sample_count_profile_model_hook_count": 2.0,
+        "mean_profile_model_hook_failures": 0.5,
+        "sample_count_profile_model_hook_failures": 2.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "model(modules=2.0,hooks=4.0,failures=0.5)" in formatted
+
+
 def test_format_summary_row_omits_profile_suffix_when_absent() -> None:
     row = {
         "dataset_mode": "generated",
@@ -177,6 +197,26 @@ def test_format_summary_row_omits_zero_or_unmeasured_open_timer_counts() -> None
     formatted = _format_summary_row(row)
 
     assert "open(" not in formatted
+
+
+def test_format_summary_row_omits_zero_or_unmeasured_profile_model_counts() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_model_modules_selected": 0.0,
+        "sample_count_profile_model_modules_selected": 2.0,
+        "mean_profile_model_hook_count": 4.0,
+        "sample_count_profile_model_hook_count": 0.0,
+        "mean_profile_model_hook_failures": 0.0,
+        "sample_count_profile_model_hook_failures": 2.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "model(" not in formatted
 
 
 def test_format_summary_row_marks_unmeasured_base_fields() -> None:
@@ -420,6 +460,9 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_flat_metric_invalid_count": 2.0,
             "profile_open_phase_count": 2,
             "profile_open_detail_count": 3,
+            "profile_model_modules_selected": 1,
+            "profile_model_hook_count": 3,
+            "profile_model_hook_failures": 1,
             "profile_forward_backward_pct": 40.0,
             "profile_forward_pct": 15.0,
             "profile_loss_pct": 4.0,
@@ -468,6 +511,9 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_flat_metric_invalid_count": 0.0,
             "profile_open_phase_count": 0,
             "profile_open_detail_count": 0,
+            "profile_model_modules_selected": 2,
+            "profile_model_hook_count": 4,
+            "profile_model_hook_failures": 0,
             "profile_forward_backward_pct": 60.0,
             "profile_forward_pct": 20.0,
             "profile_loss_pct": 8.0,
@@ -518,6 +564,9 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_flat_metric_invalid_count": 1.0,
             "profile_open_phase_count": 0,
             "profile_open_detail_count": 0,
+            "profile_model_modules_selected": 2,
+            "profile_model_hook_count": 4,
+            "profile_model_hook_failures": 0,
             "profile_forward_backward_pct": 55.0,
             "profile_forward_pct": 25.0,
             "profile_loss_pct": 6.0,
@@ -561,6 +610,9 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["max_profile_flat_metric_invalid_count"] == pytest.approx(2.0)
     assert generated["mean_profile_open_phase_count"] == pytest.approx(1.0)
     assert generated["max_profile_open_detail_count"] == pytest.approx(3.0)
+    assert generated["mean_profile_model_modules_selected"] == pytest.approx(1.5)
+    assert generated["max_profile_model_hook_count"] == pytest.approx(4.0)
+    assert generated["mean_profile_model_hook_failures"] == pytest.approx(0.5)
     assert generated["mean_profile_forward_backward_pct"] == pytest.approx(50.0)
     assert generated["mean_profile_loss_pct"] == pytest.approx(6.0)
     assert generated["mean_profile_loss_reduce_pct"] == pytest.approx(2.0)
@@ -576,6 +628,9 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert summary["best_reported"]["mean_profile_flat_metric_invalid_count"] == pytest.approx(1.0)
     assert summary["best_reported"]["mean_profile_open_phase_count"] == pytest.approx(0.0)
     assert summary["best_reported"]["mean_profile_open_detail_count"] == pytest.approx(0.0)
+    assert summary["best_reported"]["mean_profile_model_modules_selected"] == pytest.approx(2.0)
+    assert summary["best_reported"]["mean_profile_model_hook_count"] == pytest.approx(4.0)
+    assert summary["best_reported"]["mean_profile_model_hook_failures"] == pytest.approx(0.0)
     assert summary["best_reported"]["mean_profile_forward_backward_pct"] == pytest.approx(55.0)
     assert summary["best_reported"]["mean_profile_loss_pct"] == pytest.approx(6.0)
     assert summary["best_reported"]["mean_steps"] == pytest.approx(3.0)
