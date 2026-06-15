@@ -127,6 +127,24 @@ def test_format_summary_row_includes_profile_suffix_when_available() -> None:
     assert "opt=12.0%" in formatted
 
 
+def test_format_summary_row_includes_open_timer_counts_when_positive() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_open_phase_count": 0.5,
+        "sample_count_profile_open_phase_count": 2.0,
+        "mean_profile_open_detail_count": 2.0,
+        "sample_count_profile_open_detail_count": 2.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "open(phases=0.5,details=2.0)" in formatted
+
+
 def test_format_summary_row_omits_profile_suffix_when_absent() -> None:
     row = {
         "dataset_mode": "generated",
@@ -141,6 +159,24 @@ def test_format_summary_row_omits_profile_suffix_when_absent() -> None:
     assert "fwd+bwd" not in formatted
     assert "loss=" not in formatted
     assert "opt=" not in formatted
+
+
+def test_format_summary_row_omits_zero_or_unmeasured_open_timer_counts() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_open_phase_count": 0.0,
+        "sample_count_profile_open_phase_count": 2.0,
+        "mean_profile_open_detail_count": 3.0,
+        "sample_count_profile_open_detail_count": 0.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "open(" not in formatted
 
 
 def test_format_summary_row_marks_unmeasured_base_fields() -> None:

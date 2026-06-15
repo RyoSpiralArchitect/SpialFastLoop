@@ -221,6 +221,15 @@ def _format_summary_row(row: dict) -> str:
     optimizer_pct = _measured_summary_value(row, "mean_profile_optimizer_pct")
     if optimizer_pct is not None:
         profile_parts.append(f"opt={optimizer_pct:.1f}%")
+    open_phase_count = _measured_summary_value(row, "mean_profile_open_phase_count")
+    open_detail_count = _measured_summary_value(row, "mean_profile_open_detail_count")
+    open_parts = []
+    if open_phase_count is not None and open_phase_count > 0.0:
+        open_parts.append(f"phases={open_phase_count:.1f}")
+    if open_detail_count is not None and open_detail_count > 0.0:
+        open_parts.append(f"details={open_detail_count:.1f}")
+    if open_parts:
+        profile_parts.append(f"open({','.join(open_parts)})")
     profile_suffix = f" {' '.join(profile_parts)}" if profile_parts else ""
     return (
         f"{row['dataset_mode']} {row['compile_mode']} workers={row['workers']} "
