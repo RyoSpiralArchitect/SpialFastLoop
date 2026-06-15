@@ -34,6 +34,16 @@ def _percentile(values, percentile):
     return ordered[index]
 
 
+class _FailingIndex:
+    def __index__(self) -> int:
+        raise RuntimeError("index conversion failed")
+
+
+class _FailingFloat:
+    def __float__(self) -> float:
+        raise RuntimeError("float conversion failed")
+
+
 def test_distributed_context_reads_valid_env_values(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(utils_mod.torch.distributed, "is_available", lambda: False)
     monkeypatch.setenv("RANK", "2")
@@ -160,13 +170,19 @@ def test_throughput_meter_rejects_invalid_time_sources(time_fn: object):
         ThroughputMeter(time_fn=time_fn)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("timestamp", [float("nan"), float("inf"), True, "1.0", b"1.0", object()])
+@pytest.mark.parametrize(
+    "timestamp",
+    [float("nan"), float("inf"), True, "1.0", b"1.0", object(), _FailingFloat()],
+)
 def test_throughput_meter_rejects_invalid_initial_time_values(timestamp: object):
     with pytest.raises(ValueError, match="time_fn"):
         ThroughputMeter(time_fn=lambda: timestamp)  # type: ignore[arg-type, return-value]
 
 
-@pytest.mark.parametrize("timestamp", [float("nan"), float("-inf"), True, "1.0", object()])
+@pytest.mark.parametrize(
+    "timestamp",
+    [float("nan"), float("-inf"), True, "1.0", object(), _FailingFloat()],
+)
 def test_throughput_meter_tick_rejects_invalid_time_values_without_mutating_state(timestamp: object):
     values = iter([0.0, timestamp])
     meter = ThroughputMeter(time_fn=lambda: next(values))  # type: ignore[arg-type, return-value]
@@ -180,7 +196,7 @@ def test_throughput_meter_tick_rejects_invalid_time_values_without_mutating_stat
     assert meter.summary() == summary_before
 
 
-@pytest.mark.parametrize("batch_size", [0, -5, 1.5, "2", True])
+@pytest.mark.parametrize("batch_size", [0, -5, 1.5, "2", True, _FailingIndex()])
 def test_throughput_meter_tick_rejects_invalid_batch_sizes_without_mutating_state(batch_size: object):
     calls: list[float] = []
 
@@ -209,12 +225,14 @@ def test_throughput_meter_rejects_invalid_inputs():
     with pytest.raises(ValueError):
         meter.record(float("nan"), 8)
     with pytest.raises(ValueError):
+        meter.record(_FailingFloat(), 8)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
         meter.record(0.1, 0)
     with pytest.raises(ValueError):
         meter.record(0.1, -5)
 
 
-@pytest.mark.parametrize("batch_size", [1.5, "2", True])
+@pytest.mark.parametrize("batch_size", [1.5, "2", True, _FailingIndex()])
 def test_throughput_meter_rejects_non_integral_batch_sizes(batch_size):
     meter = ThroughputMeter()
 
@@ -232,13 +250,13 @@ def test_throughput_meter_time_batch_rejects_invalid_record_on_exception(record_
         meter.time_batch(4, record_on_exception=record_on_exception)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("window", [-1, 1.5, "2", True])
+@pytest.mark.parametrize("window", [-1, 1.5, "2", True, _FailingIndex()])
 def test_throughput_meter_rejects_invalid_window_values(window):
     with pytest.raises(ValueError, match="window"):
         ThroughputMeter(window=window)
 
 
-@pytest.mark.parametrize("smoothing", [0.0, -0.1, 1.1, float("nan"), True, "bad"])
+@pytest.mark.parametrize("smoothing", [0.0, -0.1, 1.1, float("nan"), True, "bad", _FailingFloat()])
 def test_throughput_meter_rejects_invalid_smoothing_values(smoothing):
     with pytest.raises(ValueError, match="smoothing"):
         ThroughputMeter(smoothing=smoothing)
@@ -416,14 +434,17 @@ def test_p_square_quantile_update_requires_initialized_state() -> None:
 
 @pytest.mark.parametrize(
     "quantile",
-    [0.0, 1.0, -0.1, 1.1, float("nan"), float("inf"), True, "0.5", b"0.5", object()],
+    [0.0, 1.0, -0.1, 1.1, float("nan"), float("inf"), True, "0.5", b"0.5", object(), _FailingFloat()],
 )
 def test_p_square_quantile_rejects_invalid_quantiles(quantile: object) -> None:
     with pytest.raises(ValueError, match="quantile"):
         _PSquareQuantile(quantile)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("value", [float("nan"), float("-inf"), True, "0.1", b"0.1", object()])
+@pytest.mark.parametrize(
+    "value",
+    [float("nan"), float("-inf"), True, "0.1", b"0.1", object(), _FailingFloat()],
+)
 def test_p_square_quantile_rejects_invalid_values_without_mutating_state(value: object) -> None:
     quantile = _PSquareQuantile(0.5)
     quantile.add(0.1)

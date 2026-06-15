@@ -166,7 +166,7 @@ def _int_setting(value: Any, name: str) -> int:
         raise ValueError(f"{name} must be an integer")
     try:
         return operator.index(value)
-    except (TypeError, ValueError) as exc:
+    except Exception as exc:
         raise ValueError(f"{name} must be an integer") from exc
 
 
@@ -195,7 +195,7 @@ def _finite_float_setting(value: Any, name: str) -> float:
         raise ValueError(f"{name} must be a finite number")
     try:
         normalized = float(value)
-    except (TypeError, ValueError) as exc:
+    except Exception as exc:
         raise ValueError(f"{name} must be a finite number") from exc
     if not math.isfinite(normalized):
         raise ValueError(f"{name} must be a finite number")
@@ -214,7 +214,7 @@ def _strict_finite_float_setting(value: Any, name: str) -> float:
         raise ValueError(f"{name} must be a finite number")
     try:
         normalized = float(value)
-    except (TypeError, ValueError) as exc:
+    except Exception as exc:
         raise ValueError(f"{name} must be a finite number") from exc
     if not math.isfinite(normalized):
         raise ValueError(f"{name} must be a finite number")
@@ -232,7 +232,7 @@ def _time_value_setting(value: Any, name: str) -> float:
         raise ValueError(f"{name} must return a finite number")
     try:
         normalized = float(value)
-    except (TypeError, ValueError) as exc:
+    except Exception as exc:
         raise ValueError(f"{name} must return a finite number") from exc
     if not math.isfinite(normalized):
         raise ValueError(f"{name} must return a finite number")

@@ -389,11 +389,11 @@ def _int_arg(raw: object) -> int:
     if isinstance(raw, str):
         try:
             return int(raw)
-        except ValueError as exc:
+        except Exception as exc:
             raise argparse.ArgumentTypeError("must be an integer") from exc
     try:
         return _int_setting(raw, "value")
-    except ValueError as exc:
+    except Exception as exc:
         raise argparse.ArgumentTypeError("must be an integer") from exc
 
 
@@ -416,7 +416,7 @@ def positive_float_arg(raw: object) -> float:
         raise argparse.ArgumentTypeError("must be a number")
     try:
         value = float(raw)
-    except (TypeError, ValueError) as exc:
+    except Exception as exc:
         raise argparse.ArgumentTypeError("must be a number") from exc
     if not math.isfinite(value) or value <= 0.0:
         raise argparse.ArgumentTypeError("must be a positive finite number")

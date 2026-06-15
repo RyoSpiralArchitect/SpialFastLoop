@@ -35,6 +35,16 @@ from scripts.bench_parallel_transactions import (
 from scripts.json_utils import dump_json, dumps_json
 
 
+class _FailingIndex:
+    def __index__(self) -> int:
+        raise RuntimeError("index conversion failed")
+
+
+class _FailingFloat:
+    def __float__(self) -> float:
+        raise RuntimeError("float conversion failed")
+
+
 def test_materialized_transaction_dataset_matches_shape_and_is_stable() -> None:
     dataset = SyntheticTransactionDataset(8, 4, 3, seed=123, materialized=True)
 
@@ -892,6 +902,22 @@ def test_benchmark_arg_types_accept_strict_direct_values() -> None:
     ],
 )
 def test_benchmark_arg_types_reject_ambiguous_direct_values(
+    parser: Callable[[object], object],
+    raw: object,
+) -> None:
+    with pytest.raises(argparse.ArgumentTypeError):
+        parser(raw)
+
+
+@pytest.mark.parametrize(
+    ("parser", "raw"),
+    [
+        (positive_int_arg, _FailingIndex()),
+        (non_negative_int_arg, _FailingIndex()),
+        (positive_float_arg, _FailingFloat()),
+    ],
+)
+def test_benchmark_arg_types_wrap_malformed_numeric_values(
     parser: Callable[[object], object],
     raw: object,
 ) -> None:
