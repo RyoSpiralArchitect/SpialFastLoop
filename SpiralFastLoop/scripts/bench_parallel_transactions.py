@@ -614,7 +614,17 @@ def _summary_choice(raw: object, allowed: frozenset[str], name: str) -> str:
 
 
 def _compact_run(row: dict) -> dict:
+    compact, _omissions = _compact_run_with_omissions(row)
+    return compact
+
+
+def _compact_run_with_omissions(row: dict) -> tuple[dict, list[dict[str, str]]]:
     compact = {}
+    omissions: list[dict[str, str]] = []
+
+    def omit(field: str, reason: str) -> None:
+        omissions.append({"field": field, "reason": reason})
+
     for field in BEST_RUN_FIELDS:
         if field not in row:
             continue
@@ -626,25 +636,36 @@ def _compact_run(row: dict) -> dict:
                 try:
                     value = _summary_choice(value, PROFILE_MODEL_STATUS_CHOICES, field)
                 except ValueError:
+                    omit(field, "invalid_choice")
                     continue
             elif field == "scheduler_last_error":
                 failures = _display_count_value(row.get("scheduler_step_failures"))
                 if failures is None or failures <= 0:
+                    if isinstance(value, str) and value.strip():
+                        omit(field, "inactive_context")
+                    elif not isinstance(value, str) and value is not None:
+                        omit(field, "invalid_text")
                     continue
                 if not isinstance(value, str) or not value.strip():
+                    omit(field, "empty_text" if isinstance(value, str) else "invalid_text")
                     continue
                 value = value.strip()
-            elif not isinstance(value, str) or not value.strip():
+            elif not isinstance(value, str):
+                omit(field, "invalid_text")
+                continue
+            elif not value.strip():
                 continue
             else:
                 value = value.strip()
         elif field in BEST_RUN_BOOL_FIELDS:
             if not isinstance(value, bool):
+                omit(field, "invalid_boolean")
                 continue
         elif field == "seed":
             try:
                 value = _int_setting(value, field)
             except ValueError:
+                omit(field, "invalid_integer")
                 continue
         elif field in BEST_RUN_INTEGER_FIELDS:
             try:
@@ -653,18 +674,24 @@ def _compact_run(row: dict) -> dict:
                 else:
                     value = _non_negative_int_setting(value, field)
             except ValueError:
+                omit(field, "invalid_integer")
                 continue
             if field in BEST_RUN_POSITIVE_ONLY_INTEGER_FIELDS and value <= 0:
                 continue
         else:
             numeric_value = _finite_summary_value(value)
-            if numeric_value is None or numeric_value < 0.0:
+            if numeric_value is None:
+                omit(field, "non_numeric_or_non_finite")
+                continue
+            if numeric_value < 0.0:
+                omit(field, "negative")
                 continue
             max_value = _summary_metric_max_value(field)
             if max_value is not None and numeric_value > max_value:
+                omit(field, "above_max")
                 continue
         compact[field] = value
-    return compact
+    return compact, omissions
 
 
 def _finite_metric_value(row: dict, field: str, *, min_value: Optional[float] = None) -> Optional[float]:
@@ -962,8 +989,20 @@ def summarize_results(rows: list[dict]) -> dict:
             prefer_high=False,
             min_value=0.0,
         )
-        summary["best_reported"] = _compact_run(best_reported) if best_reported is not None else None
-        summary["best_end_to_end"] = _compact_run(best_end_to_end) if best_end_to_end is not None else None
+        if best_reported is not None:
+            compact_reported, reported_omissions = _compact_run_with_omissions(best_reported)
+            summary["best_reported"] = compact_reported
+            if reported_omissions:
+                summary["best_reported_omitted_fields"] = reported_omissions
+        else:
+            summary["best_reported"] = None
+        if best_end_to_end is not None:
+            compact_end_to_end, end_to_end_omissions = _compact_run_with_omissions(best_end_to_end)
+            summary["best_end_to_end"] = compact_end_to_end
+            if end_to_end_omissions:
+                summary["best_end_to_end_omitted_fields"] = end_to_end_omissions
+        else:
+            summary["best_end_to_end"] = None
     return summary
 
 

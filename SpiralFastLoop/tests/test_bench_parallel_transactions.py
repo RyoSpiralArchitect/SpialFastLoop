@@ -956,6 +956,9 @@ def test_summarize_results_omits_zero_only_scheduler_diagnostics() -> None:
     assert "max_scheduler_step_failures" not in summary
     assert "scheduler_step_failures" not in summary["best_reported"]
     assert "scheduler_last_error" not in summary["best_reported"]
+    assert summary["best_reported_omitted_fields"] == [
+        {"field": "scheduler_last_error", "reason": "inactive_context"},
+    ]
     json.dumps(summary, allow_nan=False)
 
 
@@ -1353,6 +1356,12 @@ def test_summarize_results_skips_out_of_range_percentages() -> None:
     assert "profile_loss_pct" not in summary["best_reported"]
     assert summary["best_reported"]["profile_forward_top_pct_of_parent"] == pytest.approx(125.0)
     assert summary["best_reported"]["profile_backward_pct"] == pytest.approx(60.0)
+    omitted = {
+        row["field"]: row["reason"]
+        for row in summary["best_reported_omitted_fields"]
+    }
+    assert omitted["profile_forward_backward_pct"] == "above_max"
+    assert omitted["profile_loss_pct"] == "negative"
     json.dumps(summary, allow_nan=False)
 
 
@@ -1396,6 +1405,17 @@ def test_summarize_results_omits_non_finite_best_run_fields() -> None:
     assert "optimizer_steps" not in summary["best_reported"]
     assert "profile_forward_backward_pct" not in summary["best_reported"]
     assert "profile_backward_pct" not in summary["best_reported"]
+    assert {
+        row["field"]: row["reason"]
+        for row in summary["best_reported_omitted_fields"]
+    } == {
+        "p99_s": "non_numeric_or_non_finite",
+        "steps": "invalid_integer",
+        "optimizer_steps": "invalid_integer",
+        "profile_forward_backward_pct": "non_numeric_or_non_finite",
+        "profile_backward_pct": "non_numeric_or_non_finite",
+    }
+    assert "best_end_to_end_omitted_fields" not in summary
     json.dumps(summary, allow_nan=False)
 
 
@@ -1455,6 +1475,20 @@ def test_summarize_results_omits_invalid_best_run_identity_and_counts() -> None:
     assert summary["profile_model_status_invalid_count"] == 1
     assert "profile_forward_backward_pct" not in best_reported
     assert "cuda_max_mem_bytes" not in best_reported
+    omitted = {
+        row["field"]: row["reason"]
+        for row in summary["best_reported_omitted_fields"]
+    }
+    assert omitted["run"] == "invalid_integer"
+    assert omitted["seed"] == "invalid_integer"
+    assert omitted["wall_time_s"] == "negative"
+    assert omitted["setup_time_s"] == "negative"
+    assert omitted["grad_accum"] == "invalid_integer"
+    assert omitted["profile_model_requested"] == "invalid_boolean"
+    assert omitted["profile_model_enabled"] == "invalid_boolean"
+    assert omitted["profile_model_status"] == "invalid_choice"
+    assert omitted["profile_forward_backward_pct"] == "above_max"
+    assert omitted["cuda_max_mem_bytes"] == "invalid_integer"
     json.dumps(summary, allow_nan=False)
 
 
@@ -1480,6 +1514,9 @@ def test_summarize_results_omits_fractional_profile_invalid_count_from_best_run(
     assert summary["sample_count_profile_flat_metric_invalid_count"] == pytest.approx(0.0)
     assert summary["invalid_count_profile_flat_metric_invalid_count"] == pytest.approx(1.0)
     assert "profile_flat_metric_invalid_count" not in summary["best_reported"]
+    assert summary["best_reported_omitted_fields"] == [
+        {"field": "profile_flat_metric_invalid_count", "reason": "invalid_integer"},
+    ]
     json.dumps(summary, allow_nan=False)
 
 
@@ -1517,6 +1554,9 @@ def test_summarize_results_skips_zero_grad_accum_in_aggregates() -> None:
     assert summary["sample_count_grad_accum"] == pytest.approx(1.0)
     assert summary["invalid_count_grad_accum"] == pytest.approx(1.0)
     assert "grad_accum" not in summary["best_reported"]
+    assert summary["best_reported_omitted_fields"] == [
+        {"field": "grad_accum", "reason": "invalid_integer"},
+    ]
     json.dumps(summary, allow_nan=False)
 
 

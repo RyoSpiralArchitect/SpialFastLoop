@@ -171,7 +171,8 @@ breakdown for dataset, loader, model, and compile setup. It also records
 Use `--summary-out` to capture mean/min/max/stddev timing, setup, throughput,
 and run-context stats across repeated runs. Aggregate summaries also include
 `summary_diagnostic_fields` when metrics contain missing, non-finite, or
-out-of-range values.
+out-of-range values, plus best-run omitted-field lists when a selected run has
+malformed values that are left out of `best_reported` or `best_end_to_end`.
 With `--profile-model`, backward grad-ready rows print `avg_ms@pct`, where
 `pct` is the average event position within the parent backward phase. Aggregate
 summaries also expose backward grad-ready top timing and position fields for
