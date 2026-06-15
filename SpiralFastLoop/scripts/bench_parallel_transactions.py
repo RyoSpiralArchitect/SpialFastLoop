@@ -464,6 +464,8 @@ def _profile_model_status_counts(rows: list[dict]) -> tuple[dict[str, int], int]
         if status not in PROFILE_MODEL_STATUS_CHOICES:
             invalid_count += 1
             continue
+        if status == "not_requested":
+            continue
         status_totals[status] = status_totals.get(status, 0) + 1
     ordered_counts = {
         status: status_totals[status]

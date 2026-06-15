@@ -646,6 +646,28 @@ def test_summarize_results_preserves_best_run_profile_model_failure_context() ->
     json.dumps(summary, allow_nan=False)
 
 
+def test_summarize_results_omits_not_requested_profile_model_status_counts() -> None:
+    summary = summarize_results([
+        {
+            "run": 0,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 300.0,
+            "samples_per_sec": 280.0,
+            "wall_time_s": 1.0,
+            "profile_model_requested": False,
+            "profile_model_enabled": False,
+            "profile_model_status": "not_requested",
+            "profile_model_modules_selected": 0,
+            "profile_model_hook_count": 0,
+            "profile_model_hook_failures": 0,
+        },
+    ])
+
+    assert "profile_model_status_counts" not in summary
+    assert "profile_model_status_invalid_count" not in summary
+    json.dumps(summary, allow_nan=False)
+
+
 def test_summarize_results_includes_device_memory_metrics_when_present() -> None:
     rows = [
         {

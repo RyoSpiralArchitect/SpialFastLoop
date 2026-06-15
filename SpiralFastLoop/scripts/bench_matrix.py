@@ -254,6 +254,8 @@ def _format_summary_row(row: dict) -> str:
     status_parts = []
     if isinstance(status_counts, dict):
         for status in PROFILE_MODEL_STATUS_ORDER:
+            if status == "not_requested":
+                continue
             raw_count = status_counts.get(status)
             if isinstance(raw_count, (bool, str)):
                 continue

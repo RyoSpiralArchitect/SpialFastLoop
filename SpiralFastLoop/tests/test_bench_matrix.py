@@ -184,6 +184,23 @@ def test_format_summary_row_includes_profile_model_status_counts() -> None:
     assert "status(hook_failures=1,ok=2,invalid=1)" in formatted
 
 
+def test_format_summary_row_omits_not_requested_profile_model_status_counts() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "profile_model_status_counts": {
+            "not_requested": 2,
+        },
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "status(" not in formatted
+
+
 def test_format_summary_row_omits_profile_suffix_when_absent() -> None:
     row = {
         "dataset_mode": "generated",
