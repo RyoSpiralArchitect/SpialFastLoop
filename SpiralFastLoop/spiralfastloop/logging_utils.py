@@ -27,27 +27,53 @@ __all__ = ["MetricsLogger", "default_logger"]
 _RESERVED_PAYLOAD_KEYS = frozenset({"timestamp", "stage", "mode", "step", "epoch"})
 
 
+def _fallback_type_name(value: Any) -> str:
+    value_type = type(value)
+    return f"{value_type.__module__}.{value_type.__qualname__}"
+
+
+def _string_fallback(value: Any) -> str:
+    try:
+        return str(value)
+    except Exception:
+        try:
+            return repr(value)
+        except Exception:
+            return f"<unrepresentable {_fallback_type_name(value)}>"
+
+
+def _json_safe_metric_tensor(value: torch.Tensor, path: str) -> Any:
+    try:
+        normalized = value.detach().cpu()
+        if normalized.numel() == 1:
+            return _json_safe_metric_value(normalized.item(), path)
+        return _json_safe_metric_value(normalized.tolist(), path)
+    except Exception:
+        return _string_fallback(value)
+
+
 def _json_safe_metric_value(value: Any, path: str = "metrics") -> Any:
     if isinstance(value, torch.Tensor):
-        if value.numel() == 1:
-            return _json_safe_metric_value(value.detach().cpu().item(), path)
-        return _json_safe_metric_value(value.detach().cpu().tolist(), path)
+        return _json_safe_metric_tensor(value, path)
     if value is None or isinstance(value, (str, bool, int)):
         return value
     if isinstance(value, float):
         return value if math.isfinite(value) else None
     if isinstance(value, os.PathLike):
-        return os.fspath(value)
+        try:
+            return os.fsdecode(value)
+        except Exception:
+            return _string_fallback(value)
     if isinstance(value, Mapping):
         return _normalize_metric_mapping(value, path=path)
     if isinstance(value, (list, tuple)):
         return [_json_safe_metric_value(item, f"{path}[]") for item in value]
     if isinstance(value, (set, frozenset)):
-        return [_json_safe_metric_value(item, f"{path}[]") for item in sorted(value, key=repr)]
+        return [_json_safe_metric_value(item, f"{path}[]") for item in sorted(value, key=_string_fallback)]
     try:
         return _json_safe_metric_value(float(value), path)
-    except (TypeError, ValueError):
-        return str(value)
+    except Exception:
+        return _string_fallback(value)
 
 
 def _json_safe_metric_key(key: Any) -> str:
@@ -58,7 +84,7 @@ def _json_safe_metric_key(key: Any) -> str:
         return "null"
     if isinstance(safe_key, (str, int, float, bool)):
         return str(safe_key)
-    return str(safe_key)
+    return _string_fallback(safe_key)
 
 
 def _normalize_metric_value(value: Any) -> Any:

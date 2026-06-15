@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import sys
 from argparse import Namespace
 from pathlib import Path
@@ -327,6 +328,32 @@ def test_dumps_json_falls_back_for_unrepresentable_values() -> None:
     assert fallback_keys
     assert "Unrepresentable" in fallback_keys[0]
     assert normalized[fallback_keys[0]] == "key"
+
+
+def test_dumps_json_falls_back_for_unreadable_tensor_values() -> None:
+    normalized = json.loads(dumps_json({"tensor": torch.empty(2, device="meta")}))
+
+    assert "tensor" in normalized["tensor"]
+    assert "meta" in normalized["tensor"]
+
+
+def test_dumps_json_falls_back_for_failed_pathlike_values() -> None:
+    class FailingPath(os.PathLike[str]):
+        def __fspath__(self) -> str:
+            raise RuntimeError("path failed")
+
+        def __str__(self) -> str:
+            return "failed-path"
+
+    payload = {
+        "path": FailingPath(),
+        FailingPath(): "key",
+    }
+
+    normalized = json.loads(dumps_json(payload))
+
+    assert normalized["path"] == "failed-path"
+    assert normalized["failed-path"] == "key"
 
 
 @pytest.mark.parametrize(

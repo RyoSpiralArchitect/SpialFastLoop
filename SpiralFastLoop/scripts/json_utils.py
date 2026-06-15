@@ -26,17 +26,28 @@ def _string_fallback(value: Any) -> str:
             return f"<unrepresentable {_fallback_type_name(value)}>"
 
 
+def _json_safe_tensor(value: torch.Tensor, path: str) -> Any:
+    try:
+        normalized = value.detach().cpu()
+        if normalized.numel() == 1:
+            return json_safe(normalized.item(), path)
+        return json_safe(normalized.tolist(), path)
+    except Exception:
+        return _string_fallback(value)
+
+
 def json_safe(value: Any, path: str = "$") -> Any:
     if isinstance(value, torch.Tensor):
-        if value.numel() == 1:
-            return json_safe(value.detach().cpu().item(), path)
-        return json_safe(value.detach().cpu().tolist(), path)
+        return _json_safe_tensor(value, path)
     if value is None or isinstance(value, (str, bool, int)):
         return value
     if isinstance(value, float):
         return value if math.isfinite(value) else None
     if isinstance(value, os.PathLike):
-        return os.fspath(value)
+        try:
+            return os.fsdecode(value)
+        except Exception:
+            return _string_fallback(value)
     if isinstance(value, Mapping):
         return _json_safe_mapping(value, path)
     if isinstance(value, (list, tuple)):

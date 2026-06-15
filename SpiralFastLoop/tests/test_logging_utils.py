@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import os
 from pathlib import Path
 
 import pytest
@@ -50,6 +51,71 @@ def test_metrics_logger_writes_strict_jsonl_for_non_finite_metrics(tmp_path) -> 
     }
     assert payload["['top', 'tuple']"] == 3.0
     assert payload["step"] == 1
+
+
+def test_metrics_logger_falls_back_for_malformed_metric_values_and_keys(tmp_path) -> None:
+    class FailingFloat:
+        def __float__(self) -> float:
+            raise RuntimeError("float failed")
+
+        def __str__(self) -> str:
+            return "failed-float"
+
+    class MalformedRepr:
+        def __repr__(self) -> str:
+            raise RuntimeError("repr failed")
+
+        def __str__(self) -> str:
+            return "malformed-repr"
+
+    class FailingPath(os.PathLike[str]):
+        def __fspath__(self) -> str:
+            raise RuntimeError("path failed")
+
+        def __str__(self) -> str:
+            return "failed-path"
+
+    class Unrepresentable:
+        def __float__(self) -> float:
+            raise RuntimeError("float failed")
+
+        def __repr__(self) -> str:
+            raise RuntimeError("repr failed")
+
+        def __str__(self) -> str:
+            raise RuntimeError("str failed")
+
+    jsonl_path = tmp_path / "metrics.jsonl"
+    csv_path = tmp_path / "metrics.csv"
+    metrics_logger = MetricsLogger(logger=None, jsonl_path=jsonl_path, csv_path=csv_path)
+
+    metrics_logger.log_metrics(
+        "train",
+        {
+            "bad_float": FailingFloat(),
+            "bad_set": {MalformedRepr()},
+            "bad_path": FailingPath(),
+            "meta_tensor": torch.empty(2, device="meta"),
+            Unrepresentable(): "key",
+        },
+        step=1,
+    )
+
+    payload = json.loads(jsonl_path.read_text(encoding="utf-8"))
+    fallback_keys = [key for key in payload if "Unrepresentable" in key]
+
+    assert payload["bad_float"] == "failed-float"
+    assert payload["bad_set"] == ["malformed-repr"]
+    assert payload["bad_path"] == "failed-path"
+    assert "tensor" in payload["meta_tensor"]
+    assert "meta" in payload["meta_tensor"]
+    assert fallback_keys
+    assert payload[fallback_keys[0]] == "key"
+    with csv_path.open(newline="", encoding="utf-8") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["bad_float"] == "failed-float"
+    assert json.loads(row["bad_set"]) == ["malformed-repr"]
+    assert row["bad_path"] == "failed-path"
 
 
 @pytest.mark.parametrize("name", [None, True, "", "   ", object()])
