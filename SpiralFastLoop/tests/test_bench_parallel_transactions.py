@@ -597,6 +597,7 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["mean_profile_metrics_pct"] == pytest.approx(1.5)
     assert summary["max_profile_backward_pct"] == pytest.approx(40.0)
     assert summary["profiled_runs"] == 2
+    assert summary["profile_model_status_counts"] == {"hook_failures": 1, "ok": 1}
     assert summary["best_reported"]["run"] == 1
     assert summary["best_reported"]["profile_flat_metric_invalid_count"] == pytest.approx(0.0)
     assert summary["best_reported"]["profile_open_phase_count"] == 0
@@ -1022,6 +1023,8 @@ def test_summarize_results_omits_invalid_best_run_identity_and_counts() -> None:
     assert "profile_model_hook_count" not in best_reported
     assert "profile_model_hook_failures" not in best_reported
     assert "profile_model_hook_last_error" not in best_reported
+    assert "profile_model_status_counts" not in best_reported
+    assert summary["profile_model_status_invalid_count"] == 1
     assert "profile_forward_backward_pct" not in best_reported
     assert "cuda_max_mem_bytes" not in best_reported
     json.dumps(summary, allow_nan=False)

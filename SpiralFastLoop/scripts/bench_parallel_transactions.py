@@ -238,13 +238,14 @@ BEST_RUN_FIELDS = (
 
 DEVICE_CHOICES = ("auto", "cpu", "cuda", "mps")
 DATASET_MODE_CHOICES = frozenset({"generated", "materialized"})
-PROFILE_MODEL_STATUS_CHOICES = frozenset({
+PROFILE_MODEL_STATUS_ORDER = (
     "not_requested",
     "collect_profile_disabled",
     "no_matching_modules",
     "hook_failures",
     "ok",
-})
+)
+PROFILE_MODEL_STATUS_CHOICES = frozenset(PROFILE_MODEL_STATUS_ORDER)
 BEST_RUN_TEXT_FIELDS = frozenset({
     "dataset_mode",
     "profile_model_status",
@@ -449,6 +450,29 @@ def count_profiled_rows(rows: list[dict]) -> int:
     )
 
 
+def _profile_model_status_counts(rows: list[dict]) -> tuple[dict[str, int], int]:
+    status_totals: dict[str, int] = {}
+    invalid_count = 0
+    for row in rows:
+        if "profile_model_status" not in row:
+            continue
+        raw = row["profile_model_status"]
+        if not isinstance(raw, str) or not raw.strip():
+            invalid_count += 1
+            continue
+        status = raw.strip()
+        if status not in PROFILE_MODEL_STATUS_CHOICES:
+            invalid_count += 1
+            continue
+        status_totals[status] = status_totals.get(status, 0) + 1
+    ordered_counts = {
+        status: status_totals[status]
+        for status in PROFILE_MODEL_STATUS_ORDER
+        if status in status_totals
+    }
+    return ordered_counts, invalid_count
+
+
 def summarize_metric(
     rows: list[dict],
     field: str,
@@ -524,6 +548,11 @@ def summarize_results(rows: list[dict]) -> dict:
     profiled_runs = count_profiled_rows(summary_rows)
     if profiled_runs > 0:
         summary["profiled_runs"] = profiled_runs
+    status_counts, status_invalid_count = _profile_model_status_counts(summary_rows)
+    if status_counts:
+        summary["profile_model_status_counts"] = status_counts
+    if status_invalid_count > 0:
+        summary["profile_model_status_invalid_count"] = status_invalid_count
     for field in summary_fields_for_rows(summary_rows):
         missing_as_zero = field in BASE_SUMMARY_FIELDS
         for stat_name, value in summarize_metric(

@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from bench_parallel_transactions import (
     BASE_SUMMARY_FIELDS,
+    PROFILE_MODEL_STATUS_ORDER,
     SUMMARY_INTEGER_FIELDS,
     _best_finite_row,
     _finite_summary_value,
@@ -20,6 +21,7 @@ from bench_parallel_transactions import (
     _format_profile_model_hook_summary,
     _int_arg,
     _positive_sample_count_value,
+    _profile_model_status_counts,
     _summary_metric_max_value,
     _summary_metric_min_value,
     count_profiled_rows,
@@ -138,6 +140,11 @@ def summarize_rows(rows: list[dict]) -> dict:
         profiled_runs = count_profiled_rows(group_rows)
         if profiled_runs > 0:
             summary["profiled_runs"] = profiled_runs
+        status_counts, status_invalid_count = _profile_model_status_counts(group_rows)
+        if status_counts:
+            summary["profile_model_status_counts"] = status_counts
+        if status_invalid_count > 0:
+            summary["profile_model_status_invalid_count"] = status_invalid_count
         for field in summary_fields_for_rows(group_rows):
             missing_as_zero = field in BASE_SUMMARY_FIELDS
             for stat_name, value in summarize_metric(
@@ -243,6 +250,31 @@ def _format_summary_row(row: dict) -> str:
         model_parts.append(f"failures={profile_model_failures:.1f}")
     if model_parts:
         profile_parts.append(f"model({','.join(model_parts)})")
+    status_counts = row.get("profile_model_status_counts")
+    status_parts = []
+    if isinstance(status_counts, dict):
+        for status in PROFILE_MODEL_STATUS_ORDER:
+            raw_count = status_counts.get(status)
+            if isinstance(raw_count, (bool, str)):
+                continue
+            try:
+                count = non_negative_int_arg(raw_count)
+            except argparse.ArgumentTypeError:
+                continue
+            if count > 0:
+                status_parts.append(f"{status}={count}")
+    raw_status_invalid_count = row.get("profile_model_status_invalid_count")
+    if isinstance(raw_status_invalid_count, (bool, str)):
+        status_invalid_count = 0
+    else:
+        try:
+            status_invalid_count = non_negative_int_arg(raw_status_invalid_count)
+        except argparse.ArgumentTypeError:
+            status_invalid_count = 0
+    if status_invalid_count > 0:
+        status_parts.append(f"invalid={status_invalid_count}")
+    if status_parts:
+        profile_parts.append(f"status({','.join(status_parts)})")
     profile_suffix = f" {' '.join(profile_parts)}" if profile_parts else ""
     return (
         f"{row['dataset_mode']} {row['compile_mode']} workers={row['workers']} "
