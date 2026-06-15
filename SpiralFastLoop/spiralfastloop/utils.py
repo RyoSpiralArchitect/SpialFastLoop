@@ -1004,10 +1004,10 @@ class PhaseProfiler:
             "total_s": float(total),
             "avg_ms": (float(total) / calls) * 1e3,
             "calls": calls,
-            "sample_count": calls,
         }
-        if sample_values:
+        if self.track_distribution and sample_values:
             row.update({
+                "sample_count": calls,
                 "window_sample_count": len(sample_values),
                 "p50_ms": self._percentile(sample_values, 50) * 1e3,
                 "p95_ms": self._percentile(sample_values, 95) * 1e3,
@@ -1192,7 +1192,6 @@ class PhaseProfiler:
                     "total_s": row["total_s"],
                     "avg_ms": row["avg_ms"],
                     "calls": row["calls"],
-                    "sample_count": row["sample_count"],
                 }
                 if "avg_pct_of_parent" in row:
                     compact["avg_pct_of_parent"] = row["avg_pct_of_parent"]

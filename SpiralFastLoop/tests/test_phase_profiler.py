@@ -3473,8 +3473,12 @@ def test_model_profile_events_keep_totals_without_distribution() -> None:
     assert event["total_s"] >= 0.0
     assert event["avg_ms"] >= 0.0
     assert "p95_ms" not in event
+    assert "sample_count" not in event
+    assert "window_sample_count" not in event
     top_event = metrics["profile"]["phase_events"]["backward_grad_ready"]["top_children"][0]
     assert "p95_ms" not in top_event
+    assert "sample_count" not in top_event
+    assert "window_sample_count" not in top_event
 
 
 def test_phase_profiler_top_children_omit_distribution_fields_when_disabled() -> None:
@@ -3488,6 +3492,8 @@ def test_phase_profiler_top_children_omit_distribution_fields_when_disabled() ->
     assert "p95_ms" not in profile["top_phases"][0]
     assert "p95_ms" not in profile["phase_breakdowns"]["forward"]["top_children"][0]
     assert "p95_ms" not in profile["phase_events"]["backward_grad_ready"]["top_children"][0]
+    assert "sample_count" not in profile["phase_events"]["backward_grad_ready"]["top_children"][0]
+    assert "window_sample_count" not in profile["phase_events"]["backward_grad_ready"]["top_children"][0]
 
 
 def test_phase_profiler_top_rows_include_distribution_fields_when_enabled() -> None:
