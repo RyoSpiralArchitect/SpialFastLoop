@@ -364,6 +364,7 @@ def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
                 "count": 1,
                 "max_score": 35.0,
                 "total_score": 35.0,
+                "omitted_count": 1,
                 "score_unit": "profile_pct",
                 "top_candidate": "forward_top_child",
                 "top_rank": 2,
@@ -388,7 +389,7 @@ def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
     assert "hotspot=forward_phase:55.0%(phase_share,high)" in formatted
     assert (
         "pressure(#1 phase_share:forward_phase=55.0%[high];sum=75.0%,"
-        "#2 child_hotspot:forward_top_child=35.0%[high];sum=35.0%)"
+        "#2 child_hotspot:forward_top_child=35.0%[high];sum=35.0%;omitted=1)"
     ) in formatted
     assert "severity_counts(high=2,medium=1)" in formatted
 
@@ -413,6 +414,7 @@ def test_format_summary_row_orders_bottleneck_pressure_by_total_score_and_skips_
                 "count": 1,
                 "max_score": 30.0,
                 "total_score": 30.0,
+                "omitted_count": 2,
                 "score_unit": "profile_pct",
                 "top_candidate": "forward_top_child",
                 "top_rank": "bad",
@@ -432,7 +434,7 @@ def test_format_summary_row_orders_bottleneck_pressure_by_total_score_and_skips_
 
     assert (
         "pressure(phase_share:forward_phase=20.0%;sum=40.0%,"
-        "child_hotspot:forward_top_child=30.0%;sum=30.0%)"
+        "child_hotspot:forward_top_child=30.0%;sum=30.0%;omitted=2)"
     ) in formatted
     assert "bad_score" not in formatted
     assert "bad_candidate" not in formatted

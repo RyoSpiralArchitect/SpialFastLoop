@@ -2760,6 +2760,25 @@ def test_main_prints_backward_event_parent_position(
     ) in output
 
 
+def test_format_profile_bottleneck_category_pressure_includes_omitted_count() -> None:
+    text = bpt._format_profile_bottleneck_category_pressure(
+        "coverage_gap",
+        {
+            "count": 3,
+            "max_score": 12.5,
+            "total_score": 20.0,
+            "omitted_count": 2,
+            "score_unit": "profile_pct",
+            "top_candidate": "forward_untracked",
+            "top_severity": "medium",
+            "pressure_rank": 4,
+        },
+        include_count=True,
+    )
+
+    assert text == "#4 coverage_gap:forward_untracked=12.5%[medium]/3;sum=20.0%;omitted=2"
+
+
 def test_transaction_benchmark_records_run_seed() -> None:
     class Args:
         transactions = 64

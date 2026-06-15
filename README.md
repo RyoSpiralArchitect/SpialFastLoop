@@ -102,6 +102,7 @@ Matrix summaries surface the same signal as
 compact `hotspot=...` and strongest-first `pressure(...)` fragments, including
 the top hotspot severity, category-level severity suffixes such as `[high]`,
 category pressure ranks such as `#1`, category `sum=...`, and
+category `omitted=...` markers when the candidate list is capped, plus
 `severity_counts(...)`. The
 transactional benchmark prints the same severity-aware `Bottleneck:` line before
 the aggregate JSON when candidates are available.
