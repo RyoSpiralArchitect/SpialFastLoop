@@ -198,6 +198,31 @@ BEST_RUN_FIELDS = (
 DEVICE_CHOICES = ("auto", "cpu", "cuda", "mps")
 DATASET_MODE_CHOICES = frozenset({"generated", "materialized"})
 BEST_RUN_TEXT_FIELDS = frozenset({"dataset_mode"})
+BEST_RUN_INTEGER_FIELDS = frozenset({
+    "run",
+    "steps",
+    "samples",
+    "optimizer_steps",
+    "grad_accum",
+    "partial_optimizer_steps",
+    "grad_accum_tail_steps",
+    "warmup_steps",
+    "warmup_samples",
+    "warmup_optimizer_steps",
+    "cold_start_steps",
+    "steady_steps",
+    "steady_samples",
+    "steady_optimizer_steps",
+    "cuda_current_mem_bytes",
+    "cuda_max_mem_bytes",
+    "cuda_reserved_mem_bytes",
+    "cuda_max_reserved_mem_bytes",
+    "mps_current_mem_bytes",
+    "mps_max_mem_bytes",
+    "mps_driver_mem_bytes",
+    "mps_recommended_max_mem_bytes",
+})
+BEST_RUN_POSITIVE_INTEGER_FIELDS = frozenset({"grad_accum"})
 
 
 @dataclass
@@ -255,16 +280,36 @@ def _compact_run(row: dict) -> dict:
         if field in BEST_RUN_TEXT_FIELDS:
             if field == "dataset_mode":
                 value = _summary_choice(value, DATASET_MODE_CHOICES, field)
-        elif _finite_summary_value(value) is None:
-            continue
+        elif field == "seed":
+            try:
+                value = _int_setting(value, field)
+            except ValueError:
+                continue
+        elif field in BEST_RUN_INTEGER_FIELDS:
+            try:
+                if field in BEST_RUN_POSITIVE_INTEGER_FIELDS:
+                    value = _positive_int_setting(value, field)
+                else:
+                    value = _non_negative_int_setting(value, field)
+            except ValueError:
+                continue
+        else:
+            numeric_value = _finite_summary_value(value)
+            if numeric_value is None or numeric_value < 0.0:
+                continue
         compact[field] = value
     return compact
 
 
-def _finite_metric_value(row: dict, field: str) -> Optional[float]:
+def _finite_metric_value(row: dict, field: str, *, min_value: Optional[float] = None) -> Optional[float]:
     if field not in row:
         return None
-    return _finite_summary_value(row[field])
+    value = _finite_summary_value(row[field])
+    if value is None:
+        return None
+    if min_value is not None and value < min_value:
+        return None
+    return value
 
 
 def _best_finite_row(
@@ -273,14 +318,15 @@ def _best_finite_row(
     *,
     prefer_high: bool,
     sample_count_field: Optional[str] = None,
+    min_value: Optional[float] = None,
 ) -> Optional[dict]:
     candidates = []
     for row in rows:
         if sample_count_field is not None and sample_count_field in row:
-            sample_count = _finite_metric_value(row, sample_count_field)
+            sample_count = _finite_metric_value(row, sample_count_field, min_value=0.0)
             if sample_count is None or sample_count <= 0.0:
                 continue
-        value = _finite_metric_value(row, field)
+        value = _finite_metric_value(row, field, min_value=min_value)
         if value is None:
             continue
         candidates.append((value, row))
@@ -309,16 +355,26 @@ def count_profiled_rows(rows: list[dict]) -> int:
     )
 
 
-def summarize_metric(rows: list[dict], field: str, *, missing_as_zero: bool = True) -> dict[str, float]:
+def summarize_metric(
+    rows: list[dict],
+    field: str,
+    *,
+    missing_as_zero: bool = True,
+    min_value: Optional[float] = 0.0,
+) -> dict[str, float]:
     values = []
     sample_count = 0
     missing_count = 0
     non_finite_count = 0
+    invalid_count = 0
     for row in rows:
         if field in row:
             value = _finite_summary_value(row[field])
             if value is None:
                 non_finite_count += 1
+                continue
+            if min_value is not None and value < min_value:
+                invalid_count += 1
                 continue
             values.append(value)
             sample_count += 1
@@ -328,12 +384,14 @@ def summarize_metric(rows: list[dict], field: str, *, missing_as_zero: bool = Tr
     result: dict[str, float] = {}
     if not values:
         result.update({"mean": 0.0, "min": 0.0, "max": 0.0, "stddev": 0.0})
-        if missing_count > 0 or non_finite_count > 0:
+        if missing_count > 0 or non_finite_count > 0 or invalid_count > 0:
             result["sample_count"] = float(sample_count)
         if missing_count > 0:
             result["missing_count"] = float(missing_count)
         if non_finite_count > 0:
             result["non_finite_count"] = float(non_finite_count)
+        if invalid_count > 0:
+            result["invalid_count"] = float(invalid_count)
         return result
     mean = sum(values) / len(values)
     variance = sum((value - mean) ** 2 for value in values) / len(values)
@@ -349,6 +407,8 @@ def summarize_metric(rows: list[dict], field: str, *, missing_as_zero: bool = Tr
         result["missing_count"] = float(missing_count)
     if non_finite_count > 0:
         result["non_finite_count"] = float(non_finite_count)
+    if invalid_count > 0:
+        result["invalid_count"] = float(invalid_count)
     return result
 
 
@@ -376,11 +436,13 @@ def summarize_results(rows: list[dict]) -> dict:
             summary_rows,
             "reported_samples_per_sec",
             prefer_high=True,
+            min_value=0.0,
         )
         best_end_to_end = _best_finite_row(
             summary_rows,
             "end_to_end_wall_time_s",
             prefer_high=False,
+            min_value=0.0,
         )
         summary["best_reported"] = _compact_run(best_reported) if best_reported is not None else None
         summary["best_end_to_end"] = _compact_run(best_end_to_end) if best_end_to_end is not None else None

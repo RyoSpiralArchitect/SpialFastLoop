@@ -215,6 +215,20 @@ def test_summarize_metric_skips_non_finite_values() -> None:
     assert stats["non_finite_count"] == pytest.approx(2.0)
 
 
+def test_summarize_metric_skips_negative_values() -> None:
+    rows = [
+        {"samples_per_sec": 100.0},
+        {"samples_per_sec": -20.0},
+    ]
+
+    stats = summarize_metric(rows, "samples_per_sec")
+
+    assert stats["mean"] == pytest.approx(100.0)
+    assert stats["sample_count"] == pytest.approx(1.0)
+    assert stats["invalid_count"] == pytest.approx(1.0)
+    assert "non_finite_count" not in stats
+
+
 def test_summarize_metric_skips_bool_values() -> None:
     rows = [
         {"samples_per_sec": 100.0},
@@ -741,6 +755,45 @@ def test_summarize_results_skips_non_finite_best_rank_values() -> None:
     json.dumps(summary, allow_nan=False)
 
 
+def test_summarize_results_skips_negative_best_rank_values() -> None:
+    rows = [
+        {
+            "run": 0,
+            "seed": 10,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": -10.0,
+            "samples_per_sec": -8.0,
+            "steady_samples_per_sec": -10.0,
+            "wall_time_s": -1.0,
+            "setup_time_s": 0.25,
+            "end_to_end_wall_time_s": -1.0,
+        },
+        {
+            "run": 1,
+            "seed": 11,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 120.0,
+            "samples_per_sec": 95.0,
+            "steady_samples_per_sec": 120.0,
+            "wall_time_s": 0.9,
+            "setup_time_s": 0.20,
+            "end_to_end_wall_time_s": 0.9,
+        },
+    ]
+
+    summary = summarize_results(rows)
+
+    assert summary["mean_reported_samples_per_sec"] == pytest.approx(120.0)
+    assert summary["sample_count_reported_samples_per_sec"] == pytest.approx(1.0)
+    assert summary["invalid_count_reported_samples_per_sec"] == pytest.approx(1.0)
+    assert summary["mean_end_to_end_wall_time_s"] == pytest.approx(0.9)
+    assert summary["sample_count_end_to_end_wall_time_s"] == pytest.approx(1.0)
+    assert summary["invalid_count_end_to_end_wall_time_s"] == pytest.approx(1.0)
+    assert summary["best_reported"]["run"] == 1
+    assert summary["best_end_to_end"]["run"] == 1
+    json.dumps(summary, allow_nan=False)
+
+
 def test_summarize_results_omits_non_finite_best_run_fields() -> None:
     rows = [
         {
@@ -781,6 +834,43 @@ def test_summarize_results_omits_non_finite_best_run_fields() -> None:
     assert "optimizer_steps" not in summary["best_reported"]
     assert "profile_forward_backward_pct" not in summary["best_reported"]
     assert "profile_backward_pct" not in summary["best_reported"]
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_results_omits_invalid_best_run_identity_and_counts() -> None:
+    rows = [
+        {
+            "run": 0.5,
+            "seed": 10.5,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 300.0,
+            "samples_per_sec": 280.0,
+            "steady_samples_per_sec": 300.0,
+            "wall_time_s": -1.0,
+            "setup_time_s": -0.25,
+            "end_to_end_wall_time_s": 1.25,
+            "steps": 2.0,
+            "samples": -12,
+            "grad_accum": 0,
+            "profile_flat_metric_invalid_count": -1.0,
+            "cuda_max_mem_bytes": 2048.5,
+        },
+    ]
+
+    summary = summarize_results(rows)
+    best_reported = summary["best_reported"]
+
+    assert best_reported["dataset_mode"] == "generated"
+    assert best_reported["reported_samples_per_sec"] == pytest.approx(300.0)
+    assert "run" not in best_reported
+    assert "seed" not in best_reported
+    assert "wall_time_s" not in best_reported
+    assert "setup_time_s" not in best_reported
+    assert "steps" not in best_reported
+    assert "samples" not in best_reported
+    assert "grad_accum" not in best_reported
+    assert "profile_flat_metric_invalid_count" not in best_reported
+    assert "cuda_max_mem_bytes" not in best_reported
     json.dumps(summary, allow_nan=False)
 
 
@@ -884,6 +974,22 @@ def test_best_finite_row_keeps_rows_without_sample_count_field() -> None:
     )
 
     assert best == rows[0]
+
+
+def test_best_finite_row_skips_values_below_minimum() -> None:
+    rows = [
+        {"run": 0, "mean_wall_time_s": -1.0},
+        {"run": 1, "mean_wall_time_s": 0.5},
+    ]
+
+    best = _best_finite_row(
+        rows,
+        "mean_wall_time_s",
+        prefer_high=False,
+        min_value=0.0,
+    )
+
+    assert best == rows[1]
 
 
 def test_benchmark_arg_types_reject_empty_or_invalid_runs() -> None:

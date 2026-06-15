@@ -151,12 +151,14 @@ def summarize_rows(rows: list[dict]) -> dict:
             "mean_reported_samples_per_sec",
             prefer_high=True,
             sample_count_field="sample_count_reported_samples_per_sec",
+            min_value=0.0,
         )
         best_end_to_end = _best_finite_row(
             summaries,
             "mean_end_to_end_wall_time_s",
             prefer_high=False,
             sample_count_field="sample_count_end_to_end_wall_time_s",
+            min_value=0.0,
         )
 
     return {
@@ -173,6 +175,8 @@ def _measured_summary_value(row: dict, mean_field: str) -> Optional[float]:
         return None
     value = _finite_summary_value(row[mean_field])
     if value is None:
+        return None
+    if value < 0.0:
         return None
 
     metric_name = mean_field[len("mean_"):] if mean_field.startswith("mean_") else mean_field
