@@ -1470,6 +1470,21 @@ def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
     assert generated["profile_bottleneck_candidate_returned_count"] == 4
     assert generated["profile_bottleneck_candidate_limit"] == 8
     assert "profile_bottleneck_candidate_omitted_count" not in generated
+    assert generated["profile_bottleneck_top_candidate"] == generated["profile_bottleneck_candidates"][0]
+    assert generated["profile_bottleneck_category_summary"]["phase_share"] == {
+        "count": 2,
+        "max_score": pytest.approx(30.0),
+        "score_unit": "profile_pct",
+        "top_candidate": "backward_phase",
+        "top_rank": 1,
+    }
+    assert generated["profile_bottleneck_category_summary"]["readiness_span"] == {
+        "count": 1,
+        "max_score": pytest.approx(15.0),
+        "score_unit": "profile_pct",
+        "top_candidate": "backward_readiness_span",
+        "top_rank": 3,
+    }
     assert generated["profile_bottleneck_candidates"][0]["name"] == "backward_phase"
     assert generated["profile_bottleneck_candidates"][0]["score"] == pytest.approx(30.0)
     assert generated["profile_bottleneck_candidates"][0]["rank"] == 1
@@ -1485,6 +1500,10 @@ def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
     assert materialized["profile_bottleneck_candidates"][0]["score"] == pytest.approx(60.0)
     assert summary["best_reported"]["dataset_mode"] == "materialized"
     assert summary["best_reported"]["profile_bottleneck_candidates"] == materialized["profile_bottleneck_candidates"]
+    assert summary["best_reported"]["profile_bottleneck_top_candidate"] == materialized["profile_bottleneck_top_candidate"]
+    assert summary["best_reported"]["profile_bottleneck_category_summary"] == materialized[
+        "profile_bottleneck_category_summary"
+    ]
     json.dumps(summary, allow_nan=False)
 
 

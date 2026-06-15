@@ -86,7 +86,10 @@ and `opt_tail(std=...)`. Aggregate benchmark summaries also include ranked
 `profile_bottleneck_candidates` with the strongest phase, top-child, untracked,
 and backward-readiness-span signals normalized into profile-percentage scores;
 each candidate carries a reason, next-step hint, rank, and returned/omitted
-candidate counts when the list is capped.
+candidate counts when the list is capped. Summaries also expose
+`profile_bottleneck_top_candidate` and `profile_bottleneck_category_summary`
+for dashboards that compare phase-share, coverage-gap, child-hotspot, and
+readiness-span pressure directly.
 The ResNet drilldown script prints the same top-phase tail fields. Throughput
 summaries include `p99_s` and `std_batch_s`. Set `profile_sync=True` only when
 you need stricter accelerator timings; it synchronizes around profiled regions

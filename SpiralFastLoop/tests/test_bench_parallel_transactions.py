@@ -949,6 +949,29 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
     assert summary["profile_bottleneck_candidate_limit"] == 8
     assert summary["profile_bottleneck_candidate_omitted_count"] == 1
     assert len(candidates) == 8
+    assert summary["profile_bottleneck_top_candidate"] == candidates[0]
+    category_summary = summary["profile_bottleneck_category_summary"]
+    assert category_summary["phase_share"] == {
+        "count": 3,
+        "max_score": pytest.approx(50.0),
+        "score_unit": "profile_pct",
+        "top_candidate": "backward_phase",
+        "top_rank": 1,
+    }
+    assert category_summary["child_hotspot"] == {
+        "count": 3,
+        "max_score": pytest.approx(15.0),
+        "score_unit": "profile_pct",
+        "top_candidate": "backward_ready_top_child",
+        "top_rank": 4,
+    }
+    assert category_summary["coverage_gap"] == {
+        "count": 2,
+        "max_score": pytest.approx(5.0),
+        "score_unit": "profile_pct",
+        "top_candidate": "forward_untracked",
+        "top_rank": 8,
+    }
     assert [candidate["name"] for candidate in candidates[:4]] == [
         "backward_phase",
         "backward_readiness_span",
@@ -1005,6 +1028,8 @@ def test_summarize_results_skips_invalid_profile_bottleneck_candidates() -> None
     ])
 
     assert "profile_bottleneck_candidate_count" not in summary
+    assert "profile_bottleneck_category_summary" not in summary
+    assert "profile_bottleneck_top_candidate" not in summary
     assert "profile_bottleneck_candidates" not in summary
     json.dumps(summary, allow_nan=False)
 

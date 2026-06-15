@@ -873,6 +873,36 @@ def profile_bottleneck_candidates_for_summary(summary: dict) -> list[dict[str, o
     return _ranked_profile_bottleneck_candidates(summary)[:PROFILE_BOTTLENECK_CANDIDATE_LIMIT]
 
 
+def _profile_bottleneck_category_summary(
+    candidates: list[dict[str, object]],
+) -> dict[str, dict[str, object]]:
+    category_summary: dict[str, dict[str, object]] = {}
+    for candidate in candidates:
+        category_raw = candidate.get("category")
+        category = category_raw if isinstance(category_raw, str) and category_raw else "uncategorized"
+        score = _finite_summary_value(candidate.get("score"))
+        if score is None:
+            continue
+        entry = category_summary.setdefault(
+            category,
+            {
+                "count": 0,
+                "max_score": score,
+                "score_unit": candidate.get("score_unit", ""),
+                "top_candidate": candidate.get("name", ""),
+                "top_rank": candidate.get("rank", 0),
+            },
+        )
+        entry["count"] = int(entry["count"]) + 1
+        max_score = _finite_summary_value(entry.get("max_score"))
+        if max_score is None or score > max_score:
+            entry["max_score"] = score
+            entry["score_unit"] = candidate.get("score_unit", "")
+            entry["top_candidate"] = candidate.get("name", "")
+            entry["top_rank"] = candidate.get("rank", 0)
+    return category_summary
+
+
 def _add_profile_bottleneck_candidates(summary: dict) -> None:
     ranked_candidates = _ranked_profile_bottleneck_candidates(summary)
     if not ranked_candidates:
@@ -884,6 +914,8 @@ def _add_profile_bottleneck_candidates(summary: dict) -> None:
     summary["profile_bottleneck_candidate_limit"] = PROFILE_BOTTLENECK_CANDIDATE_LIMIT
     if omitted_count > 0:
         summary["profile_bottleneck_candidate_omitted_count"] = omitted_count
+    summary["profile_bottleneck_top_candidate"] = candidates[0]
+    summary["profile_bottleneck_category_summary"] = _profile_bottleneck_category_summary(ranked_candidates)
     summary["profile_bottleneck_candidates"] = candidates
 
 
