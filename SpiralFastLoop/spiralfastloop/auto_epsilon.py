@@ -222,7 +222,7 @@ def _residual_values_setting(residuals: Any) -> List[float]:
         raise ValueError("residuals must be an iterable of finite numbers")
     try:
         iterator = iter(residuals)
-    except TypeError as exc:
+    except Exception as exc:
         raise ValueError("residuals must be an iterable of finite numbers") from exc
     try:
         return [abs(_strict_finite_float_setting(residual, "residual")) for residual in iterator]

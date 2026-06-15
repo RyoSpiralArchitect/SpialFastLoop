@@ -160,7 +160,7 @@ class HybridCompensatedAccumulator:
 
         try:
             iterator = iter(values)
-        except TypeError as exc:
+        except Exception as exc:
             raise ValueError("values must be an iterable of finite floats") from exc
 
         snapshot = self.snapshot()

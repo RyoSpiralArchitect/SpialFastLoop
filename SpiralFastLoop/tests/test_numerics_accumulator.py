@@ -18,6 +18,11 @@ class _FailingFloat:
         raise RuntimeError("float conversion failed")
 
 
+class _BrokenIterable:
+    def __iter__(self):
+        raise RuntimeError("iterator creation failed")
+
+
 def test_accumulator_tracks_total_with_compensation() -> None:
     acc = HybridCompensatedAccumulator(unit=0.01, rng=random.Random(123))
     # Sequence designed to trigger cancellation when accumulated naïvely.
@@ -128,13 +133,14 @@ def test_add_rejects_invalid_values_before_mutating_state(value: object) -> None
     assert acc.snapshot() == snapshot
 
 
-def test_extend_rejects_non_iterable_values_before_mutating_state() -> None:
+@pytest.mark.parametrize("values", [object(), _BrokenIterable()])
+def test_extend_rejects_non_iterable_values_before_mutating_state(values: object) -> None:
     acc = HybridCompensatedAccumulator(unit=0.01, rng=random.Random(13))
     acc.add(0.25)
     snapshot = acc.snapshot()
 
     with pytest.raises(ValueError, match="values"):
-        acc.extend(object())  # type: ignore[arg-type]
+        acc.extend(values)  # type: ignore[arg-type]
 
     assert acc.snapshot() == snapshot
 

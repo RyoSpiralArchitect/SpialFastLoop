@@ -178,7 +178,7 @@ class NormalizationMetricsCollector:
     def merge(self, events: Iterable[NormalizationEvent]) -> None:
         try:
             iterator = iter(events)
-        except TypeError as exc:
+        except Exception as exc:
             raise ValueError("events must be an iterable of NormalizationEvent items") from exc
 
         validated_events: List[NormalizationEvent] = []

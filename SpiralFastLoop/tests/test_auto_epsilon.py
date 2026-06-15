@@ -17,6 +17,11 @@ class _FailingIterable:
         raise RuntimeError("iteration failed")
 
 
+class _BrokenIterable:
+    def __iter__(self):
+        raise RuntimeError("iterator creation failed")
+
+
 def _generate_residuals(seed: int = 7, total: int = 400) -> list[float]:
     rng = random.Random(seed)
     samples: list[float] = []
@@ -42,6 +47,7 @@ def _generate_residuals(seed: int = 7, total: int = 400) -> list[float]:
         ({"bounds": {1e-6: 0.1, 0.2: 0.3}}, "bounds"),
         ({"bounds": (0.1,)}, "bounds"),
         ({"bounds": _FailingIterable()}, "bounds"),
+        ({"bounds": _BrokenIterable()}, "bounds"),
         ({"bounds": (True, 0.2)}, "bounds"),
         ({"bounds": ("0.1", 0.2)}, "bounds"),
         ({"bounds": (float("nan"), 0.2)}, "bounds"),
@@ -111,6 +117,8 @@ def test_auto_epsilon_rejects_invalid_evaluation_inputs() -> None:
         optimiser.evaluate(residuals={0.1: "ignored"})  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="residuals"):
         optimiser.evaluate(residuals=_FailingIterable())  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="residuals"):
+        optimiser.evaluate(residuals=_BrokenIterable())  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="objective"):
         optimiser.evaluate(residuals=[sys.float_info.max, sys.float_info.max])
 
