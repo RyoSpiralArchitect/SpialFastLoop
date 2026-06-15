@@ -21,6 +21,7 @@ from scripts.bench_parallel_transactions import (
     _best_finite_row,
     _format_count,
     _format_metric_value,
+    _format_profile_breakdown_child_timing,
     _format_profile_breakdown_summary,
     _format_profile_event_timing,
     _format_profile_model_hook_summary,
@@ -1672,6 +1673,26 @@ def test_format_profile_breakdown_summary_omits_malformed_values() -> None:
     assert _format_profile_breakdown_summary(profile, "loss") == ""
 
 
+def test_format_profile_breakdown_child_timing_includes_avg_and_p95() -> None:
+    formatted = _format_profile_breakdown_child_timing({
+        "pct_of_parent": 42.5,
+        "avg_ms": 1.25,
+        "p95_ms": 2.5,
+    })
+
+    assert formatted == "42.5% avg=1.25ms p95=2.50ms"
+
+
+def test_format_profile_breakdown_child_timing_omits_malformed_avg_and_p95() -> None:
+    formatted = _format_profile_breakdown_child_timing({
+        "pct_of_parent": "slow",
+        "avg_ms": -1.0,
+        "p95_ms": True,
+    })
+
+    assert formatted == "n/a"
+
+
 def test_format_profile_event_timing_includes_parent_position() -> None:
     assert _format_profile_event_timing({
         "avg_ms": 4.25,
@@ -1682,6 +1703,18 @@ def test_format_profile_event_timing_includes_parent_position() -> None:
         "avg_ms": "slow",
         "avg_pct_of_parent": 42.5,
     }) == "n/a"
+
+
+def test_format_profile_event_timing_can_include_p95() -> None:
+    assert _format_profile_event_timing({
+        "avg_ms": 4.25,
+        "avg_pct_of_parent": 42.5,
+        "p95_ms": 6.5,
+    }, include_p95=True) == "4.2ms@42.5% p95=6.5ms"
+    assert _format_profile_event_timing({
+        "avg_ms": 4.25,
+        "p95_ms": 6.5,
+    }, include_p95=True) == "4.2ms p95=6.5ms"
 
 
 def test_format_profile_phase_timing_includes_tail_latency() -> None:
@@ -2042,6 +2075,31 @@ def test_main_prints_backward_event_parent_position(
                             "std_ms": 0.25,
                         },
                     ],
+                    "phase_breakdowns": {
+                        "forward": {
+                            "tracked_s": 0.07,
+                            "untracked_s": 0.03,
+                            "top_children": [
+                                {
+                                    "name": "model.0",
+                                    "pct_of_parent": 70.0,
+                                    "avg_ms": 1.25,
+                                    "p95_ms": 2.5,
+                                },
+                            ],
+                        },
+                        "optimizer": {
+                            "tracked_s": 0.04,
+                            "top_children": [
+                                {
+                                    "name": "optimizer.step",
+                                    "pct_of_parent": 80.0,
+                                    "avg_ms": 3.25,
+                                    "p95_ms": 4.5,
+                                },
+                            ],
+                        },
+                    },
                     "phase_events": {
                         "backward_grad_ready": {
                             "top_children": [
@@ -2049,6 +2107,7 @@ def test_main_prints_backward_event_parent_position(
                                     "name": "model.0",
                                     "avg_ms": 3.5,
                                     "avg_pct_of_parent": 35.0,
+                                    "p95_ms": 4.5,
                                 },
                                 {"name": "model.2", "avg_ms": 1.2},
                             ],
@@ -2066,7 +2125,9 @@ def test_main_prints_backward_event_parent_position(
 
     output = capsys.readouterr().out
     assert "phases: forward=42.5% avg=1.25ms p95=2.50ms p99=3.50ms std=0.25ms" in output
-    assert "backward_grad_ready: model.0=3.5ms@35.0%, model.2=1.2ms" in output
+    assert "forward: model.0=70.0% avg=1.25ms p95=2.50ms" in output
+    assert "backward_grad_ready: model.0=3.5ms@35.0% p95=4.5ms, model.2=1.2ms" in output
+    assert "optimizer: optimizer.step=80.0% avg=3.25ms p95=4.50ms" in output
 
 
 def test_transaction_benchmark_records_run_seed() -> None:

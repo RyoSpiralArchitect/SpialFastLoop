@@ -1103,7 +1103,12 @@ def _profile_child_rows(profile: dict[str, Any], section: str, group: str) -> li
     return _list_value(group_profile.get("top_children"))
 
 
-def _format_profile_event_timing(row: dict[str, Any], *, precision: int = 1) -> str:
+def _format_profile_event_timing(
+    row: dict[str, Any],
+    *,
+    precision: int = 1,
+    include_p95: bool = False,
+) -> str:
     avg_text = _format_metric_value(row.get("avg_ms"), precision=precision, suffix="ms")
     if avg_text == "n/a":
         return avg_text
@@ -1113,8 +1118,29 @@ def _format_profile_event_timing(row: dict[str, Any], *, precision: int = 1) -> 
         suffix="%",
     )
     if pct_text is None:
-        return avg_text
-    return f"{avg_text}@{pct_text}"
+        parts = [avg_text]
+    else:
+        parts = [f"{avg_text}@{pct_text}"]
+    if include_p95:
+        p95_text = _format_non_negative_metric_value(
+            row.get("p95_ms"),
+            precision=precision,
+            suffix="ms",
+        )
+        if p95_text is not None:
+            parts.append(f"p95={p95_text}")
+    return " ".join(parts)
+
+
+def _format_profile_breakdown_child_timing(row: dict[str, Any]) -> str:
+    parts = [_format_metric_value(row.get("pct_of_parent"), precision=1, suffix="%")]
+    avg_text = _format_non_negative_metric_value(row.get("avg_ms"), precision=2, suffix="ms")
+    if avg_text is not None:
+        parts.append(f"avg={avg_text}")
+    p95_text = _format_non_negative_metric_value(row.get("p95_ms"), precision=2, suffix="ms")
+    if p95_text is not None:
+        parts.append(f"p95={p95_text}")
+    return " ".join(parts)
 
 
 def _format_profile_phase_timing(row: dict[str, Any]) -> str:
@@ -1503,7 +1529,7 @@ def main() -> None:
                 forward_summary = _format_profile_breakdown_summary(profile, "forward")
                 top_forward = ", ".join(
                     f"{_profile_row_name(row)}="
-                    f"{_format_metric_value(row.get('pct_of_parent'), precision=1, suffix='%')}"
+                    f"{_format_profile_breakdown_child_timing(row)}"
                     for row in forward[:4]
                     if isinstance(row, dict)
                 )
@@ -1512,7 +1538,8 @@ def main() -> None:
             backward = _profile_child_rows(profile, "phase_events", "backward_grad_ready")
             if backward:
                 top_backward = ", ".join(
-                    f"{_profile_row_name(row)}={_format_profile_event_timing(row)}"
+                    f"{_profile_row_name(row)}="
+                    f"{_format_profile_event_timing(row, include_p95=True)}"
                     for row in backward[:4]
                     if isinstance(row, dict)
                 )
@@ -1522,7 +1549,7 @@ def main() -> None:
                 optimizer_summary = _format_profile_breakdown_summary(profile, "optimizer")
                 top_optimizer = ", ".join(
                     f"{_profile_row_name(row)}="
-                    f"{_format_metric_value(row.get('pct_of_parent'), precision=1, suffix='%')}"
+                    f"{_format_profile_breakdown_child_timing(row)}"
                     for row in optimizer[:4]
                     if isinstance(row, dict)
                 )

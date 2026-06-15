@@ -74,7 +74,8 @@ backward gradient-ready fields such as `profile_backward_grad_ready_top_avg_ms` 
 `profile_backward_grad_ready_top_pct`. Optimizer drilldowns are available under
 `phase_breakdowns.optimizer` and flattened as `profile_optimizer_top_avg_ms`,
 `profile_optimizer_top_pct_of_parent`, `profile_optimizer_top_p95_ms`, and
-related tracked/untracked fields.
+related tracked/untracked fields. Benchmark console drilldown lines include
+top-child `avg` and `p95` timings when distribution tracking is enabled.
 The top-level phases include `data_wait`, so loader stalls can be separated from
 compute time, and their distribution windows are flattened as fields like
 `profile_forward_p95_ms`, `profile_forward_p99_ms`, and
