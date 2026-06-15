@@ -27,11 +27,11 @@ __all__ = ["MetricsLogger", "default_logger"]
 _RESERVED_PAYLOAD_KEYS = frozenset({"timestamp", "stage", "mode", "step", "epoch"})
 
 
-def _json_safe_metric_value(value: Any) -> Any:
+def _json_safe_metric_value(value: Any, path: str = "metrics") -> Any:
     if isinstance(value, torch.Tensor):
         if value.numel() == 1:
-            return _json_safe_metric_value(value.detach().cpu().item())
-        return _json_safe_metric_value(value.detach().cpu().tolist())
+            return _json_safe_metric_value(value.detach().cpu().item(), path)
+        return _json_safe_metric_value(value.detach().cpu().tolist(), path)
     if value is None or isinstance(value, (str, bool, int)):
         return value
     if isinstance(value, float):
@@ -39,13 +39,13 @@ def _json_safe_metric_value(value: Any) -> Any:
     if isinstance(value, os.PathLike):
         return os.fspath(value)
     if isinstance(value, Mapping):
-        return {_json_safe_metric_key(key): _json_safe_metric_value(item) for key, item in value.items()}
+        return _normalize_metric_mapping(value, path=path)
     if isinstance(value, (list, tuple)):
-        return [_json_safe_metric_value(item) for item in value]
+        return [_json_safe_metric_value(item, f"{path}[]") for item in value]
     if isinstance(value, (set, frozenset)):
-        return [_json_safe_metric_value(item) for item in sorted(value, key=repr)]
+        return [_json_safe_metric_value(item, f"{path}[]") for item in sorted(value, key=repr)]
     try:
-        return _json_safe_metric_value(float(value))
+        return _json_safe_metric_value(float(value), path)
     except (TypeError, ValueError):
         return str(value)
 
@@ -65,32 +65,45 @@ def _normalize_metric_value(value: Any) -> Any:
     return _json_safe_metric_value(value)
 
 
-def _normalize_metric_payload(metrics: Mapping[Any, Any]) -> Dict[str, Any]:
+def _normalize_metric_mapping(
+    metrics: Mapping[Any, Any],
+    *,
+    path: str,
+    reserved_key_set: frozenset[str] = frozenset(),
+) -> Dict[str, Any]:
     normalized: Dict[str, Any] = {}
     blank_keys = 0
-    reserved_keys: list[str] = []
+    reserved_found: list[str] = []
     duplicate_keys: list[str] = []
     for key, value in metrics.items():
         normalized_key = _json_safe_metric_key(key)
         if not normalized_key.strip():
             blank_keys += 1
             continue
-        if normalized_key in _RESERVED_PAYLOAD_KEYS:
-            reserved_keys.append(normalized_key)
+        if normalized_key in reserved_key_set:
+            reserved_found.append(normalized_key)
             continue
         if normalized_key in normalized:
             duplicate_keys.append(normalized_key)
             continue
-        normalized[normalized_key] = _normalize_metric_value(value)
+        normalized[normalized_key] = _json_safe_metric_value(value, f"{path}.{normalized_key}")
     if blank_keys:
-        raise ValueError("metrics keys must be non-empty after normalization")
-    if reserved_keys:
-        names = ", ".join(sorted(set(reserved_keys)))
+        raise ValueError(f"metrics keys must be non-empty after normalization at {path}")
+    if reserved_found:
+        names = ", ".join(sorted(set(reserved_found)))
         raise ValueError(f"metrics must not contain reserved payload keys: {names}")
     if duplicate_keys:
         names = ", ".join(sorted(set(duplicate_keys)))
-        raise ValueError(f"metrics keys must be unique after normalization: {names}")
+        raise ValueError(f"metrics keys must be unique after normalization at {path}: {names}")
     return normalized
+
+
+def _normalize_metric_payload(metrics: Mapping[Any, Any]) -> Dict[str, Any]:
+    return _normalize_metric_mapping(
+        metrics,
+        path="metrics",
+        reserved_key_set=_RESERVED_PAYLOAD_KEYS,
+    )
 
 
 def _csv_header_fields(header: list[str], path: str) -> list[str]:

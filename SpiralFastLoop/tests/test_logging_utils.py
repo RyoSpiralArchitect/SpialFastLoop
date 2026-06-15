@@ -177,6 +177,30 @@ def test_metrics_logger_rejects_blank_metric_keys_without_writing(
     assert not csv_path.exists()
 
 
+@pytest.mark.parametrize(
+    ("metrics", "match"),
+    [
+        ({"nested": {1: "int", "1": "str"}}, "unique after normalization at metrics.nested"),
+        ({"nested": {"": 1.0}}, "non-empty after normalization at metrics.nested"),
+        ({"items": [{1: "int", "1": "str"}]}, "unique after normalization at metrics.items"),
+    ],
+)
+def test_metrics_logger_rejects_nested_metric_key_collisions_without_writing(
+    tmp_path,
+    metrics: dict[str, object],
+    match: str,
+) -> None:
+    jsonl_path = tmp_path / "metrics.jsonl"
+    csv_path = tmp_path / "metrics.csv"
+    metrics_logger = MetricsLogger(logger=None, jsonl_path=jsonl_path, csv_path=csv_path)
+
+    with pytest.raises(ValueError, match=match):
+        metrics_logger.log_metrics("train", metrics)
+
+    assert not jsonl_path.exists()
+    assert not csv_path.exists()
+
+
 @pytest.mark.parametrize("step", [-1, 1.5, "2", True])
 def test_metrics_logger_rejects_invalid_step_values(step: object) -> None:
     logger = logging.getLogger("spiralfastloop.test.invalid_step")
