@@ -149,7 +149,7 @@ when CIFAR-10 should be fetched explicitly.
 ## Transactional Benchmark
 
 ```bash
-python scripts/bench_parallel_transactions.py \
+python3 scripts/bench_parallel_transactions.py \
   --device mps --steps 40 --runs 1 --workers 2 \
   --dataset-mode materialized \
   --warmup-steps 4 --no-compile \
@@ -160,23 +160,24 @@ python scripts/bench_parallel_transactions.py \
 ```
 
 The transactional benchmark reports training-only `wall_time_s`, separate
-`setup_time_s`, combined `end_to_end_wall_time_s`, and
+`setup_time_s`, combined `end_to_end_wall_time_s`, and an `init(...)`
+breakdown for dataset, loader, model, and compile setup. It also records
 `dataset_materialized_bytes` so materialized-data runs remain transparent.
-Use `--summary-out` to capture mean/min/max/stddev timing and throughput
-stats across repeated runs.
+Use `--summary-out` to capture mean/min/max/stddev timing, setup, throughput,
+and run-context stats across repeated runs.
 
 ```bash
-python scripts/bench_matrix.py \
+python3 scripts/bench_matrix.py \
   --device cpu --steps 16 --runs 1 --worker-counts 0 \
   --dataset-modes generated,materialized \
   --compile-modes no-compile \
   --json-out reports/bench_matrix.json \
   --summary-out reports/bench_matrix_summary.json
 ```
-Matrix summaries include per-config means, min/max values, stddev, best steady
-throughput, and best end-to-end configuration. Profile summaries preserve phase
-fields such as `user_metrics`, `postprocess`, and `collect_output` when a run
-emits them.
+Matrix summaries include per-config means, min/max values, stddev, setup
+breakdowns, best steady throughput, and best end-to-end configuration. Profile
+summaries preserve phase fields such as `user_metrics`, `postprocess`, and
+`collect_output` when a run emits them.
 
 ## License
 
