@@ -1488,6 +1488,29 @@ def _format_count(raw: object) -> str:
         return "n/a"
 
 
+def _format_profile_bottleneck_severity_counts(summary: dict[str, Any]) -> str:
+    counts = summary.get("profile_bottleneck_severity_counts")
+    if not isinstance(counts, dict):
+        return ""
+
+    parts = []
+    seen: set[str] = set()
+    for severity, _threshold in PROFILE_BOTTLENECK_SEVERITY_LEVELS:
+        count = _display_count_value(counts.get(severity))
+        if count is not None and count > 0:
+            parts.append(f"{severity}={count}")
+            seen.add(severity)
+
+    for severity in sorted(key for key in counts if isinstance(key, str) and key not in seen):
+        count = _display_count_value(counts.get(severity))
+        if count is not None and count > 0:
+            parts.append(f"{severity}={count}")
+
+    if not parts:
+        return ""
+    return f"severity_counts({','.join(parts)})"
+
+
 def _format_profile_bottleneck_summary(summary: dict[str, Any]) -> str:
     top_candidate = _dict_value(summary.get("profile_bottleneck_top_candidate"))
     name = top_candidate.get("name")
@@ -1506,6 +1529,9 @@ def _format_profile_bottleneck_summary(summary: dict[str, Any]) -> str:
     next_step = top_candidate.get("next_step")
     if isinstance(next_step, str) and next_step:
         parts.append(f"next={next_step}")
+    severity_counts = _format_profile_bottleneck_severity_counts(summary)
+    if severity_counts:
+        parts.append(severity_counts)
 
     category_summary = summary.get("profile_bottleneck_category_summary")
     category_parts = []
@@ -1518,7 +1544,11 @@ def _format_profile_bottleneck_summary(summary: dict[str, Any]) -> str:
             if not isinstance(top_name, str) or not top_name or max_score is None or count is None:
                 continue
             entry_suffix = "%" if entry.get("score_unit") == "profile_pct" else ""
-            category_parts.append(f"{category_name}:{top_name}={max_score:.1f}{entry_suffix}/{count}")
+            top_severity = entry.get("top_severity")
+            severity_suffix = f"[{top_severity}]" if isinstance(top_severity, str) and top_severity else ""
+            category_parts.append(
+                f"{category_name}:{top_name}={max_score:.1f}{entry_suffix}{severity_suffix}/{count}"
+            )
     if category_parts:
         parts.append(f"categories={','.join(category_parts)}")
     return " ".join(parts)

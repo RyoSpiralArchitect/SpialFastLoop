@@ -18,6 +18,7 @@ from bench_parallel_transactions import (
     _best_finite_row,
     _finite_summary_value,
     _format_metric_value,
+    _format_profile_bottleneck_severity_counts,
     _format_profile_model_hook_summary,
     _format_scheduler_summary,
     _format_setup_breakdown,
@@ -304,7 +305,9 @@ def _format_bottleneck_pressure(row: dict) -> str:
         if not isinstance(top_candidate, str) or not top_candidate or score is None or score < 0.0:
             continue
         suffix = "%" if entry.get("score_unit") == "profile_pct" else ""
-        parts.append(f"{category_name}:{top_candidate}={score:.1f}{suffix}")
+        top_severity = entry.get("top_severity")
+        severity_suffix = f"[{top_severity}]" if isinstance(top_severity, str) and top_severity else ""
+        parts.append(f"{category_name}:{top_candidate}={score:.1f}{suffix}{severity_suffix}")
     if not parts:
         return ""
     return f"pressure({','.join(parts)})"
@@ -431,6 +434,9 @@ def _format_summary_row(row: dict) -> str:
     bottleneck_pressure = _format_bottleneck_pressure(row)
     if bottleneck_pressure:
         profile_parts.append(bottleneck_pressure)
+    bottleneck_severity_counts = _format_profile_bottleneck_severity_counts(row)
+    if bottleneck_severity_counts:
+        profile_parts.append(bottleneck_severity_counts)
     scheduler_failures = _measured_summary_value(row, "mean_scheduler_step_failures")
     if scheduler_failures is not None and scheduler_failures > 0.0:
         profile_parts.append(f"scheduler(failures={scheduler_failures:.1f})")

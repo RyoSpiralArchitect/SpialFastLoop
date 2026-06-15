@@ -355,6 +355,10 @@ def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
             "category": "phase_share",
             "severity": "high",
         },
+        "profile_bottleneck_severity_counts": {
+            "high": 2,
+            "medium": 1,
+        },
         "profile_bottleneck_category_summary": {
             "child_hotspot": {
                 "count": 1,
@@ -378,7 +382,11 @@ def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
     formatted = _format_summary_row(row)
 
     assert "hotspot=forward_phase:55.0%(phase_share,high)" in formatted
-    assert "pressure(child_hotspot:forward_top_child=35.0%,phase_share:forward_phase=55.0%)" in formatted
+    assert (
+        "pressure(child_hotspot:forward_top_child=35.0%[high],"
+        "phase_share:forward_phase=55.0%[high])"
+    ) in formatted
+    assert "severity_counts(high=2,medium=1)" in formatted
 
 
 def test_format_summary_row_includes_scheduler_failures_when_positive() -> None:

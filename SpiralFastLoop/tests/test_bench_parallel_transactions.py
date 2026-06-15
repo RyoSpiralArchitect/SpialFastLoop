@@ -2612,9 +2612,10 @@ def test_main_prints_backward_event_parent_position(
         "next=inspect forward top-child and tail metrics"
     ) in output
     assert (
-        "categories=child_hotspot:forward_top_child=29.8%/1,"
-        "phase_share:forward_phase=42.5%/3,"
-        "readiness_span:backward_readiness_span=6.9%/1"
+        "severity_counts(high=3,medium=1,low=1) "
+        "categories=child_hotspot:forward_top_child=29.8%[high]/1,"
+        "phase_share:forward_phase=42.5%[high]/3,"
+        "readiness_span:backward_readiness_span=6.9%[low]/1"
     ) in output
 
 
