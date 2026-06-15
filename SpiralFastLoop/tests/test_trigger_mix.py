@@ -91,6 +91,27 @@ def test_hard_sample_buffer_rejects_invalid_loss_vectors(
     assert len(buffer) == 0
 
 
+@pytest.mark.parametrize(
+    ("inputs", "targets"),
+    [
+        ([], torch.arange(3)),
+        (torch.arange(6, dtype=torch.float32).reshape(3, 2), []),
+        (torch.arange(6, dtype=torch.float32).reshape(3, 2), torch.arange(2)),
+    ],
+)
+def test_hard_sample_buffer_rejects_misaligned_batch_structures_without_mutating(
+    inputs: object,
+    targets: object,
+) -> None:
+    buffer = HardSampleBuffer(max_samples=8)
+    losses = torch.tensor([3.0, 2.0, 1.0])
+
+    with pytest.raises(ValueError, match="inputs and targets"):
+        buffer.add_batch(inputs, targets, losses)
+
+    assert len(buffer) == 0
+
+
 @pytest.mark.parametrize("num_samples", [0, -1, 1.5, "2", True])
 def test_hard_sample_buffer_rejects_invalid_sample_request(num_samples: object) -> None:
     buffer = HardSampleBuffer(max_samples=8)

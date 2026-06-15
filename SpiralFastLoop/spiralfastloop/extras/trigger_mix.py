@@ -73,6 +73,8 @@ def _select_indices(batch: Any, indices: Sequence[int]) -> Any:
         return {k: _select_indices(v, indices) for k, v in batch.items()}
     if isinstance(batch, (list, tuple)):
         if len(batch) == 0:
+            if len(indices) > 0:
+                raise ValueError("batch sequence must not be empty when selecting samples.")
             return batch
         if isinstance(batch[0], torch.Tensor):
             selected = [_select_indices(v, indices) for v in batch]
@@ -166,12 +168,18 @@ class HardSampleBuffer:
         requested_top_k = _optional_positive_int_setting(top_k, "top_k")
         k = batch_size if requested_top_k is None else min(batch_size, requested_top_k)
         _, indices = torch.topk(loss_vec, k=k, largest=True)
-        selected_inputs = _select_indices(inputs, indices.tolist())
-        selected_targets = _select_indices(targets, indices.tolist())
-        cpu_inputs = _detach_to_cpu(selected_inputs)
-        cpu_targets = _detach_to_cpu(selected_targets)
-        input_samples = _split_batch(cpu_inputs, k)
-        target_samples = _split_batch(cpu_targets, k)
+        try:
+            selected_indices = indices.tolist()
+            selected_inputs = _select_indices(inputs, selected_indices)
+            selected_targets = _select_indices(targets, selected_indices)
+            cpu_inputs = _detach_to_cpu(selected_inputs)
+            cpu_targets = _detach_to_cpu(selected_targets)
+            input_samples = _split_batch(cpu_inputs, k)
+            target_samples = _split_batch(cpu_targets, k)
+        except Exception as exc:
+            raise ValueError("inputs and targets must match loss_vec batch dimension") from exc
+        if len(input_samples) != k or len(target_samples) != k:
+            raise ValueError("inputs and targets must match loss_vec batch dimension")
         for item_in, item_tgt in zip(input_samples, target_samples):
             self._inputs.append(item_in)
             self._targets.append(item_tgt)
