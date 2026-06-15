@@ -365,7 +365,7 @@ def test_phase_profiler_stop_preserves_body_exception_on_invalid_elapsed(
         finally:
             profiler.stop("forward")
 
-    assert profiler._starts == {"forward": 2.0}
+    assert profiler._starts == {}
     assert profiler.summary() == profile_before
 
 
@@ -385,7 +385,7 @@ def test_phase_profiler_stop_detail_preserves_body_exception_on_invalid_elapsed(
         finally:
             profiler.stop_detail("forward", "model.0")
 
-    assert profiler._detail_starts == {("forward", "model.0"): [2.0]}
+    assert profiler._detail_starts == {}
     assert profiler.summary() == profile_before
 
 

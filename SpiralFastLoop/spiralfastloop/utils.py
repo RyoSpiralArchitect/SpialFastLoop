@@ -1023,6 +1023,7 @@ class PhaseProfiler:
         except ValueError:
             if not exception_active:
                 raise
+            self._starts.pop(key, None)
             return
         self._starts.pop(key, None)
 
@@ -1058,6 +1059,9 @@ class PhaseProfiler:
         except ValueError:
             if not exception_active:
                 raise
+            starts.pop()
+            if not starts:
+                self._detail_starts.pop(key, None)
             return
         starts.pop()
         if not starts:
