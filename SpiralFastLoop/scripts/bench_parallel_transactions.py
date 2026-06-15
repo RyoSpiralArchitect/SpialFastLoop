@@ -297,6 +297,9 @@ def _compact_run(row: dict) -> dict:
             numeric_value = _finite_summary_value(value)
             if numeric_value is None or numeric_value < 0.0:
                 continue
+            max_value = _summary_metric_max_value(field)
+            if max_value is not None and numeric_value > max_value:
+                continue
         compact[field] = value
     return compact
 
@@ -310,6 +313,10 @@ def _finite_metric_value(row: dict, field: str, *, min_value: Optional[float] = 
     if min_value is not None and value < min_value:
         return None
     return value
+
+
+def _summary_metric_max_value(field: str) -> Optional[float]:
+    return 100.0 if field.endswith("_pct") else None
 
 
 def _best_finite_row(
@@ -361,6 +368,7 @@ def summarize_metric(
     *,
     missing_as_zero: bool = True,
     min_value: Optional[float] = 0.0,
+    max_value: Optional[float] = None,
 ) -> dict[str, float]:
     values = []
     sample_count = 0
@@ -374,6 +382,9 @@ def summarize_metric(
                 non_finite_count += 1
                 continue
             if min_value is not None and value < min_value:
+                invalid_count += 1
+                continue
+            if max_value is not None and value > max_value:
                 invalid_count += 1
                 continue
             values.append(value)
@@ -428,6 +439,7 @@ def summarize_results(rows: list[dict]) -> dict:
             summary_rows,
             field,
             missing_as_zero=missing_as_zero,
+            max_value=_summary_metric_max_value(field),
         ).items():
             summary[f"{stat_name}_{field}"] = value
 

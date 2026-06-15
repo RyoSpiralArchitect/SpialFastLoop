@@ -196,6 +196,13 @@ def test_measured_summary_value_rejects_negative_values() -> None:
     ) is None
 
 
+def test_measured_summary_value_rejects_out_of_range_percentages() -> None:
+    assert _measured_summary_value(
+        {"mean_profile_forward_backward_pct": 125.0},
+        "mean_profile_forward_backward_pct",
+    ) is None
+
+
 def test_format_summary_row_keeps_zero_when_it_was_measured() -> None:
     row = {
         "dataset_mode": "generated",
@@ -254,6 +261,23 @@ def test_format_summary_row_includes_only_measured_profile_parts() -> None:
     assert "fwd+bwd=62.5%" in formatted
     assert "loss=" not in formatted
     assert "opt=12.0%" in formatted
+
+
+def test_format_summary_row_omits_out_of_range_profile_parts() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_forward_backward_pct": 125.0,
+        "mean_profile_loss_pct": 8.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "fwd+bwd" not in formatted
+    assert "loss=8.0%" in formatted
 
 
 def test_format_run_row_uses_reported_and_e2e_metrics() -> None:
@@ -684,6 +708,51 @@ def test_summarize_rows_skips_groups_with_negative_best_rank_values() -> None:
     assert generated["invalid_count_end_to_end_wall_time_s"] == pytest.approx(1.0)
     assert summary["best_reported"]["dataset_mode"] == "materialized"
     assert summary["best_end_to_end"]["dataset_mode"] == "materialized"
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_rows_skips_out_of_range_profile_percentages() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+            "profile_forward_backward_pct": 125.0,
+            "profile_loss_pct": -1.0,
+            "profile_backward_pct": 40.0,
+        },
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 120.0,
+            "samples_per_sec": 95.0,
+            "steady_samples_per_sec": 120.0,
+            "end_to_end_wall_time_s": 0.9,
+            "setup_time_s": 0.20,
+            "wall_time_s": 0.70,
+            "dataset_materialized_bytes": 0,
+            "profile_forward_backward_pct": 60.0,
+            "profile_loss_pct": 8.0,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert group["mean_profile_forward_backward_pct"] == pytest.approx(60.0)
+    assert group["sample_count_profile_forward_backward_pct"] == pytest.approx(1.0)
+    assert group["invalid_count_profile_forward_backward_pct"] == pytest.approx(1.0)
+    assert group["mean_profile_loss_pct"] == pytest.approx(8.0)
+    assert group["invalid_count_profile_loss_pct"] == pytest.approx(1.0)
+    assert group["mean_profile_backward_pct"] == pytest.approx(40.0)
     json.dumps(summary, allow_nan=False)
 
 

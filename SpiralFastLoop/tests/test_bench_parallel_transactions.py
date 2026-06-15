@@ -229,6 +229,19 @@ def test_summarize_metric_skips_negative_values() -> None:
     assert "non_finite_count" not in stats
 
 
+def test_summarize_metric_skips_values_above_maximum() -> None:
+    rows = [
+        {"profile_forward_pct": 40.0},
+        {"profile_forward_pct": 140.0},
+    ]
+
+    stats = summarize_metric(rows, "profile_forward_pct", max_value=100.0)
+
+    assert stats["mean"] == pytest.approx(40.0)
+    assert stats["sample_count"] == pytest.approx(1.0)
+    assert stats["invalid_count"] == pytest.approx(1.0)
+
+
 def test_summarize_metric_skips_bool_values() -> None:
     rows = [
         {"samples_per_sec": 100.0},
@@ -794,6 +807,51 @@ def test_summarize_results_skips_negative_best_rank_values() -> None:
     json.dumps(summary, allow_nan=False)
 
 
+def test_summarize_results_skips_out_of_range_percentages() -> None:
+    rows = [
+        {
+            "run": 0,
+            "seed": 10,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 300.0,
+            "samples_per_sec": 280.0,
+            "steady_samples_per_sec": 300.0,
+            "wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "end_to_end_wall_time_s": 1.25,
+            "profile_forward_backward_pct": 125.0,
+            "profile_loss_pct": -1.0,
+            "profile_backward_pct": 60.0,
+        },
+        {
+            "run": 1,
+            "seed": 11,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 200.0,
+            "samples_per_sec": 180.0,
+            "steady_samples_per_sec": 200.0,
+            "wall_time_s": 0.9,
+            "setup_time_s": 0.20,
+            "end_to_end_wall_time_s": 1.10,
+            "profile_forward_backward_pct": 50.0,
+            "profile_loss_pct": 8.0,
+        },
+    ]
+
+    summary = summarize_results(rows)
+
+    assert summary["mean_profile_forward_backward_pct"] == pytest.approx(50.0)
+    assert summary["sample_count_profile_forward_backward_pct"] == pytest.approx(1.0)
+    assert summary["invalid_count_profile_forward_backward_pct"] == pytest.approx(1.0)
+    assert summary["mean_profile_loss_pct"] == pytest.approx(8.0)
+    assert summary["invalid_count_profile_loss_pct"] == pytest.approx(1.0)
+    assert summary["best_reported"]["run"] == 0
+    assert "profile_forward_backward_pct" not in summary["best_reported"]
+    assert "profile_loss_pct" not in summary["best_reported"]
+    assert summary["best_reported"]["profile_backward_pct"] == pytest.approx(60.0)
+    json.dumps(summary, allow_nan=False)
+
+
 def test_summarize_results_omits_non_finite_best_run_fields() -> None:
     rows = [
         {
@@ -853,6 +911,7 @@ def test_summarize_results_omits_invalid_best_run_identity_and_counts() -> None:
             "samples": -12,
             "grad_accum": 0,
             "profile_flat_metric_invalid_count": -1.0,
+            "profile_forward_backward_pct": 125.0,
             "cuda_max_mem_bytes": 2048.5,
         },
     ]
@@ -870,6 +929,7 @@ def test_summarize_results_omits_invalid_best_run_identity_and_counts() -> None:
     assert "samples" not in best_reported
     assert "grad_accum" not in best_reported
     assert "profile_flat_metric_invalid_count" not in best_reported
+    assert "profile_forward_backward_pct" not in best_reported
     assert "cuda_max_mem_bytes" not in best_reported
     json.dumps(summary, allow_nan=False)
 

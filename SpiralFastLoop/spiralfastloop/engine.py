@@ -111,9 +111,18 @@ def _set_profile_metric(
     name: str,
     raw: Any,
     invalid_fields: list[str],
+    *,
+    min_value: Optional[float] = 0.0,
+    max_value: Optional[float] = None,
 ) -> Optional[float]:
     value = _finite_profile_value(raw)
     if value is None:
+        invalid_fields.append(name)
+        return None
+    if min_value is not None and value < min_value:
+        invalid_fields.append(name)
+        return None
+    if max_value is not None and value > max_value:
         invalid_fields.append(name)
         return None
     metrics[name] = value
@@ -154,6 +163,7 @@ def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, An
             f"profile_{phase_name}_pct",
             row.get("pct", 0.0),
             invalid_fields,
+            max_value=100.0,
         )
         _set_profile_metric(
             metrics,
@@ -171,7 +181,10 @@ def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, An
     if forward_backward_time_values > 0:
         metrics["profile_forward_backward_time_s"] = forward_backward_time_s
     if forward_backward_pct_values > 0:
-        metrics["profile_forward_backward_pct"] = forward_backward_pct
+        if forward_backward_pct <= 100.0:
+            metrics["profile_forward_backward_pct"] = forward_backward_pct
+        else:
+            invalid_fields.append("profile_forward_backward_pct")
     _record_profile_flat_metric_invalids(metrics, invalid_fields)
 
 

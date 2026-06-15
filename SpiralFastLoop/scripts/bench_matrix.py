@@ -17,6 +17,7 @@ from bench_parallel_transactions import (
     _finite_summary_value,
     _format_metric_value,
     _int_arg,
+    _summary_metric_max_value,
     count_profiled_rows,
     device_arg,
     non_negative_int_arg,
@@ -139,6 +140,7 @@ def summarize_rows(rows: list[dict]) -> dict:
                 group_rows,
                 field,
                 missing_as_zero=missing_as_zero,
+                max_value=_summary_metric_max_value(field),
             ).items():
                 summary[f"{stat_name}_{field}"] = value
         summaries.append(summary)
@@ -180,6 +182,9 @@ def _measured_summary_value(row: dict, mean_field: str) -> Optional[float]:
         return None
 
     metric_name = mean_field[len("mean_"):] if mean_field.startswith("mean_") else mean_field
+    max_value = _summary_metric_max_value(metric_name)
+    if max_value is not None and value > max_value:
+        return None
     sample_count_field = f"sample_count_{metric_name}"
     if sample_count_field in row:
         sample_count = _finite_summary_value(row[sample_count_field])

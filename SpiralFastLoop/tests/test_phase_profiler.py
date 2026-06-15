@@ -2393,6 +2393,59 @@ def test_profile_flat_metrics_skip_invalid_values() -> None:
     ]
 
 
+def test_profile_flat_metrics_skip_negative_and_out_of_range_values() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "profile_total_s": -1.0,
+        "phases": {
+            "forward": {"total_s": -0.1, "pct": 101.0, "avg_ms": -0.5},
+            "backward": {"total_s": 0.2, "pct": -5.0, "avg_ms": 0.7},
+            "optimizer": {"total_s": 0.1, "pct": 50.0, "avg_ms": 0.5},
+        },
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert "profile_total_s" not in metrics
+    assert "profile_forward_time_s" not in metrics
+    assert "profile_forward_pct" not in metrics
+    assert "profile_forward_avg_ms" not in metrics
+    assert metrics["profile_backward_time_s"] == pytest.approx(0.2)
+    assert "profile_backward_pct" not in metrics
+    assert metrics["profile_backward_avg_ms"] == pytest.approx(0.7)
+    assert metrics["profile_optimizer_pct"] == pytest.approx(50.0)
+    assert metrics["profile_forward_backward_time_s"] == pytest.approx(0.2)
+    assert "profile_forward_backward_pct" not in metrics
+    assert metrics["profile_flat_metric_invalid_count"] == 5
+    assert metrics["profile_flat_metric_invalid_fields"] == [
+        "profile_total_s",
+        "profile_forward_time_s",
+        "profile_forward_pct",
+        "profile_forward_avg_ms",
+        "profile_backward_pct",
+    ]
+
+
+def test_profile_flat_metrics_omit_combined_pct_above_100() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "profile_total_s": 1.0,
+        "phases": {
+            "forward": {"total_s": 0.4, "pct": 60.0, "avg_ms": 1.0},
+            "backward": {"total_s": 0.3, "pct": 50.0, "avg_ms": 2.0},
+        },
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert metrics["profile_forward_pct"] == pytest.approx(60.0)
+    assert metrics["profile_backward_pct"] == pytest.approx(50.0)
+    assert metrics["profile_forward_backward_time_s"] == pytest.approx(0.7)
+    assert "profile_forward_backward_pct" not in metrics
+    assert metrics["profile_flat_metric_invalid_count"] == 1
+    assert metrics["profile_flat_metric_invalid_fields"] == ["profile_forward_backward_pct"]
+
+
 def test_profile_flat_metrics_omit_combined_forward_backward_when_invalid() -> None:
     metrics: dict[str, object] = {}
     profile = {
