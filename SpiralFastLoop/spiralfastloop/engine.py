@@ -30,6 +30,7 @@ from .utils import (
     _positive_int_setting,
     autocast_ctx,
     dataloader_from_dataset,
+    distributed_max,
     distributed_sum,
     get_distributed_context,
     get_amp_policy,
@@ -450,6 +451,79 @@ def _add_batch_size_failure_metrics(metrics: Dict[str, Any], counts: Mapping[str
 
 def _distributed_sum_int(value: int, device: torch.device) -> int:
     return int(distributed_sum(torch.tensor(value, device=device)).item())
+
+
+def _distributed_metric_dtype(device: torch.device) -> torch.dtype:
+    return torch.float32 if device.type == "mps" else torch.float64
+
+
+def _distributed_sum_float(value: float, device: torch.device) -> float:
+    tensor = torch.tensor(value, device=device, dtype=_distributed_metric_dtype(device))
+    return float(distributed_sum(tensor).item())
+
+
+def _distributed_max_float(value: float, device: torch.device) -> float:
+    tensor = torch.tensor(value, device=device, dtype=_distributed_metric_dtype(device))
+    return float(distributed_max(tensor).item())
+
+
+def _non_negative_metric_value(raw: Any) -> float:
+    value = _finite_profile_value(raw)
+    if value is None or value < 0.0:
+        return 0.0
+    return value
+
+
+def _apply_distributed_throughput_metrics(
+    metrics: Dict[str, Any],
+    *,
+    samples: int,
+    batches: int,
+    device: torch.device,
+) -> None:
+    total_time_s = _distributed_max_float(
+        _non_negative_metric_value(metrics.get("total_time_s")),
+        device,
+    )
+    best_samples_per_sec = _distributed_sum_float(
+        _non_negative_metric_value(metrics.get("best_samples_per_sec")),
+        device,
+    )
+    window_samples = _distributed_sum_float(
+        _non_negative_metric_value(metrics.get("window_samples")),
+        device,
+    )
+    window_batches = _distributed_sum_float(
+        _non_negative_metric_value(metrics.get("window_batches")),
+        device,
+    )
+    window_time_s = _distributed_max_float(
+        _non_negative_metric_value(metrics.get("window_time_s")),
+        device,
+    )
+    ema_samples_per_sec = _distributed_sum_float(
+        _non_negative_metric_value(metrics.get("ema_samples_per_sec")),
+        device,
+    )
+
+    samples_per_sec = samples / total_time_s if total_time_s > 0.0 else 0.0
+    window_samples_per_sec = (
+        window_samples / window_time_s if window_time_s > 0.0 else 0.0
+    )
+    metrics["samples"] = float(samples)
+    metrics["batches"] = float(batches)
+    metrics["total_time_s"] = total_time_s
+    metrics["avg_batch_s"] = total_time_s / batches if batches > 0 else 0.0
+    metrics["samples_per_sec"] = samples_per_sec
+    metrics["best_samples_per_sec"] = best_samples_per_sec
+    metrics["headroom_ratio"] = (
+        best_samples_per_sec / samples_per_sec if samples_per_sec > 0.0 else 0.0
+    )
+    metrics["window_samples"] = window_samples
+    metrics["window_batches"] = window_batches
+    metrics["window_time_s"] = window_time_s
+    metrics["window_samples_per_sec"] = window_samples_per_sec
+    metrics["ema_samples_per_sec"] = ema_samples_per_sec
 
 
 def _try_infer_batch_size_with_reason(batch: Any) -> tuple[Optional[int], str]:
@@ -1564,6 +1638,7 @@ class FastTrainer:
 
         metrics: Dict[str, Any] = dict(meter.summary())
         metrics.update(_collect_device_memory_metrics(self.device))
+        counter_device = total_loss.device
         if self.dist_ctx.world_size > 1:
             total_loss = distributed_sum(total_loss)
             total_weight = distributed_sum(total_weight)
@@ -1571,7 +1646,6 @@ class FastTrainer:
             warmup_weight = distributed_sum(warmup_weight)
             steady_loss = distributed_sum(steady_loss)
             steady_weight = distributed_sum(steady_weight)
-            counter_device = total_loss.device
             total_items = _distributed_sum_int(total_items, counter_device)
             warmup_items = _distributed_sum_int(warmup_items, counter_device)
             steady_items = _distributed_sum_int(steady_items, counter_device)
@@ -1599,6 +1673,27 @@ class FastTrainer:
             metrics["steady_avg_loss"] = (steady_loss / steady_weight).item()
         else:
             metrics["steady_avg_loss"] = 0.0
+        warmup_summary = warmup_meter.summary()
+        steady_summary = steady_meter.summary()
+        if self.dist_ctx.world_size > 1:
+            _apply_distributed_throughput_metrics(
+                metrics,
+                samples=total_items,
+                batches=step_idx,
+                device=counter_device,
+            )
+            _apply_distributed_throughput_metrics(
+                warmup_summary,
+                samples=warmup_items,
+                batches=warmup_recorded_steps,
+                device=counter_device,
+            )
+            _apply_distributed_throughput_metrics(
+                steady_summary,
+                samples=steady_items,
+                batches=steady_recorded_steps,
+                device=counter_device,
+            )
         metrics["steps"] = step_idx
         metrics["batches"] = float(step_idx)
         metrics["optimizer_steps"] = optimizer_steps
@@ -1608,8 +1703,6 @@ class FastTrainer:
         metrics["scheduler_step_failures"] = scheduler_step_failures
         metrics["scheduler_last_error"] = scheduler_last_error
         metrics["samples"] = total_items
-        warmup_summary = warmup_meter.summary()
-        steady_summary = steady_meter.summary()
         for key, value in warmup_summary.items():
             metrics[f"warmup_{key}"] = value
         for key, value in steady_summary.items():
@@ -1772,6 +1865,13 @@ class FastTrainer:
             metrics["batch_size_inference_failures"] = batch_size_inference_failures
             _add_batch_size_failure_metrics(metrics, batch_size_failure_counts)
             metrics["samples"] = total_items
+            if not failed and self.dist_ctx.world_size > 1:
+                _apply_distributed_throughput_metrics(
+                    metrics,
+                    samples=total_items,
+                    batches=measured_steps,
+                    device=torch.device(self.device),
+                )
             metrics["reported_samples_per_sec"] = metrics["samples_per_sec"]
             metrics["device"] = self.device
             metrics["world_size"] = self.dist_ctx.world_size
@@ -2075,6 +2175,13 @@ class FastTrainer:
             metrics["batch_size_inference_failures"] = batch_size_inference_failures
             _add_batch_size_failure_metrics(metrics, batch_size_failure_counts)
             metrics["samples"] = total_items
+            if not failed and self.dist_ctx.world_size > 1:
+                _apply_distributed_throughput_metrics(
+                    metrics,
+                    samples=total_items,
+                    batches=measured_steps,
+                    device=torch.device(self.device),
+                )
             metrics["reported_samples_per_sec"] = metrics["samples_per_sec"]
             metrics["device"] = self.device
             metrics["world_size"] = self.dist_ctx.world_size

@@ -404,6 +404,14 @@ def distributed_sum(value: torch.Tensor) -> torch.Tensor:
     return tensor
 
 
+def distributed_max(value: torch.Tensor) -> torch.Tensor:
+    if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
+        return value
+    tensor = value.clone()
+    torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.MAX)
+    return tensor
+
+
 def distributed_mean(value: torch.Tensor) -> torch.Tensor:
     tensor = distributed_sum(value)
     ctx = get_distributed_context()

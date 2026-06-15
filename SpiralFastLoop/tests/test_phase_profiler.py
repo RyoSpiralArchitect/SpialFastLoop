@@ -1251,6 +1251,10 @@ def test_evaluate_distributed_summary_sums_metrics_fn_counts(
     assert metrics["samples"] == 4
     assert metrics["measured_steps"] == 2
     assert metrics["unmeasured_steps"] == 0
+    assert metrics["samples_per_sec"] == pytest.approx(
+        metrics["samples"] / metrics["total_time_s"]
+    )
+    assert metrics["reported_samples_per_sec"] == metrics["samples_per_sec"]
     assert metrics["metrics_fn_calls"] == 2
     assert metrics["metrics_fn_successes"] == 2
     assert metrics["metrics_fn_failures"] == 0
@@ -1303,6 +1307,9 @@ def test_train_distributed_summary_sums_workload_counters(
     assert metrics["steps"] == 4
     assert metrics["batches"] == pytest.approx(4.0)
     assert metrics["samples"] == 8
+    assert metrics["samples_per_sec"] == pytest.approx(
+        metrics["samples"] / metrics["total_time_s"]
+    )
     assert metrics["optimizer_steps"] == 2
     assert metrics["grad_accum"] == 2
     assert metrics["partial_optimizer_steps"] == 0
@@ -1311,10 +1318,17 @@ def test_train_distributed_summary_sums_workload_counters(
     assert metrics["warmup_steps"] == 2
     assert metrics["warmup_batches"] == pytest.approx(2.0)
     assert metrics["warmup_samples"] == 4
+    assert metrics["warmup_samples_per_sec"] == pytest.approx(
+        metrics["warmup_samples"] / metrics["warmup_total_time_s"]
+    )
     assert metrics["warmup_optimizer_steps"] == 0
     assert metrics["steady_steps"] == 2
     assert metrics["steady_batches"] == pytest.approx(2.0)
     assert metrics["steady_samples"] == 4
+    assert metrics["steady_samples_per_sec"] == pytest.approx(
+        metrics["steady_samples"] / metrics["steady_total_time_s"]
+    )
+    assert metrics["reported_samples_per_sec"] == metrics["steady_samples_per_sec"]
     assert metrics["steady_optimizer_steps"] == 2
     assert metrics["cold_start_steps"] == 2
 
@@ -1753,6 +1767,10 @@ def test_predict_distributed_summary_sums_counter_metrics(
     assert metrics["samples"] == 4
     assert metrics["measured_steps"] == 2
     assert metrics["unmeasured_steps"] == 0
+    assert metrics["samples_per_sec"] == pytest.approx(
+        metrics["samples"] / metrics["total_time_s"]
+    )
+    assert metrics["reported_samples_per_sec"] == metrics["samples_per_sec"]
     assert metrics["batch_size_inference_failures"] == 0
     assert metrics["postprocess_calls"] == 2
     assert metrics["postprocess_successes"] == 2
