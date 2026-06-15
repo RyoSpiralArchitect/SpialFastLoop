@@ -384,6 +384,7 @@ def test_format_run_row_uses_reported_and_e2e_metrics() -> None:
     assert "run=3" in row
     assert "steady=123.5/s" in row
     assert "e2e=1.23s" in row
+    assert "profile_model(" not in row
 
 
 def test_format_run_row_falls_back_to_total_metrics() -> None:
@@ -400,6 +401,26 @@ def test_format_run_row_falls_back_to_total_metrics() -> None:
 
     assert "steady=80.0/s" in row
     assert "e2e=2.00s" in row
+
+
+def test_format_run_row_includes_profile_model_hook_summary_when_requested() -> None:
+    row = _format_run_row(
+        "generated",
+        "no-compile",
+        0,
+        0,
+        {
+            "reported_samples_per_sec": 123.45,
+            "end_to_end_wall_time_s": 1.234,
+            "profile_model_requested": True,
+            "profile_model_status": "no_matching_modules",
+            "profile_model_modules_selected": 0,
+            "profile_model_hook_count": 0,
+            "profile_model_hook_failures": 0,
+        },
+    )
+
+    assert "profile_model(status=no_matching_modules modules=0 hooks=0 failures=0)" in row
 
 
 def test_format_run_row_marks_malformed_metrics_as_na() -> None:

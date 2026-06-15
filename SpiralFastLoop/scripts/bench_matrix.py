@@ -17,6 +17,7 @@ from bench_parallel_transactions import (
     _best_finite_row,
     _finite_summary_value,
     _format_metric_value,
+    _format_profile_model_hook_summary,
     _int_arg,
     _positive_sample_count_value,
     _summary_metric_max_value,
@@ -262,11 +263,14 @@ def _format_run_row(dataset_mode: str, compile_mode: str, workers: int, run_inde
         precision=2,
         suffix="s",
     )
+    profile_model_summary = _format_profile_model_hook_summary(result)
+    profile_suffix = f" profile_model({profile_model_summary})" if profile_model_summary else ""
     return (
         f"{dataset_mode:>12} {compile_mode:>10} workers={workers:<2} "
         f"run={run_index:<2} "
         f"steady={steady_text} "
         f"e2e={e2e_text}"
+        f"{profile_suffix}"
     )
 
 
