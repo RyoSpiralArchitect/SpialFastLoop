@@ -2508,6 +2508,11 @@ def test_main_prints_backward_event_parent_position(
                 "avg_loss": 0.1234,
                 "setup_time_s": 0.0,
                 "end_to_end_wall_time_s": 0.50,
+                "profile_forward_pct": 42.5,
+                "profile_forward_top_pct_of_parent": 70.0,
+                "profile_backward_pct": 30.0,
+                "profile_backward_grad_ready_span_pct": 23.0,
+                "profile_optimizer_pct": 12.5,
                 "profile": {
                     "top_phases": [
                         {
@@ -2589,6 +2594,15 @@ def test_main_prints_backward_event_parent_position(
     assert "backward_grad_ready_summary: span=2.30ms@23.0% range=1.20ms-3.50ms range_pct=12.0%-35.0%" in output
     assert "backward_grad_ready: model.0=3.5ms@35.0% p95=4.5ms calls=2 samples=2 window=2, model.2=1.2ms calls=1" in output
     assert "optimizer: optimizer.step=80.0% avg=3.25ms p95=4.50ms calls=1" in output
+    assert (
+        "Bottleneck: #1 forward_phase=42.5% category=phase_share "
+        "next=inspect forward top-child and tail metrics"
+    ) in output
+    assert (
+        "categories=child_hotspot:forward_top_child=29.8%/1,"
+        "phase_share:forward_phase=42.5%/3,"
+        "readiness_span:backward_readiness_span=6.9%/1"
+    ) in output
 
 
 def test_transaction_benchmark_records_run_seed() -> None:

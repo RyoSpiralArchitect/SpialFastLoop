@@ -1451,6 +1451,39 @@ def _format_count(raw: object) -> str:
         return "n/a"
 
 
+def _format_profile_bottleneck_summary(summary: dict[str, Any]) -> str:
+    top_candidate = _dict_value(summary.get("profile_bottleneck_top_candidate"))
+    name = top_candidate.get("name")
+    score = _non_negative_display_value(top_candidate.get("score"))
+    if not isinstance(name, str) or not name or score is None:
+        return ""
+    score_suffix = "%" if top_candidate.get("score_unit") == "profile_pct" else ""
+    parts = [f"#{_format_count(top_candidate.get('rank'))} {name}={score:.1f}{score_suffix}"]
+
+    category = top_candidate.get("category")
+    if isinstance(category, str) and category:
+        parts.append(f"category={category}")
+    next_step = top_candidate.get("next_step")
+    if isinstance(next_step, str) and next_step:
+        parts.append(f"next={next_step}")
+
+    category_summary = summary.get("profile_bottleneck_category_summary")
+    category_parts = []
+    if isinstance(category_summary, dict):
+        for category_name in sorted(category_summary):
+            entry = _dict_value(category_summary.get(category_name))
+            top_name = entry.get("top_candidate")
+            max_score = _non_negative_display_value(entry.get("max_score"))
+            count = _display_count_value(entry.get("count"))
+            if not isinstance(top_name, str) or not top_name or max_score is None or count is None:
+                continue
+            entry_suffix = "%" if entry.get("score_unit") == "profile_pct" else ""
+            category_parts.append(f"{category_name}:{top_name}={max_score:.1f}{entry_suffix}/{count}")
+    if category_parts:
+        parts.append(f"categories={','.join(category_parts)}")
+    return " ".join(parts)
+
+
 def _has_positive_display_value(raw: object) -> bool:
     value = _finite_display_value(raw)
     return value is not None and value > 0.0
@@ -2164,6 +2197,9 @@ def main() -> None:
             dump_json(aggregate, handle)
         print(f"Wrote aggregate summary to {out_path}")
 
+    bottleneck_summary = _format_profile_bottleneck_summary(aggregate)
+    if bottleneck_summary:
+        print(f"Bottleneck: {bottleneck_summary}")
     print("Aggregate:", dumps_json(aggregate))
 
 
