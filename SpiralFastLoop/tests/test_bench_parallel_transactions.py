@@ -1050,12 +1050,16 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
     assert backward_phase["next_step"] == "inspect gradient-ready span and backward top-child metrics"
     assert backward_phase["score"] == pytest.approx(50.0)
     assert backward_phase["score_unit"] == "profile_pct"
+    assert backward_phase["score_basis"] == "direct_metric"
+    assert backward_phase["score_formula"] == "score=value"
     assert backward_phase["severity"] == "high"
     backward_span = candidates[1]
     assert backward_span["score"] == pytest.approx(40.0)
     assert backward_span["severity"] == "high"
     assert backward_span["parent_metric"] == "profile_backward_pct"
     assert backward_span["parent_value"] == pytest.approx(50.0)
+    assert backward_span["score_basis"] == "parent_metric_weighted"
+    assert backward_span["score_formula"] == "score=parent_value*value/100"
     assert backward_span["span_avg_ms"] == pytest.approx(8.0)
     assert candidates[2]["severity"] == "medium"
     forward_top = next(

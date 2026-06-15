@@ -840,6 +840,8 @@ def _profile_bottleneck_candidate(summary: dict, spec: dict[str, object]) -> Opt
         "metric": metric,
         "value": value,
         "unit": unit,
+        "score_basis": "direct_metric",
+        "score_formula": "score=value",
     }
     for text_field in ("label", "category", "reason", "next_step"):
         text_value = spec.get(text_field)
@@ -854,6 +856,8 @@ def _profile_bottleneck_candidate(summary: dict, spec: dict[str, object]) -> Opt
         score_unit = "profile_pct"
         candidate["parent_metric"] = parent_metric
         candidate["parent_value"] = parent_value
+        candidate["score_basis"] = "parent_metric_weighted"
+        candidate["score_formula"] = "score=parent_value*value/100"
     if score <= 0.0:
         return None
     candidate["score"] = score

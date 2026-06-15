@@ -1617,6 +1617,8 @@ def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
     assert generated["profile_bottleneck_candidates"][0]["rank"] == 1
     assert generated["profile_bottleneck_candidates"][0]["category"] == "phase_share"
     assert generated["profile_bottleneck_candidates"][0]["severity"] == "high"
+    assert generated["profile_bottleneck_candidates"][0]["score_basis"] == "direct_metric"
+    assert generated["profile_bottleneck_candidates"][0]["score_formula"] == "score=value"
     assert generated["profile_bottleneck_candidates"][0]["next_step"]
     assert generated["profile_bottleneck_candidates"][1]["name"] == "forward_phase"
     assert generated["profile_bottleneck_candidates"][1]["score"] == pytest.approx(20.0)
@@ -1626,6 +1628,8 @@ def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
     assert generated["profile_bottleneck_candidates"][2]["score"] == pytest.approx(15.0)
     assert generated["profile_bottleneck_candidates"][2]["rank"] == 3
     assert generated["profile_bottleneck_candidates"][2]["severity"] == "medium"
+    assert generated["profile_bottleneck_candidates"][2]["score_basis"] == "parent_metric_weighted"
+    assert generated["profile_bottleneck_candidates"][2]["score_formula"] == "score=parent_value*value/100"
     assert materialized["profile_bottleneck_severity_counts"] == {
         "high": 1,
         "medium": 1,

@@ -86,7 +86,8 @@ and `opt_tail(std=...)`. Aggregate benchmark summaries also include ranked
 `profile_bottleneck_candidates` with the strongest phase, top-child, untracked,
 and backward-readiness-span signals normalized into profile-percentage scores;
 each candidate carries a `high`/`medium`/`low` severity label, reason,
-next-step hint, rank, and returned/omitted candidate counts when the list is
+next-step hint, rank, `score_basis`/`score_formula` provenance for direct versus
+parent-weighted scores, and returned/omitted candidate counts when the list is
 capped. Summaries also expose `profile_bottleneck_top_candidate`,
 `profile_bottleneck_top_category`,
 `profile_bottleneck_category_order`,
