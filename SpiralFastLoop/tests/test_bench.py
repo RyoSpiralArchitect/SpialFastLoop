@@ -292,6 +292,44 @@ def test_plain_loop_splits_warmup_and_reported_throughput() -> None:
     assert metrics["reported_samples_per_sec"] == metrics["steady_samples_per_sec"]
 
 
+def test_plain_loop_rejects_backward_batch_timer(monkeypatch: pytest.MonkeyPatch) -> None:
+    timestamps = iter([0.0, 0.0, 0.0, 0.0, 2.0, 1.0, 3.0])
+    monkeypatch.setattr(bench.time, "perf_counter", lambda: next(timestamps))
+    dataset = TensorDataset(torch.randn(1, 2), torch.tensor([0]))
+    loader = DataLoader(dataset, batch_size=1, shuffle=False)
+    model = nn.Linear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+    with pytest.raises(ValueError, match="batch_duration_s"):
+        bench.plain_loop(
+            loader,
+            model,
+            optimizer,
+            nn.CrossEntropyLoss(),
+            torch.device("cpu"),
+            steps=1,
+        )
+
+
+def test_plain_loop_rejects_backward_total_elapsed(monkeypatch: pytest.MonkeyPatch) -> None:
+    timestamps = iter([2.0, 2.0, 2.0, 2.0, 2.5, 3.0, 1.0])
+    monkeypatch.setattr(bench.time, "perf_counter", lambda: next(timestamps))
+    dataset = TensorDataset(torch.randn(1, 2), torch.tensor([0]))
+    loader = DataLoader(dataset, batch_size=1, shuffle=False)
+    model = nn.Linear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+    with pytest.raises(ValueError, match="elapsed_sec"):
+        bench.plain_loop(
+            loader,
+            model,
+            optimizer,
+            nn.CrossEntropyLoss(),
+            torch.device("cpu"),
+            steps=1,
+        )
+
+
 def test_bench_parse_args_accepts_valid_minimal_run(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         sys,

@@ -20,6 +20,7 @@ from spiralfastloop.utils import (
     ThroughputMeter,
     _finite_float_setting,
     _non_negative_int_setting,
+    _non_negative_finite_float_setting,
     _optional_positive_int_setting,
     _positive_int_setting,
 )
@@ -193,7 +194,10 @@ def plain_loop(
             if reached_accum_boundary or reached_requested_steps:
                 run_optimizer_step(pending_accum_steps)
                 pending_accum_steps = 0
-            batch_duration_s = max(0.0, time.perf_counter() - batch_started)
+            batch_duration_s = _non_negative_finite_float_setting(
+                time.perf_counter() - batch_started,
+                "batch_duration_s",
+            )
             meter.record(batch_duration_s, batch_size)
             if warmup_step_limit > 0 and step_count <= warmup_step_limit:
                 warmup_meter.record(batch_duration_s, batch_size)
@@ -209,7 +213,7 @@ def plain_loop(
             break
     if pending_accum_steps > 0:
         run_optimizer_step(pending_accum_steps)
-    elapsed = time.perf_counter() - start
+    elapsed = _non_negative_finite_float_setting(time.perf_counter() - start, "elapsed_sec")
     metrics = dict(meter.summary())
     warmup_summary = warmup_meter.summary()
     steady_summary = steady_meter.summary()

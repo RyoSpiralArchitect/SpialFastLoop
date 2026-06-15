@@ -25,6 +25,7 @@ from spiralfastloop.utils import (
     _bool_setting,
     _finite_float_setting,
     _int_setting,
+    _non_negative_finite_float_setting,
     _non_negative_int_setting,
     _positive_int_setting,
     dataloader_from_dataset,
@@ -657,7 +658,10 @@ def run_once(args, run_index: int) -> BenchmarkResult:
         seed=run_seed,
         materialized=args.dataset_mode == "materialized",
     )
-    dataset_setup_time_s = time.perf_counter() - dataset_start
+    dataset_setup_time_s = _non_negative_finite_float_setting(
+        time.perf_counter() - dataset_start,
+        "dataset_setup_time_s",
+    )
 
     loader_start = time.perf_counter()
     loader = dataloader_from_dataset(
@@ -670,7 +674,10 @@ def run_once(args, run_index: int) -> BenchmarkResult:
         seed=run_seed,
         shuffle=True,
     )
-    loader_setup_time_s = time.perf_counter() - loader_start
+    loader_setup_time_s = _non_negative_finite_float_setting(
+        time.perf_counter() - loader_start,
+        "loader_setup_time_s",
+    )
 
     model_start = time.perf_counter()
     model = build_model(args.feature_dim, args.num_classes)
@@ -686,8 +693,14 @@ def run_once(args, run_index: int) -> BenchmarkResult:
         grad_accum=args.grad_accum,
         log_interval=args.log_interval,
     )
-    model_setup_time_s = time.perf_counter() - model_start
-    setup_time_s = time.perf_counter() - setup_start
+    model_setup_time_s = _non_negative_finite_float_setting(
+        time.perf_counter() - model_start,
+        "model_setup_time_s",
+    )
+    setup_time_s = _non_negative_finite_float_setting(
+        time.perf_counter() - setup_start,
+        "setup_time_s",
+    )
 
     start = time.perf_counter()
     metrics = trainer.train_one_epoch(
@@ -704,7 +717,7 @@ def run_once(args, run_index: int) -> BenchmarkResult:
         profile_model_include=args.profile_model_include,
         warmup_steps=args.warmup_steps,
     )
-    wall = time.perf_counter() - start
+    wall = _non_negative_finite_float_setting(time.perf_counter() - start, "wall_time_s")
     metrics.update({
         "batch_size": args.batch_size,
         "dataset_materialized_bytes": dataset.materialized_bytes,

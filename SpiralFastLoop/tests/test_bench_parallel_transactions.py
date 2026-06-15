@@ -14,6 +14,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scripts import bench_parallel_transactions as bpt
 from scripts.bench_parallel_transactions import (
     SyntheticTransactionDataset,
     _best_finite_row,
@@ -1140,6 +1141,64 @@ def test_transaction_benchmark_records_run_seed() -> None:
     assert result["seed"] == 103
     assert result["dataset_mode"] == "materialized"
     assert result["dataset_materialized_bytes"] == (64 * 8 * 4) + (64 * 8)
+
+
+@pytest.mark.parametrize(
+    "timer_name",
+    [
+        "dataset_setup_time_s",
+        "loader_setup_time_s",
+        "model_setup_time_s",
+        "setup_time_s",
+        "wall_time_s",
+    ],
+)
+def test_transaction_benchmark_validates_timer_outputs(
+    monkeypatch: pytest.MonkeyPatch,
+    timer_name: str,
+) -> None:
+    def validate_timer(value: object, name: str) -> float:
+        if name == timer_name:
+            raise ValueError(f"{timer_name} boom")
+        return float(value)
+
+    class DummyTrainer:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def train_one_epoch(self, *_args: object, **_kwargs: object) -> dict[str, float]:
+            return {}
+
+    monkeypatch.setattr(bpt, "_non_negative_finite_float_setting", validate_timer, raising=False)
+    monkeypatch.setattr(bpt, "FastTrainer", DummyTrainer)
+    args = Namespace(
+        transactions=8,
+        feature_dim=4,
+        num_classes=2,
+        seed=100,
+        dataset_mode="generated",
+        batch_size=4,
+        device="cpu",
+        workers=0,
+        prefetch_factor=2,
+        learning_rate=3e-4,
+        compile=False,
+        grad_accum=1,
+        log_interval=0,
+        steps=1,
+        collect_profile=False,
+        profile_sync=False,
+        profile_distribution=True,
+        profile_window=16,
+        profile_model=False,
+        profile_model_depth=1,
+        profile_model_max_modules=8,
+        profile_model_include=None,
+        warmup_steps=0,
+    )
+
+    with pytest.raises(ValueError, match=f"{timer_name} boom"):
+        run_once(args, 0)
 
 
 def test_transaction_benchmark_rejects_invalid_direct_seed() -> None:

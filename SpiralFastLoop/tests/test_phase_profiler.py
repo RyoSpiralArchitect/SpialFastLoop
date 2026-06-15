@@ -180,6 +180,17 @@ def _fail_first_meter_record(monkeypatch: pytest.MonkeyPatch, message: str) -> N
     monkeypatch.setattr(engine, "ThroughputMeter", FailingRecordMeter)
 
 
+def _fail_batch_duration_validation(monkeypatch: pytest.MonkeyPatch, message: str) -> None:
+    original_validator = engine._non_negative_finite_float_setting
+
+    def validate(value: object, name: str) -> float:
+        if name == "batch_duration_s":
+            raise ValueError(message)
+        return original_validator(value, name)
+
+    monkeypatch.setattr(engine, "_non_negative_finite_float_setting", validate)
+
+
 @pytest.mark.parametrize(
     ("batch", "reason", "match"),
     [
@@ -1329,6 +1340,31 @@ def test_evaluate_logs_metrics_failures_before_reraising(
     assert "metrics" in phases
 
 
+def test_evaluate_rejects_invalid_batch_duration_before_recording_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fail_batch_duration_validation(monkeypatch, "eval batch duration boom")
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    logger = _CapturingLogger()
+    loader, _optimizer, trainer = _make_logged_cpu_trainer(logger)
+
+    with pytest.raises(ValueError, match="eval batch duration boom"):
+        trainer.evaluate(loader, nn.CrossEntropyLoss(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    metrics = _assert_eval_failure_metrics(
+        logger,
+        stage="metrics",
+        last_error="ValueError: eval batch duration boom",
+    )
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "loss" in phases
+    assert "metrics" in phases
+
+
 def test_evaluate_reports_scalar_tensor_inputs_as_unmeasured() -> None:
     class ScalarTensorDataset(torch.utils.data.Dataset[torch.Tensor]):
         def __len__(self) -> int:
@@ -1609,6 +1645,31 @@ def test_predict_logs_metrics_failures_before_reraising(
         logger,
         stage="metrics",
         last_error="RuntimeError: predict metrics boom",
+    )
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "collect_output" in phases
+    assert "metrics" in phases
+
+
+def test_predict_rejects_invalid_batch_duration_before_recording_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fail_batch_duration_validation(monkeypatch, "predict batch duration boom")
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    logger = _CapturingLogger()
+    loader, _optimizer, trainer = _make_logged_cpu_trainer(logger)
+
+    with pytest.raises(ValueError, match="predict batch duration boom"):
+        trainer.predict(loader, steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    metrics = _assert_predict_failure_metrics(
+        logger,
+        stage="metrics",
+        last_error="ValueError: predict batch duration boom",
     )
     profile = metrics["profile"]
     assert isinstance(profile, dict)
@@ -2085,6 +2146,32 @@ def test_train_one_epoch_logs_metrics_failures_before_reraising(
     assert metrics["train_failed"] is True
     assert metrics["train_failure_stage"] == "metrics"
     assert metrics["train_failure_last_error"] == "RuntimeError: metrics meter boom"
+    profile = metrics["profile"]
+    assert isinstance(profile, dict)
+    phases = profile["phases"]
+    assert "optimizer" in phases
+    assert "metrics" in phases
+
+
+def test_train_one_epoch_rejects_invalid_batch_duration_before_recording_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fail_batch_duration_validation(monkeypatch, "train batch duration boom")
+    profilers = _capture_engine_phase_profilers(monkeypatch)
+    logger = _CapturingLogger()
+    loader, _optimizer, trainer = _make_logged_cpu_trainer(logger)
+
+    with pytest.raises(ValueError, match="train batch duration boom"):
+        trainer.train_one_epoch(loader, nn.CrossEntropyLoss(), steps=1, collect_profile=True)
+
+    assert len(profilers) == 1
+    assert profilers[0]._starts == {}
+    metrics = _assert_train_failure_metrics(
+        logger,
+        stage="metrics",
+        last_error="ValueError: train batch duration boom",
+        optimizer_steps=1,
+    )
     profile = metrics["profile"]
     assert isinstance(profile, dict)
     phases = profile["phases"]

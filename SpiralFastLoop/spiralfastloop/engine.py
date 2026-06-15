@@ -1413,7 +1413,10 @@ class FastTrainer:
                     loss_weight_tensor = total_loss.new_tensor(batch_size, dtype=total_loss.dtype)
 
                 batch_size_int = int(batch_size)
-                batch_duration_s = max(0.0, time.perf_counter() - step_started_at)
+                batch_duration_s = _non_negative_finite_float_setting(
+                    time.perf_counter() - step_started_at,
+                    "batch_duration_s",
+                )
                 meter.record(batch_duration_s, batch_size_int)
                 total_items += batch_size_int
                 loss_detached = raw_loss.detach().to(device=total_loss.device, dtype=total_loss.dtype)
@@ -1792,7 +1795,10 @@ class FastTrainer:
                 profiler.start("metrics")
                 metrics_error: Optional[Exception] = None
                 try:
-                    batch_duration_s = max(0.0, time.perf_counter() - step_started_at)
+                    batch_duration_s = _non_negative_finite_float_setting(
+                        time.perf_counter() - step_started_at,
+                        "batch_duration_s",
+                    )
                     if batch_size_int is not None:
                         meter.record(batch_duration_s, batch_size_int)
                         total_items += batch_size_int
@@ -2067,7 +2073,10 @@ class FastTrainer:
                     try:
                         if batch_size is not None:
                             batch_size_int = int(batch_size)
-                            batch_duration_s = max(0.0, time.perf_counter() - step_started_at)
+                            batch_duration_s = _non_negative_finite_float_setting(
+                                time.perf_counter() - step_started_at,
+                                "batch_duration_s",
+                            )
                             meter.record(batch_duration_s, batch_size_int)
                             total_items += batch_size_int
                             measured_steps += 1
