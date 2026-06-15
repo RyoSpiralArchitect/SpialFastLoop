@@ -207,8 +207,9 @@ class BenchmarkResult:
     run_index: int
 
     def as_dict(self) -> dict:
-        payload = {"wall_time_s": self.wall_time_s, "run": self.run_index}
-        payload.update(self.trainer_metrics)
+        payload = dict(self.trainer_metrics)
+        payload["wall_time_s"] = self.wall_time_s
+        payload["run"] = self.run_index
         return payload
 
 

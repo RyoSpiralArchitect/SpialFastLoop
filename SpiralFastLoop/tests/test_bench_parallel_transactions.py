@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts import bench_parallel_transactions as bpt
 from scripts.bench_parallel_transactions import (
+    BenchmarkResult,
     SyntheticTransactionDataset,
     _best_finite_row,
     _format_count,
@@ -68,6 +69,24 @@ def test_generated_transaction_dataset_is_index_deterministic() -> None:
     assert torch.equal(features_a, features_b)
     assert torch.equal(target_a, target_b)
     assert dataset.materialized_bytes == 0
+
+
+def test_benchmark_result_as_dict_preserves_authoritative_run_and_wall_time() -> None:
+    result = BenchmarkResult(
+        wall_time_s=1.25,
+        trainer_metrics={
+            "run": 99,
+            "wall_time_s": 99.0,
+            "samples_per_sec": 10.0,
+        },
+        run_index=3,
+    )
+
+    payload = result.as_dict()
+
+    assert payload["run"] == 3
+    assert payload["wall_time_s"] == pytest.approx(1.25)
+    assert payload["samples_per_sec"] == pytest.approx(10.0)
 
 
 def test_transaction_dataset_ignores_global_default_device() -> None:
