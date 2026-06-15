@@ -385,6 +385,8 @@ def _try_infer_batch_size_with_reason(batch: Any) -> tuple[Optional[int], str]:
             if child_reasons and len(set(child_reasons)) == 1:
                 return None, child_reasons[0]
             return None, "mapping_empty"
+        if child_reasons:
+            return None, "mapping_inconsistent"
         unique = set(candidate_values)
         if len(unique) != 1:
             return None, "mapping_inconsistent"
@@ -405,6 +407,8 @@ def _try_infer_batch_size_with_reason(batch: Any) -> tuple[Optional[int], str]:
             if length <= 0:
                 return None, "sequence_empty"
             return length, ""
+        if child_reasons:
+            return None, "sequence_inconsistent"
         unique = set(candidate_values)
         if len(unique) != 1:
             return None, "sequence_inconsistent"

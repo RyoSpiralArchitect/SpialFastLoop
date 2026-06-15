@@ -187,8 +187,10 @@ def _fail_first_meter_record(monkeypatch: pytest.MonkeyPatch, message: str) -> N
         (torch.empty(0, 4), "tensor_empty", "non-zero"),
         ({}, "mapping_empty", "mapping input"),
         ({"x": torch.randn(2, 4), "y": torch.randn(3, 4)}, "mapping_inconsistent", "Inconsistent"),
+        ({"x": torch.randn(2, 4), "y": torch.tensor(1.0)}, "mapping_inconsistent", "Inconsistent"),
         ([], "sequence_empty", "Sequence batch dimension"),
         ((torch.randn(2, 4), torch.randn(3, 4)), "sequence_inconsistent", "Inconsistent"),
+        ((torch.randn(2, 4), object()), "sequence_inconsistent", "Inconsistent"),
         (None, "none", "None"),
         (object(), "unsupported_type", "Unsupported batch structure"),
     ],
@@ -204,6 +206,14 @@ def test_batch_size_inference_reports_failure_reasons(
     assert failure_reason == reason
     with pytest.raises((TypeError, ValueError), match=match):
         _infer_batch_size(batch)
+
+
+def test_batch_size_inference_preserves_sample_sequence_length_fallback() -> None:
+    batch_size, failure_reason = _try_infer_batch_size_with_reason([object(), object(), object()])
+
+    assert batch_size == 3
+    assert failure_reason == ""
+    assert _infer_batch_size([object(), object(), object()]) == 3
 
 
 @pytest.mark.parametrize("window", [0, -1, 1.5, "8", True])
