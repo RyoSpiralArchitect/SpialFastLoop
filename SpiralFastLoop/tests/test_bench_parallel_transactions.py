@@ -1020,6 +1020,53 @@ def test_summarize_results_omits_not_requested_profile_model_status_counts() -> 
     json.dumps(summary, allow_nan=False)
 
 
+def test_summarize_results_surfaces_summary_diagnostic_fields() -> None:
+    summary = summarize_results([
+        {
+            "run": 0,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 90.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.1,
+            "setup_time_s": 0.1,
+            "wall_time_s": 1.0,
+            "cold_start_time_s": 0.2,
+            "grad_accum": 2,
+            "profile_forward_backward_pct": 50.0,
+            "profile_model_status": "unknown_status",
+        },
+        {
+            "run": 1,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": float("nan"),
+            "samples_per_sec": 95.0,
+            "steady_samples_per_sec": 110.0,
+            "end_to_end_wall_time_s": 0.9,
+            "setup_time_s": 0.1,
+            "wall_time_s": 0.8,
+            "grad_accum": 0,
+            "profile_forward_backward_pct": 125.0,
+        },
+    ])
+
+    diagnostics = {
+        diagnostic["field"]: diagnostic
+        for diagnostic in summary["summary_diagnostic_fields"]
+    }
+    assert summary["summary_diagnostic_field_count"] == 5
+    assert summary["summary_missing_field_count"] == 1
+    assert summary["summary_non_finite_field_count"] == 1
+    assert summary["summary_invalid_field_count"] == 3
+    assert diagnostics["profile_model_status"]["invalid_count"] == 1
+    assert diagnostics["reported_samples_per_sec"]["non_finite_count"] == 1
+    assert diagnostics["cold_start_time_s"]["missing_count"] == 1
+    assert diagnostics["grad_accum"]["invalid_count"] == 1
+    assert diagnostics["profile_forward_backward_pct"]["invalid_count"] == 1
+    assert "samples_per_sec" not in diagnostics
+    json.dumps(summary, allow_nan=False)
+
+
 def test_summarize_results_includes_device_memory_metrics_when_present() -> None:
     rows = [
         {

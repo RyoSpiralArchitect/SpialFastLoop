@@ -169,7 +169,9 @@ The transactional benchmark reports training-only `wall_time_s`, separate
 breakdown for dataset, loader, model, and compile setup. It also records
 `dataset_materialized_bytes` so materialized-data runs remain transparent.
 Use `--summary-out` to capture mean/min/max/stddev timing, setup, throughput,
-and run-context stats across repeated runs.
+and run-context stats across repeated runs. Aggregate summaries also include
+`summary_diagnostic_fields` when metrics contain missing, non-finite, or
+out-of-range values.
 With `--profile-model`, backward grad-ready rows print `avg_ms@pct`, where
 `pct` is the average event position within the parent backward phase. Aggregate
 summaries also expose backward grad-ready top timing and position fields for

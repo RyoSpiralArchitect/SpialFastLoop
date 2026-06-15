@@ -41,6 +41,10 @@ BASE_SUMMARY_FIELDS = (
     "wall_time_s",
     "cold_start_time_s",
 )
+CRITICAL_SUMMARY_MISSING_FIELDS = frozenset({
+    "reported_samples_per_sec",
+    "end_to_end_wall_time_s",
+})
 
 SETUP_SUMMARY_FIELDS = (
     "dataset_setup_time_s",
@@ -796,6 +800,46 @@ def _profile_model_status_counts(rows: list[dict]) -> tuple[dict[str, int], int]
     return ordered_counts, invalid_count
 
 
+def _positive_diagnostic_count(raw: object) -> Optional[int]:
+    value = _finite_summary_value(raw)
+    if value is None or value <= 0.0 or not value.is_integer():
+        return None
+    return int(value)
+
+
+def _summary_metric_diagnostic(
+    field: str,
+    stats: dict[str, float],
+    *,
+    field_present: bool,
+) -> Optional[dict[str, object]]:
+    diagnostic: dict[str, object] = {"field": field}
+    missing_count = _positive_diagnostic_count(stats.get("missing_count"))
+    if missing_count is not None and (field_present or field in CRITICAL_SUMMARY_MISSING_FIELDS):
+        diagnostic["missing_count"] = missing_count
+    for key in ("non_finite_count", "invalid_count"):
+        count = _positive_diagnostic_count(stats.get(key))
+        if count is not None:
+            diagnostic[key] = count
+    return diagnostic if len(diagnostic) > 1 else None
+
+
+def _add_summary_diagnostic_totals(summary: dict, diagnostics: list[dict[str, object]]) -> None:
+    if not diagnostics:
+        return
+    missing_field_count = sum(1 for diagnostic in diagnostics if "missing_count" in diagnostic)
+    non_finite_field_count = sum(1 for diagnostic in diagnostics if "non_finite_count" in diagnostic)
+    invalid_field_count = sum(1 for diagnostic in diagnostics if "invalid_count" in diagnostic)
+    summary["summary_diagnostic_field_count"] = len(diagnostics)
+    if missing_field_count > 0:
+        summary["summary_missing_field_count"] = missing_field_count
+    if non_finite_field_count > 0:
+        summary["summary_non_finite_field_count"] = non_finite_field_count
+    if invalid_field_count > 0:
+        summary["summary_invalid_field_count"] = invalid_field_count
+    summary["summary_diagnostic_fields"] = diagnostics
+
+
 def summarize_metric(
     rows: list[dict],
     field: str,
@@ -863,11 +907,15 @@ def summarize_metric(
 
 def summarize_results(rows: list[dict]) -> dict:
     summary_rows = [_summary_row(row) for row in rows]
+    present_fields = set()
+    for row in summary_rows:
+        present_fields.update(row.keys())
     summary: dict = {
         "runs": len(summary_rows),
         "best_reported": None,
         "best_end_to_end": None,
     }
+    summary_diagnostics: list[dict[str, object]] = []
     profiled_runs = count_profiled_rows(summary_rows)
     if profiled_runs > 0:
         summary["profiled_runs"] = profiled_runs
@@ -876,17 +924,30 @@ def summarize_results(rows: list[dict]) -> dict:
         summary["profile_model_status_counts"] = status_counts
     if status_invalid_count > 0:
         summary["profile_model_status_invalid_count"] = status_invalid_count
+        summary_diagnostics.append({
+            "field": "profile_model_status",
+            "invalid_count": status_invalid_count,
+        })
     for field in summary_fields_for_rows(summary_rows):
         missing_as_zero = field in BASE_SUMMARY_FIELDS
-        for stat_name, value in summarize_metric(
+        metric_stats = summarize_metric(
             summary_rows,
             field,
             missing_as_zero=missing_as_zero,
             min_value=_summary_metric_min_value(field),
             max_value=_summary_metric_max_value(field),
             integer=field in SUMMARY_INTEGER_FIELDS,
-        ).items():
+        )
+        diagnostic = _summary_metric_diagnostic(
+            field,
+            metric_stats,
+            field_present=field in present_fields,
+        )
+        if diagnostic is not None:
+            summary_diagnostics.append(diagnostic)
+        for stat_name, value in metric_stats.items():
             summary[f"{stat_name}_{field}"] = value
+    _add_summary_diagnostic_totals(summary, summary_diagnostics)
 
     if summary_rows:
         best_reported = _best_finite_row(
