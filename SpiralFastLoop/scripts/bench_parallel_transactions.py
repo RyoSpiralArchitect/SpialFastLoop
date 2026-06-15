@@ -208,9 +208,13 @@ BEST_RUN_FIELDS = (
     "profile_flat_metric_invalid_count",
     "profile_open_phase_count",
     "profile_open_detail_count",
+    "profile_model_requested",
+    "profile_model_enabled",
+    "profile_model_status",
     "profile_model_modules_selected",
     "profile_model_hook_count",
     "profile_model_hook_failures",
+    "profile_model_hook_last_error",
     "profile_forward_backward_pct",
     "profile_forward_backward_time_s",
     "profile_forward_pct",
@@ -234,7 +238,22 @@ BEST_RUN_FIELDS = (
 
 DEVICE_CHOICES = ("auto", "cpu", "cuda", "mps")
 DATASET_MODE_CHOICES = frozenset({"generated", "materialized"})
-BEST_RUN_TEXT_FIELDS = frozenset({"dataset_mode"})
+PROFILE_MODEL_STATUS_CHOICES = frozenset({
+    "not_requested",
+    "collect_profile_disabled",
+    "no_matching_modules",
+    "hook_failures",
+    "ok",
+})
+BEST_RUN_TEXT_FIELDS = frozenset({
+    "dataset_mode",
+    "profile_model_status",
+    "profile_model_hook_last_error",
+})
+BEST_RUN_BOOL_FIELDS = frozenset({
+    "profile_model_requested",
+    "profile_model_enabled",
+})
 BEST_RUN_INTEGER_FIELDS = frozenset({
     "run",
     "steps",
@@ -323,6 +342,18 @@ def _compact_run(row: dict) -> dict:
         if field in BEST_RUN_TEXT_FIELDS:
             if field == "dataset_mode":
                 value = _summary_choice(value, DATASET_MODE_CHOICES, field)
+            elif field == "profile_model_status":
+                try:
+                    value = _summary_choice(value, PROFILE_MODEL_STATUS_CHOICES, field)
+                except ValueError:
+                    continue
+            elif not isinstance(value, str) or not value.strip():
+                continue
+            else:
+                value = value.strip()
+        elif field in BEST_RUN_BOOL_FIELDS:
+            if not isinstance(value, bool):
+                continue
         elif field == "seed":
             try:
                 value = _int_setting(value, field)
