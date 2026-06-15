@@ -1147,7 +1147,13 @@ def _ordered_profile_bottleneck_severity_counts(
     return ordered_counts
 
 
+def _clear_profile_bottleneck_fields(summary: dict) -> None:
+    for field in PROFILE_BOTTLENECK_COUNT_FIELDS + PROFILE_BOTTLENECK_OBJECT_FIELDS:
+        summary.pop(field, None)
+
+
 def _add_profile_bottleneck_candidates(summary: dict) -> None:
+    _clear_profile_bottleneck_fields(summary)
     ranked_candidates = _ranked_profile_bottleneck_candidates(summary)
     if not ranked_candidates:
         return

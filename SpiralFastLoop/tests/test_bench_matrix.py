@@ -836,6 +836,34 @@ def test_format_run_row_includes_profile_bottleneck_summary() -> None:
     assert "severity_counts(high=2,medium=1)" in row
 
 
+def test_format_run_row_ignores_stale_profile_bottleneck_summary() -> None:
+    row = _format_run_row(
+        "generated",
+        "no-compile",
+        0,
+        0,
+        {
+            "reported_samples_per_sec": 123.45,
+            "end_to_end_wall_time_s": 1.234,
+            "profile_bottleneck_top_candidate": {
+                "name": "stale_phase",
+                "score": 99.0,
+                "score_unit": "profile_pct",
+            },
+            "profile_bottleneck_candidates": [
+                {
+                    "name": "stale_phase",
+                    "score": 99.0,
+                    "score_unit": "profile_pct",
+                },
+            ],
+        },
+    )
+
+    assert "hotspot=" not in row
+    assert "stale_phase" not in row
+
+
 def test_format_run_row_falls_back_to_total_metrics() -> None:
     row = _format_run_row(
         "materialized",

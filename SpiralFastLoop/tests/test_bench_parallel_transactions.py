@@ -1160,6 +1160,27 @@ def test_summarize_results_marks_omitted_profile_bottleneck_category_top(
     json.dumps(summary, allow_nan=False)
 
 
+def test_add_profile_bottleneck_candidates_clears_stale_fields() -> None:
+    summary = {
+        "profile_forward_pct": 25.0,
+        "profile_bottleneck_candidate_omitted_count": 7,
+        "profile_bottleneck_candidates": [{"name": "stale"}],
+        "profile_bottleneck_top_candidate": {"name": "stale"},
+    }
+
+    bpt._add_profile_bottleneck_candidates(summary)
+
+    assert summary["profile_bottleneck_candidate_count"] == 1
+    assert summary["profile_bottleneck_candidates"][0]["name"] == "forward_phase"
+    assert "profile_bottleneck_candidate_omitted_count" not in summary
+
+    summary.pop("profile_forward_pct")
+    bpt._add_profile_bottleneck_candidates(summary)
+
+    for field in bpt.PROFILE_BOTTLENECK_COUNT_FIELDS + bpt.PROFILE_BOTTLENECK_OBJECT_FIELDS:
+        assert field not in summary
+
+
 def test_summarize_results_preserves_best_run_profile_bottleneck_context() -> None:
     category_summary = {
         "phase_share": {
