@@ -11,6 +11,21 @@ from typing import Any, TextIO
 import torch
 
 
+def _fallback_type_name(value: Any) -> str:
+    value_type = type(value)
+    return f"{value_type.__module__}.{value_type.__qualname__}"
+
+
+def _string_fallback(value: Any) -> str:
+    try:
+        return str(value)
+    except Exception:
+        try:
+            return repr(value)
+        except Exception:
+            return f"<unrepresentable {_fallback_type_name(value)}>"
+
+
 def json_safe(value: Any, path: str = "$") -> Any:
     if isinstance(value, torch.Tensor):
         if value.numel() == 1:
@@ -27,11 +42,11 @@ def json_safe(value: Any, path: str = "$") -> Any:
     if isinstance(value, (list, tuple)):
         return [json_safe(item, f"{path}[]") for item in value]
     if isinstance(value, (set, frozenset)):
-        return [json_safe(item, f"{path}[]") for item in sorted(value, key=repr)]
+        return [json_safe(item, f"{path}[]") for item in sorted(value, key=_string_fallback)]
     try:
         return json_safe(float(value), path)
-    except (OverflowError, TypeError, ValueError):
-        return str(value)
+    except Exception:
+        return _string_fallback(value)
 
 
 def _json_safe_mapping(value: Mapping[Any, Any], path: str) -> dict[str, Any]:
@@ -61,7 +76,7 @@ def _json_safe_key(key: Any) -> str:
         return "null"
     if isinstance(safe_key, (str, int, float, bool)):
         return str(safe_key)
-    return str(safe_key)
+    return _string_fallback(safe_key)
 
 
 def dump_json(payload: Any, handle: TextIO) -> None:

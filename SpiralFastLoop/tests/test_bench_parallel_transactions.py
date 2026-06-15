@@ -272,6 +272,63 @@ def test_dumps_json_falls_back_for_overflowing_float_like_values() -> None:
     assert normalized["overflowing"] == "key"
 
 
+def test_dumps_json_falls_back_for_failed_float_like_values() -> None:
+    class FailingFloat:
+        def __float__(self) -> float:
+            raise RuntimeError("float failed")
+
+        def __str__(self) -> str:
+            return "failed-float"
+
+    payload = {
+        "value": FailingFloat(),
+        FailingFloat(): "key",
+    }
+
+    normalized = json.loads(dumps_json(payload))
+
+    assert normalized["value"] == "failed-float"
+    assert normalized["failed-float"] == "key"
+
+
+def test_dumps_json_sorts_sets_with_malformed_repr_values() -> None:
+    class MalformedRepr:
+        def __repr__(self) -> str:
+            raise RuntimeError("repr failed")
+
+        def __str__(self) -> str:
+            return "malformed-repr"
+
+    normalized = json.loads(dumps_json({"items": {MalformedRepr()}}))
+
+    assert normalized["items"] == ["malformed-repr"]
+
+
+def test_dumps_json_falls_back_for_unrepresentable_values() -> None:
+    class Unrepresentable:
+        def __float__(self) -> float:
+            raise RuntimeError("float failed")
+
+        def __repr__(self) -> str:
+            raise RuntimeError("repr failed")
+
+        def __str__(self) -> str:
+            raise RuntimeError("str failed")
+
+    payload = {
+        "value": Unrepresentable(),
+        Unrepresentable(): "key",
+    }
+
+    normalized = json.loads(dumps_json(payload))
+    fallback_keys = [key for key in normalized if key != "value"]
+
+    assert "Unrepresentable" in normalized["value"]
+    assert fallback_keys
+    assert "Unrepresentable" in fallback_keys[0]
+    assert normalized[fallback_keys[0]] == "key"
+
+
 @pytest.mark.parametrize(
     ("payload", "match"),
     [
