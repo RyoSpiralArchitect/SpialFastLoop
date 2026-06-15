@@ -212,11 +212,13 @@ class BenchmarkResult:
 
 def _summary_row(row: dict) -> dict:
     normalized = dict(row)
-    normalized.setdefault(
-        "reported_samples_per_sec",
-        normalized.get("steady_samples_per_sec", normalized.get("samples_per_sec", 0.0)),
-    )
-    normalized.setdefault("end_to_end_wall_time_s", normalized.get("wall_time_s", 0.0))
+    if "reported_samples_per_sec" not in normalized:
+        if "steady_samples_per_sec" in normalized:
+            normalized["reported_samples_per_sec"] = normalized["steady_samples_per_sec"]
+        elif "samples_per_sec" in normalized:
+            normalized["reported_samples_per_sec"] = normalized["samples_per_sec"]
+    if "end_to_end_wall_time_s" not in normalized and "wall_time_s" in normalized:
+        normalized["end_to_end_wall_time_s"] = normalized["wall_time_s"]
     return normalized
 
 
@@ -306,6 +308,8 @@ def count_profiled_rows(rows: list[dict]) -> int:
 
 def summarize_metric(rows: list[dict], field: str, *, missing_as_zero: bool = True) -> dict[str, float]:
     values = []
+    sample_count = 0
+    missing_count = 0
     non_finite_count = 0
     for row in rows:
         if field in row:
@@ -314,13 +318,18 @@ def summarize_metric(rows: list[dict], field: str, *, missing_as_zero: bool = Tr
                 non_finite_count += 1
                 continue
             values.append(value)
+            sample_count += 1
         elif missing_as_zero:
             values.append(0.0)
+            missing_count += 1
     result: dict[str, float] = {}
     if not values:
         result.update({"mean": 0.0, "min": 0.0, "max": 0.0, "stddev": 0.0})
+        if missing_count > 0 or non_finite_count > 0:
+            result["sample_count"] = float(sample_count)
+        if missing_count > 0:
+            result["missing_count"] = float(missing_count)
         if non_finite_count > 0:
-            result["sample_count"] = 0.0
             result["non_finite_count"] = float(non_finite_count)
         return result
     mean = sum(values) / len(values)
@@ -331,8 +340,10 @@ def summarize_metric(rows: list[dict], field: str, *, missing_as_zero: bool = Tr
         "max": max(values),
         "stddev": math.sqrt(variance),
     })
-    if len(values) != len(rows) or non_finite_count > 0:
-        result["sample_count"] = float(len(values))
+    if sample_count != len(rows) or non_finite_count > 0:
+        result["sample_count"] = float(sample_count)
+    if missing_count > 0:
+        result["missing_count"] = float(missing_count)
     if non_finite_count > 0:
         result["non_finite_count"] = float(non_finite_count)
     return result

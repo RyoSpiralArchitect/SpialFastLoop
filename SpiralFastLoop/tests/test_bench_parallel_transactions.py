@@ -153,6 +153,21 @@ def test_summarize_metric_reports_distribution() -> None:
     assert stats["stddev"] == pytest.approx(100.0)
 
 
+def test_summarize_metric_reports_missing_zero_imputation() -> None:
+    rows = [
+        {"samples_per_sec": 100.0},
+        {},
+    ]
+
+    stats = summarize_metric(rows, "samples_per_sec")
+
+    assert stats["mean"] == pytest.approx(50.0)
+    assert stats["min"] == pytest.approx(0.0)
+    assert stats["max"] == pytest.approx(100.0)
+    assert stats["sample_count"] == pytest.approx(1.0)
+    assert stats["missing_count"] == pytest.approx(1.0)
+
+
 def test_summarize_metric_skips_non_finite_values() -> None:
     rows = [
         {"samples_per_sec": 100.0},
@@ -422,6 +437,28 @@ def test_summarize_results_handles_empty_input() -> None:
     assert summary["mean_wall_time_s"] == pytest.approx(0.0)
     assert summary["stddev_wall_time_s"] == pytest.approx(0.0)
     assert "mean_profile_forward_backward_pct" not in summary
+
+
+def test_summarize_results_keeps_missing_base_metrics_out_of_best_runs() -> None:
+    rows = [
+        {
+            "run": 0,
+            "seed": 10,
+            "dataset_mode": "generated",
+            "setup_time_s": 0.25,
+        },
+    ]
+
+    summary = summarize_results(rows)
+
+    assert summary["mean_reported_samples_per_sec"] == pytest.approx(0.0)
+    assert summary["sample_count_reported_samples_per_sec"] == pytest.approx(0.0)
+    assert summary["missing_count_reported_samples_per_sec"] == pytest.approx(1.0)
+    assert summary["mean_end_to_end_wall_time_s"] == pytest.approx(0.0)
+    assert summary["sample_count_end_to_end_wall_time_s"] == pytest.approx(0.0)
+    assert summary["missing_count_end_to_end_wall_time_s"] == pytest.approx(1.0)
+    assert summary["best_reported"] is None
+    assert summary["best_end_to_end"] is None
 
 
 def test_summarize_results_skips_profile_fields_when_absent() -> None:
