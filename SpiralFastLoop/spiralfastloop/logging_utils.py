@@ -231,6 +231,15 @@ class MetricsLogger:
                 writer.writeheader()
             writer.writerow({key: _csv_safe_metric_value(value) for key, value in payload.items()})
 
+    def _validate_sinks(self, payload: Dict[str, Any]) -> None:
+        if self.jsonl_path is not None:
+            json.dumps(payload, ensure_ascii=False, allow_nan=False)
+        if self.csv_path is not None:
+            self._ensure_dir(self.csv_path)
+            if self._csv_fields is None:
+                self._csv_fields = self._read_csv_header()
+            {key: _csv_safe_metric_value(value) for key, value in payload.items()}
+
     def _ensure_csv_fields(self, payload: Dict[str, Any]) -> None:
         if self.csv_path is None:
             return
@@ -293,6 +302,7 @@ class MetricsLogger:
             epoch = _non_negative_int_setting(epoch, "epoch")
             payload["epoch"] = epoch
 
+        self._validate_sinks(payload)
         if self.logger is not None:
             summary = ", ".join(f"{k}={v}" for k, v in normalized.items())
             prefix = f"[{stage_value}:{mode_value}]"

@@ -2262,6 +2262,21 @@ def test_model_profile_events_keep_totals_without_distribution() -> None:
     assert event["total_s"] >= 0.0
     assert event["avg_ms"] >= 0.0
     assert "p95_ms" not in event
+    top_event = metrics["profile"]["phase_events"]["backward_grad_ready"]["top_children"][0]
+    assert "p95_ms" not in top_event
+
+
+def test_phase_profiler_top_children_omit_distribution_fields_when_disabled() -> None:
+    profiler = PhaseProfiler(enabled=True, track_distribution=False)
+
+    profiler._record("forward", 0.01)
+    profiler._record_detail("forward", "model.0", 0.006)
+    profiler._record_event("backward_grad_ready", "model.0", 0.004)
+    profile = profiler.summary()
+
+    assert "p95_ms" not in profile["top_phases"][0]
+    assert "p95_ms" not in profile["phase_breakdowns"]["forward"]["top_children"][0]
+    assert "p95_ms" not in profile["phase_events"]["backward_grad_ready"]["top_children"][0]
 
 
 def test_train_one_epoch_rejects_non_callable_trigger_observe() -> None:

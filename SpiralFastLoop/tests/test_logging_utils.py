@@ -402,3 +402,28 @@ def test_metrics_logger_rejects_malformed_existing_csv_headers_without_writing(
         metrics_logger.log_metrics("train", {"loss": 0.25, "accuracy": 0.9})
 
     assert csv_path.read_text(encoding="utf-8") == original
+
+
+def test_metrics_logger_validates_csv_before_jsonl_and_logger_side_effects(tmp_path) -> None:
+    records: list[logging.LogRecord] = []
+
+    class ListHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    logger = logging.getLogger("spiralfastloop.test.csv_preflight")
+    logger.handlers.clear()
+    logger.addHandler(ListHandler())
+    logger.propagate = False
+    jsonl_path = tmp_path / "metrics.jsonl"
+    csv_path = tmp_path / "metrics.csv"
+    original = "timestamp,stage,,loss\n1.0,train,step,0.5\n"
+    csv_path.write_text(original, encoding="utf-8")
+    metrics_logger = MetricsLogger(logger=logger, jsonl_path=jsonl_path, csv_path=csv_path)
+
+    with pytest.raises(ValueError, match="blank CSV header"):
+        metrics_logger.log_metrics("train", {"loss": 0.25, "accuracy": 0.9})
+
+    assert not jsonl_path.exists()
+    assert csv_path.read_text(encoding="utf-8") == original
+    assert records == []

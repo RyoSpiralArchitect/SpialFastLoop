@@ -989,6 +989,12 @@ class PhaseProfiler:
             })
         return row
 
+    @staticmethod
+    def _with_optional_p95(row: Dict[str, Any], source: Mapping[str, Any]) -> Dict[str, Any]:
+        if "p95_ms" in source:
+            row["p95_ms"] = source["p95_ms"]
+        return row
+
     def start(self, name: str) -> None:
         if not self.enabled:
             return
@@ -1076,14 +1082,16 @@ class PhaseProfiler:
             }
             top_children = sorted(
                 (
-                    {
-                        "name": name,
-                        "total_s": row["total_s"],
-                        "pct_of_parent": row["pct_of_parent"],
-                        "avg_ms": row["avg_ms"],
-                        "calls": row["calls"],
-                        "p95_ms": row.get("p95_ms"),
-                    }
+                    self._with_optional_p95(
+                        {
+                            "name": name,
+                            "total_s": row["total_s"],
+                            "pct_of_parent": row["pct_of_parent"],
+                            "avg_ms": row["avg_ms"],
+                            "calls": row["calls"],
+                        },
+                        row,
+                    )
                     for name, row in children.items()
                 ),
                 key=lambda row: row["total_s"],
@@ -1109,14 +1117,16 @@ class PhaseProfiler:
             }
             top_children = sorted(
                 (
-                    {
-                        "name": name,
-                        "total_s": row["total_s"],
-                        "avg_ms": row["avg_ms"],
-                        "calls": row["calls"],
-                        "sample_count": row["sample_count"],
-                        "p95_ms": row.get("p95_ms"),
-                    }
+                    self._with_optional_p95(
+                        {
+                            "name": name,
+                            "total_s": row["total_s"],
+                            "avg_ms": row["avg_ms"],
+                            "calls": row["calls"],
+                            "sample_count": row["sample_count"],
+                        },
+                        row,
+                    )
                     for name, row in children.items()
                 ),
                 key=lambda row: row["avg_ms"],
@@ -1125,14 +1135,16 @@ class PhaseProfiler:
             phase_events[group] = {"children": children, "top_children": top_children}
         top_phases = sorted(
             (
-                {
-                    "name": name,
-                    "total_s": row["total_s"],
-                    "pct": row["pct"],
-                    "avg_ms": row["avg_ms"],
-                    "calls": row["calls"],
-                    "p95_ms": row.get("p95_ms"),
-                }
+                self._with_optional_p95(
+                    {
+                        "name": name,
+                        "total_s": row["total_s"],
+                        "pct": row["pct"],
+                        "avg_ms": row["avg_ms"],
+                        "calls": row["calls"],
+                    },
+                    row,
+                )
                 for name, row in phases.items()
             ),
             key=lambda row: row["total_s"],
