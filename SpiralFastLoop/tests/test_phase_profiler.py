@@ -1246,8 +1246,10 @@ def test_evaluate_distributed_summary_sums_metrics_fn_counts(
         steps=1,
     )
 
+    assert metrics["steps"] == 2
     assert metrics["samples"] == 4
     assert metrics["measured_steps"] == 2
+    assert metrics["unmeasured_steps"] == 0
     assert metrics["metrics_fn_calls"] == 2
     assert metrics["metrics_fn_successes"] == 2
     assert metrics["metrics_fn_failures"] == 0
@@ -1649,6 +1651,49 @@ def test_predict_can_return_metrics_and_phase_profile() -> None:
         assert phase_name in phases
         assert metrics[f"profile_{phase_name}_time_s"] == pytest.approx(phases[phase_name]["total_s"])
         assert metrics[f"profile_{phase_name}_pct"] == pytest.approx(phases[phase_name]["pct"])
+
+
+def test_predict_distributed_summary_sums_counter_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inputs = torch.randn(2, 4)
+    targets = torch.zeros(2)
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 2))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+    trainer.dist_ctx = utils_mod.DistributedContext(
+        is_initialized=True,
+        rank=0,
+        world_size=2,
+        local_rank=0,
+        backend="gloo",
+    )
+
+    def fake_distributed_sum(value: torch.Tensor) -> torch.Tensor:
+        return value * 2
+
+    def postprocess(outputs: torch.Tensor) -> torch.Tensor:
+        return outputs.softmax(dim=1)
+
+    monkeypatch.setattr(engine, "distributed_sum", fake_distributed_sum)
+
+    predictions, metrics = trainer.predict(
+        loader,
+        steps=1,
+        postprocess=postprocess,
+        return_metrics=True,
+    )
+
+    assert len(predictions) == 1
+    assert metrics["steps"] == 2
+    assert metrics["samples"] == 4
+    assert metrics["measured_steps"] == 2
+    assert metrics["unmeasured_steps"] == 0
+    assert metrics["batch_size_inference_failures"] == 0
+    assert metrics["postprocess_calls"] == 2
+    assert metrics["postprocess_successes"] == 2
+    assert metrics["postprocess_failures"] == 0
 
 
 def test_predict_logs_postprocess_failures_before_reraising() -> None:

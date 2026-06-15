@@ -1955,6 +1955,7 @@ class FastTrainer:
             total_loss = distributed_sum(total_loss)
             total_weight = distributed_sum(total_weight)
             total_items = int(distributed_sum(torch.tensor(total_items, device=total_loss.device)).item())
+            step_idx = int(distributed_sum(torch.tensor(step_idx, device=total_loss.device)).item())
             measured_steps = int(distributed_sum(torch.tensor(measured_steps, device=total_loss.device)).item())
             batch_size_inference_failures = int(
                 distributed_sum(torch.tensor(batch_size_inference_failures, device=total_loss.device)).item()
@@ -2191,6 +2192,24 @@ class FastTrainer:
                             log_predict_failure("metrics", metrics_error)
         if not metrics_requested:
             return outputs_list
+        if self.dist_ctx.world_size > 1:
+            counter_device = torch.device(self.device)
+            step_idx = int(distributed_sum(torch.tensor(step_idx, device=counter_device)).item())
+            total_items = int(distributed_sum(torch.tensor(total_items, device=counter_device)).item())
+            measured_steps = int(distributed_sum(torch.tensor(measured_steps, device=counter_device)).item())
+            batch_size_inference_failures = int(
+                distributed_sum(torch.tensor(batch_size_inference_failures, device=counter_device)).item()
+            )
+            for reason in list(batch_size_failure_counts.keys()):
+                batch_size_failure_counts[reason] = int(
+                    distributed_sum(torch.tensor(batch_size_failure_counts[reason], device=counter_device)).item()
+                )
+            postprocess_calls = int(
+                distributed_sum(torch.tensor(postprocess_calls, device=counter_device)).item()
+            )
+            postprocess_failures = int(
+                distributed_sum(torch.tensor(postprocess_failures, device=counter_device)).item()
+            )
         metrics = build_predict_metrics()
         self._log_metrics("predict", metrics, mode="epoch")
         return outputs_list, metrics
