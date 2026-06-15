@@ -84,7 +84,9 @@ output surfaces those tails in the `phases:` line, and matrix output also
 surfaces compact summaries such as `fwd_tail(p95=...)`, `bwd_tail(p99=...)`,
 and `opt_tail(std=...)`. Aggregate benchmark summaries also include ranked
 `profile_bottleneck_candidates` with the strongest phase, top-child, untracked,
-and backward-readiness-span signals normalized into profile-percentage scores.
+and backward-readiness-span signals normalized into profile-percentage scores;
+each candidate carries a reason, next-step hint, rank, and returned/omitted
+candidate counts when the list is capped.
 The ResNet drilldown script prints the same top-phase tail fields. Throughput
 summaries include `p99_s` and `std_batch_s`. Set `profile_sync=True` only when
 you need stricter accelerator timings; it synchronizes around profiled regions

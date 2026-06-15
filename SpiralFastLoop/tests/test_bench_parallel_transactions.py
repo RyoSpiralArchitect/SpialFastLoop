@@ -935,6 +935,8 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
             "profile_backward_grad_ready_top_pct": 30.0,
             "profile_backward_grad_ready_top_avg_ms": 3.0,
             "profile_optimizer_pct": 10.0,
+            "profile_optimizer_untracked_pct": 20.0,
+            "profile_optimizer_coverage_pct": 80.0,
             "profile_optimizer_top_pct_of_parent": 90.0,
             "profile_optimizer_top_avg_ms": 3.0,
         },
@@ -942,7 +944,11 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
 
     candidates = summary["profile_bottleneck_candidates"]
 
-    assert summary["profile_bottleneck_candidate_count"] == 8
+    assert summary["profile_bottleneck_candidate_count"] == 9
+    assert summary["profile_bottleneck_candidate_returned_count"] == 8
+    assert summary["profile_bottleneck_candidate_limit"] == 8
+    assert summary["profile_bottleneck_candidate_omitted_count"] == 1
+    assert len(candidates) == 8
     assert [candidate["name"] for candidate in candidates[:4]] == [
         "backward_phase",
         "backward_readiness_span",
@@ -957,8 +963,13 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
             candidate["name"],
         ),
     )
+    assert [candidate["rank"] for candidate in candidates] == list(range(1, 9))
     backward_phase = candidates[0]
     assert backward_phase["metric"] == "profile_backward_pct"
+    assert backward_phase["label"] == "backward phase"
+    assert backward_phase["category"] == "phase_share"
+    assert backward_phase["reason"] == "backward owns a large share of profiled loop time"
+    assert backward_phase["next_step"] == "inspect gradient-ready span and backward top-child metrics"
     assert backward_phase["score"] == pytest.approx(50.0)
     assert backward_phase["score_unit"] == "profile_pct"
     backward_span = candidates[1]

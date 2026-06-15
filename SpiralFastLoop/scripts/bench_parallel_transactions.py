@@ -582,8 +582,12 @@ PROFILE_BOTTLENECK_CANDIDATE_LIMIT = 8
 PROFILE_BOTTLENECK_CANDIDATE_SPECS = (
     {
         "name": "forward_phase",
+        "label": "forward phase",
+        "category": "phase_share",
         "metric": "profile_forward_pct",
         "unit": "profile_pct",
+        "reason": "forward owns a large share of profiled loop time",
+        "next_step": "inspect forward top-child and tail metrics",
         "details": (
             ("avg_ms", "profile_forward_avg_ms"),
             ("p95_ms", "profile_forward_p95_ms"),
@@ -593,8 +597,12 @@ PROFILE_BOTTLENECK_CANDIDATE_SPECS = (
     },
     {
         "name": "backward_phase",
+        "label": "backward phase",
+        "category": "phase_share",
         "metric": "profile_backward_pct",
         "unit": "profile_pct",
+        "reason": "backward owns a large share of profiled loop time",
+        "next_step": "inspect gradient-ready span and backward top-child metrics",
         "details": (
             ("avg_ms", "profile_backward_avg_ms"),
             ("p95_ms", "profile_backward_p95_ms"),
@@ -604,8 +612,12 @@ PROFILE_BOTTLENECK_CANDIDATE_SPECS = (
     },
     {
         "name": "optimizer_phase",
+        "label": "optimizer phase",
+        "category": "phase_share",
         "metric": "profile_optimizer_pct",
         "unit": "profile_pct",
+        "reason": "optimizer owns a large share of profiled loop time",
+        "next_step": "inspect optimizer top-child and tail metrics",
         "details": (
             ("avg_ms", "profile_optimizer_avg_ms"),
             ("p95_ms", "profile_optimizer_p95_ms"),
@@ -615,9 +627,13 @@ PROFILE_BOTTLENECK_CANDIDATE_SPECS = (
     },
     {
         "name": "forward_untracked",
+        "label": "forward untracked time",
+        "category": "coverage_gap",
         "metric": "profile_forward_untracked_pct",
         "parent_metric": "profile_forward_pct",
         "unit": "pct_of_parent",
+        "reason": "a large share of forward time is outside child timers",
+        "next_step": "increase model profiling coverage or include narrower module filters",
         "details": (
             ("coverage_pct", "profile_forward_coverage_pct"),
             ("untracked_time_s", "profile_forward_untracked_time_s"),
@@ -625,9 +641,13 @@ PROFILE_BOTTLENECK_CANDIDATE_SPECS = (
     },
     {
         "name": "optimizer_untracked",
+        "label": "optimizer untracked time",
+        "category": "coverage_gap",
         "metric": "profile_optimizer_untracked_pct",
         "parent_metric": "profile_optimizer_pct",
         "unit": "pct_of_parent",
+        "reason": "a large share of optimizer time is outside child timers",
+        "next_step": "add or inspect optimizer child timers before optimizing",
         "details": (
             ("coverage_pct", "profile_optimizer_coverage_pct"),
             ("untracked_time_s", "profile_optimizer_untracked_time_s"),
@@ -635,9 +655,13 @@ PROFILE_BOTTLENECK_CANDIDATE_SPECS = (
     },
     {
         "name": "forward_top_child",
+        "label": "forward top child",
+        "category": "child_hotspot",
         "metric": "profile_forward_top_pct_of_parent",
         "parent_metric": "profile_forward_pct",
         "unit": "pct_of_parent",
+        "reason": "one forward child dominates its parent phase",
+        "next_step": "drill into selected modules with depth/include filters",
         "details": (
             ("avg_ms", "profile_forward_top_avg_ms"),
             ("p95_ms", "profile_forward_top_p95_ms"),
@@ -649,9 +673,13 @@ PROFILE_BOTTLENECK_CANDIDATE_SPECS = (
     },
     {
         "name": "backward_readiness_span",
+        "label": "backward readiness span",
+        "category": "readiness_span",
         "metric": "profile_backward_grad_ready_span_pct",
         "parent_metric": "profile_backward_pct",
         "unit": "pct_of_parent",
+        "reason": "gradient readiness is spread across a large part of backward time",
+        "next_step": "look for long gaps between earliest and latest ready modules",
         "details": (
             ("span_avg_ms", "profile_backward_grad_ready_span_avg_ms"),
             ("earliest_pct", "profile_backward_grad_ready_earliest_pct"),
@@ -663,9 +691,13 @@ PROFILE_BOTTLENECK_CANDIDATE_SPECS = (
     },
     {
         "name": "backward_ready_top_child",
+        "label": "backward ready top child",
+        "category": "child_hotspot",
         "metric": "profile_backward_grad_ready_top_pct",
         "parent_metric": "profile_backward_pct",
         "unit": "pct_of_parent",
+        "reason": "one module dominates gradient-ready timing",
+        "next_step": "focus backward inspection on the slowest ready module",
         "details": (
             ("avg_ms", "profile_backward_grad_ready_top_avg_ms"),
             ("p95_ms", "profile_backward_grad_ready_top_p95_ms"),
@@ -676,9 +708,13 @@ PROFILE_BOTTLENECK_CANDIDATE_SPECS = (
     },
     {
         "name": "optimizer_top_child",
+        "label": "optimizer top child",
+        "category": "child_hotspot",
         "metric": "profile_optimizer_top_pct_of_parent",
         "parent_metric": "profile_optimizer_pct",
         "unit": "pct_of_parent",
+        "reason": "one optimizer child dominates its parent phase",
+        "next_step": "compare optimizer child timing and parameter-group behavior",
         "details": (
             ("avg_ms", "profile_optimizer_top_avg_ms"),
             ("p95_ms", "profile_optimizer_top_p95_ms"),
@@ -766,6 +802,9 @@ def _profile_bottleneck_candidate(summary: dict, spec: dict[str, object]) -> Opt
     metric = spec["metric"]
     if not isinstance(metric, str):
         return None
+    name = spec.get("name")
+    if not isinstance(name, str) or not name:
+        return None
     value = _measured_summary_metric_value(summary, metric)
     if value is None or value <= 0.0:
         return None
@@ -774,11 +813,15 @@ def _profile_bottleneck_candidate(summary: dict, spec: dict[str, object]) -> Opt
     score = value
     score_unit = unit
     candidate: dict[str, object] = {
-        "name": spec["name"],
+        "name": name,
         "metric": metric,
         "value": value,
         "unit": unit,
     }
+    for text_field in ("label", "category", "reason", "next_step"):
+        text_value = spec.get(text_field)
+        if isinstance(text_value, str) and text_value:
+            candidate[text_field] = text_value
     parent_metric = spec.get("parent_metric")
     if isinstance(parent_metric, str):
         parent_value = _measured_summary_metric_value(summary, parent_metric)
@@ -807,7 +850,7 @@ def _profile_bottleneck_candidate(summary: dict, spec: dict[str, object]) -> Opt
     return candidate
 
 
-def profile_bottleneck_candidates_for_summary(summary: dict) -> list[dict[str, object]]:
+def _ranked_profile_bottleneck_candidates(summary: dict) -> list[dict[str, object]]:
     candidates = []
     for spec in PROFILE_BOTTLENECK_CANDIDATE_SPECS:
         candidate = _profile_bottleneck_candidate(summary, spec)
@@ -820,14 +863,27 @@ def profile_bottleneck_candidates_for_summary(summary: dict) -> list[dict[str, o
             str(candidate["name"]),
         )
     )
-    return candidates[:PROFILE_BOTTLENECK_CANDIDATE_LIMIT]
+    return [
+        {**candidate, "rank": rank}
+        for rank, candidate in enumerate(candidates, start=1)
+    ]
+
+
+def profile_bottleneck_candidates_for_summary(summary: dict) -> list[dict[str, object]]:
+    return _ranked_profile_bottleneck_candidates(summary)[:PROFILE_BOTTLENECK_CANDIDATE_LIMIT]
 
 
 def _add_profile_bottleneck_candidates(summary: dict) -> None:
-    candidates = profile_bottleneck_candidates_for_summary(summary)
-    if not candidates:
+    ranked_candidates = _ranked_profile_bottleneck_candidates(summary)
+    if not ranked_candidates:
         return
-    summary["profile_bottleneck_candidate_count"] = len(candidates)
+    candidates = ranked_candidates[:PROFILE_BOTTLENECK_CANDIDATE_LIMIT]
+    omitted_count = len(ranked_candidates) - len(candidates)
+    summary["profile_bottleneck_candidate_count"] = len(ranked_candidates)
+    summary["profile_bottleneck_candidate_returned_count"] = len(candidates)
+    summary["profile_bottleneck_candidate_limit"] = PROFILE_BOTTLENECK_CANDIDATE_LIMIT
+    if omitted_count > 0:
+        summary["profile_bottleneck_candidate_omitted_count"] = omitted_count
     summary["profile_bottleneck_candidates"] = candidates
 
 
