@@ -531,6 +531,14 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "profile_backward_grad_ready_top_pct": 30.0,
             "profile_backward_grad_ready_top_calls": 2,
             "profile_optimizer_pct": 10.0,
+            "profile_optimizer_child_count": 1,
+            "profile_optimizer_tracked_time_s": 0.03,
+            "profile_optimizer_untracked_time_s": 0.01,
+            "profile_optimizer_overtracked_time_s": 0.0,
+            "profile_optimizer_top_time_s": 0.02,
+            "profile_optimizer_top_pct_of_parent": 20.0,
+            "profile_optimizer_top_avg_ms": 2.0,
+            "profile_optimizer_top_calls": 2,
             "profile_user_metrics_pct": 4.0,
             "profile_postprocess_pct": 6.0,
             "profile_collect_output_pct": 3.0,
@@ -624,6 +632,14 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "profile_backward_grad_ready_top_pct": 50.0,
             "profile_backward_grad_ready_top_calls": 3,
             "profile_optimizer_pct": 15.0,
+            "profile_optimizer_child_count": 2,
+            "profile_optimizer_tracked_time_s": 0.04,
+            "profile_optimizer_untracked_time_s": 0.02,
+            "profile_optimizer_overtracked_time_s": 0.01,
+            "profile_optimizer_top_time_s": 0.03,
+            "profile_optimizer_top_pct_of_parent": 30.0,
+            "profile_optimizer_top_avg_ms": 3.0,
+            "profile_optimizer_top_calls": 3,
             "profile_user_metrics_pct": 8.0,
             "profile_postprocess_pct": 10.0,
             "profile_collect_output_pct": 5.0,
@@ -702,6 +718,14 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["mean_profile_backward_grad_ready_top_avg_ms"] == pytest.approx(5.0)
     assert summary["mean_profile_backward_grad_ready_top_pct"] == pytest.approx(40.0)
     assert summary["mean_profile_backward_grad_ready_top_calls"] == pytest.approx(2.5)
+    assert summary["mean_profile_optimizer_child_count"] == pytest.approx(1.5)
+    assert summary["mean_profile_optimizer_tracked_time_s"] == pytest.approx(0.035)
+    assert summary["mean_profile_optimizer_untracked_time_s"] == pytest.approx(0.015)
+    assert summary["mean_profile_optimizer_overtracked_time_s"] == pytest.approx(0.005)
+    assert summary["mean_profile_optimizer_top_time_s"] == pytest.approx(0.025)
+    assert summary["mean_profile_optimizer_top_pct_of_parent"] == pytest.approx(25.0)
+    assert summary["mean_profile_optimizer_top_avg_ms"] == pytest.approx(2.5)
+    assert summary["mean_profile_optimizer_top_calls"] == pytest.approx(2.5)
     assert summary["profiled_runs"] == 2
     assert summary["profile_model_status_counts"] == {"hook_failures": 1, "ok": 1}
     assert summary["best_reported"]["run"] == 1
@@ -730,6 +754,14 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["best_reported"]["profile_backward_grad_ready_top_avg_ms"] == pytest.approx(6.0)
     assert summary["best_reported"]["profile_backward_grad_ready_top_pct"] == pytest.approx(50.0)
     assert summary["best_reported"]["profile_backward_grad_ready_top_calls"] == 3
+    assert summary["best_reported"]["profile_optimizer_child_count"] == 2
+    assert summary["best_reported"]["profile_optimizer_tracked_time_s"] == pytest.approx(0.04)
+    assert summary["best_reported"]["profile_optimizer_untracked_time_s"] == pytest.approx(0.02)
+    assert summary["best_reported"]["profile_optimizer_overtracked_time_s"] == pytest.approx(0.01)
+    assert summary["best_reported"]["profile_optimizer_top_time_s"] == pytest.approx(0.03)
+    assert summary["best_reported"]["profile_optimizer_top_pct_of_parent"] == pytest.approx(30.0)
+    assert summary["best_reported"]["profile_optimizer_top_avg_ms"] == pytest.approx(3.0)
+    assert summary["best_reported"]["profile_optimizer_top_calls"] == 3
     assert summary["best_reported"]["profile_postprocess_pct"] == pytest.approx(10.0)
     assert summary["best_reported"]["profile_collect_output_pct"] == pytest.approx(5.0)
     assert summary["best_reported"]["device"] == "cpu"

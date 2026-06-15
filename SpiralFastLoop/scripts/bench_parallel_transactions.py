@@ -176,6 +176,17 @@ PROFILE_FORWARD_BREAKDOWN_SUMMARY_FIELDS = (
     "profile_forward_top_calls",
 )
 
+PROFILE_OPTIMIZER_BREAKDOWN_SUMMARY_FIELDS = (
+    "profile_optimizer_child_count",
+    "profile_optimizer_tracked_time_s",
+    "profile_optimizer_untracked_time_s",
+    "profile_optimizer_overtracked_time_s",
+    "profile_optimizer_top_time_s",
+    "profile_optimizer_top_pct_of_parent",
+    "profile_optimizer_top_avg_ms",
+    "profile_optimizer_top_calls",
+)
+
 PROFILE_EVENT_SUMMARY_FIELDS = (
     "profile_backward_grad_ready_child_count",
     "profile_backward_grad_ready_parent_avg_ms",
@@ -193,6 +204,7 @@ PROFILE_MODEL_SUMMARY_FIELDS = (
 PROFILE_SUMMARY_FIELDS = (
     PROFILE_PHASE_SUMMARY_FIELDS
     + PROFILE_FORWARD_BREAKDOWN_SUMMARY_FIELDS
+    + PROFILE_OPTIMIZER_BREAKDOWN_SUMMARY_FIELDS
     + PROFILE_EVENT_SUMMARY_FIELDS
     + PROFILE_MODEL_SUMMARY_FIELDS
 )
@@ -223,6 +235,8 @@ SUMMARY_INTEGER_FIELDS = (
         "profile_open_detail_count",
         "profile_forward_child_count",
         "profile_forward_top_calls",
+        "profile_optimizer_child_count",
+        "profile_optimizer_top_calls",
         "profile_backward_grad_ready_child_count",
         "profile_backward_grad_ready_top_calls",
         "profile_model_modules_selected",
@@ -329,6 +343,14 @@ BEST_RUN_FIELDS = (
     "profile_loss_reduce_pct",
     "profile_backward_pct",
     "profile_optimizer_pct",
+    "profile_optimizer_child_count",
+    "profile_optimizer_tracked_time_s",
+    "profile_optimizer_untracked_time_s",
+    "profile_optimizer_overtracked_time_s",
+    "profile_optimizer_top_time_s",
+    "profile_optimizer_top_pct_of_parent",
+    "profile_optimizer_top_avg_ms",
+    "profile_optimizer_top_calls",
     "profile_user_metrics_pct",
     "profile_postprocess_pct",
     "profile_collect_output_pct",
@@ -403,6 +425,8 @@ BEST_RUN_INTEGER_FIELDS = frozenset({
     "profile_open_detail_count",
     "profile_forward_child_count",
     "profile_forward_top_calls",
+    "profile_optimizer_child_count",
+    "profile_optimizer_top_calls",
     "profile_backward_grad_ready_child_count",
     "profile_backward_grad_ready_top_calls",
     "profile_model_modules_selected",

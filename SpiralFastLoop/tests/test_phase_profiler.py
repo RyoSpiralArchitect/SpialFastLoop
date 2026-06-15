@@ -2848,6 +2848,127 @@ def test_profile_flat_metrics_reject_invalid_forward_drilldown_values() -> None:
     ]
 
 
+def test_profile_flat_metrics_include_optimizer_drilldown_position() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "profile_total_s": 1.0,
+        "phases": {
+            "optimizer": {"total_s": 0.05, "pct": 5.0, "avg_ms": 5.0},
+        },
+        "phase_breakdowns": {
+            "optimizer": {
+                "tracked_s": 0.04,
+                "untracked_s": 0.01,
+                "overtracked_s": 0.0,
+                "children": {
+                    "optimizer.zero_grad": {"total_s": 0.01},
+                    "optimizer.step": {"total_s": 0.03},
+                },
+                "top_children": [
+                    {
+                        "name": "optimizer.step",
+                        "total_s": 0.03,
+                        "pct_of_parent": 60.0,
+                        "avg_ms": 3.0,
+                        "calls": 2,
+                    },
+                ],
+            },
+        },
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert metrics["profile_optimizer_child_count"] == 2
+    assert metrics["profile_optimizer_tracked_time_s"] == pytest.approx(0.04)
+    assert metrics["profile_optimizer_untracked_time_s"] == pytest.approx(0.01)
+    assert metrics["profile_optimizer_overtracked_time_s"] == pytest.approx(0.0)
+    assert metrics["profile_optimizer_top_time_s"] == pytest.approx(0.03)
+    assert metrics["profile_optimizer_top_pct_of_parent"] == pytest.approx(60.0)
+    assert metrics["profile_optimizer_top_avg_ms"] == pytest.approx(3.0)
+    assert metrics["profile_optimizer_top_calls"] == 2
+    assert metrics["profile_flat_metric_invalid_count"] == 0
+    assert "profile_flat_metric_invalid_fields" not in metrics
+
+
+def test_profile_flat_metrics_tolerate_partial_optimizer_drilldown_rows() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "profile_total_s": 1.0,
+        "phases": {},
+        "phase_breakdowns": {
+            "optimizer": {
+                "children": {"optimizer.step": {}},
+                "top_children": [
+                    {
+                        "name": "optimizer.step",
+                        "avg_ms": 3.0,
+                    },
+                ],
+            },
+        },
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert metrics["profile_optimizer_child_count"] == 1
+    assert metrics["profile_optimizer_top_avg_ms"] == pytest.approx(3.0)
+    assert "profile_optimizer_tracked_time_s" not in metrics
+    assert "profile_optimizer_untracked_time_s" not in metrics
+    assert "profile_optimizer_overtracked_time_s" not in metrics
+    assert "profile_optimizer_top_time_s" not in metrics
+    assert "profile_optimizer_top_pct_of_parent" not in metrics
+    assert "profile_optimizer_top_calls" not in metrics
+    assert metrics["profile_flat_metric_invalid_count"] == 0
+    assert "profile_flat_metric_invalid_fields" not in metrics
+
+
+def test_profile_flat_metrics_reject_invalid_optimizer_drilldown_values() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "profile_total_s": 1.0,
+        "phases": {},
+        "phase_breakdowns": {
+            "optimizer": {
+                "tracked_s": -0.04,
+                "untracked_s": "missing",
+                "overtracked_s": True,
+                "children": {"optimizer.step": {}},
+                "top_children": [
+                    {
+                        "name": "optimizer.step",
+                        "total_s": float("nan"),
+                        "pct_of_parent": "bad",
+                        "avg_ms": -3.0,
+                        "calls": 1.5,
+                    },
+                ],
+            },
+        },
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert metrics["profile_optimizer_child_count"] == 1
+    assert "profile_optimizer_tracked_time_s" not in metrics
+    assert "profile_optimizer_untracked_time_s" not in metrics
+    assert "profile_optimizer_overtracked_time_s" not in metrics
+    assert "profile_optimizer_top_time_s" not in metrics
+    assert "profile_optimizer_top_pct_of_parent" not in metrics
+    assert "profile_optimizer_top_avg_ms" not in metrics
+    assert "profile_optimizer_top_calls" not in metrics
+    assert metrics["profile_flat_metric_invalid_count"] == 7
+    assert metrics["profile_flat_metric_invalid_fields"] == [
+        "profile_optimizer_tracked_time_s",
+        "profile_optimizer_untracked_time_s",
+        "profile_optimizer_overtracked_time_s",
+        "profile_optimizer_top_time_s",
+        "profile_optimizer_top_pct_of_parent",
+        "profile_optimizer_top_avg_ms",
+        "profile_optimizer_top_calls",
+    ]
+
+
 def test_profile_flat_metrics_include_backward_event_position() -> None:
     metrics: dict[str, object] = {}
     profile = {

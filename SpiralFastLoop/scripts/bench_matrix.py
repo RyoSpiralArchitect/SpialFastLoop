@@ -249,6 +249,13 @@ def _format_summary_row(row: dict) -> str:
     optimizer_pct = _measured_summary_value(row, "mean_profile_optimizer_pct")
     if optimizer_pct is not None:
         profile_parts.append(f"opt={optimizer_pct:.1f}%")
+    optimizer_top_pct = _measured_summary_value(row, "mean_profile_optimizer_top_pct_of_parent")
+    optimizer_top_avg_ms = _measured_summary_value(row, "mean_profile_optimizer_top_avg_ms")
+    if optimizer_top_pct is not None:
+        optimizer_text = f"opt_top={optimizer_top_pct:.1f}%"
+        if optimizer_top_avg_ms is not None:
+            optimizer_text = f"{optimizer_text}@{optimizer_top_avg_ms:.2f}ms"
+        profile_parts.append(optimizer_text)
     backward_ready_pct = _measured_summary_value(row, "mean_profile_backward_grad_ready_top_pct")
     backward_ready_avg_ms = _measured_summary_value(row, "mean_profile_backward_grad_ready_top_avg_ms")
     if backward_ready_pct is not None:
