@@ -347,11 +347,35 @@ def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
                 "rank": 1,
             },
         ],
+        "profile_bottleneck_top_candidate": {
+            "name": "forward_phase",
+            "score": 55.0,
+            "score_unit": "profile_pct",
+            "rank": 1,
+            "category": "phase_share",
+        },
+        "profile_bottleneck_category_summary": {
+            "child_hotspot": {
+                "count": 1,
+                "max_score": 35.0,
+                "score_unit": "profile_pct",
+                "top_candidate": "forward_top_child",
+                "top_rank": 2,
+            },
+            "phase_share": {
+                "count": 2,
+                "max_score": 55.0,
+                "score_unit": "profile_pct",
+                "top_candidate": "forward_phase",
+                "top_rank": 1,
+            },
+        },
     }
 
     formatted = _format_summary_row(row)
 
-    assert "hotspot=backward_phase:42.5%" in formatted
+    assert "hotspot=forward_phase:55.0%(phase_share)" in formatted
+    assert "pressure(child_hotspot:forward_top_child=35.0%,phase_share:forward_phase=55.0%)" in formatted
 
 
 def test_format_summary_row_includes_scheduler_failures_when_positive() -> None:

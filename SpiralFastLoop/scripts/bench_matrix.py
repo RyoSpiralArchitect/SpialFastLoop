@@ -262,10 +262,12 @@ def _format_phase_tail_parts(row: dict, *, aggregate: bool) -> list[str]:
 
 
 def _format_top_bottleneck_candidate(row: dict) -> str:
-    candidates = row.get("profile_bottleneck_candidates")
-    if not isinstance(candidates, list) or not candidates:
-        return ""
-    candidate = candidates[0]
+    candidate = row.get("profile_bottleneck_top_candidate")
+    if not isinstance(candidate, dict):
+        candidates = row.get("profile_bottleneck_candidates")
+        if not isinstance(candidates, list) or not candidates:
+            return ""
+        candidate = candidates[0]
     if not isinstance(candidate, dict):
         return ""
     name = candidate.get("name")
@@ -275,7 +277,31 @@ def _format_top_bottleneck_candidate(row: dict) -> str:
     if score is None or score < 0.0:
         return ""
     suffix = "%" if candidate.get("score_unit") == "profile_pct" else ""
-    return f"hotspot={name}:{score:.1f}{suffix}"
+    text = f"hotspot={name}:{score:.1f}{suffix}"
+    category = candidate.get("category")
+    if isinstance(category, str) and category:
+        text = f"{text}({category})"
+    return text
+
+
+def _format_bottleneck_pressure(row: dict) -> str:
+    category_summary = row.get("profile_bottleneck_category_summary")
+    if not isinstance(category_summary, dict):
+        return ""
+    parts = []
+    for category_name in sorted(category_summary):
+        entry = category_summary.get(category_name)
+        if not isinstance(entry, dict):
+            continue
+        top_candidate = entry.get("top_candidate")
+        score = _finite_summary_value(entry.get("max_score"))
+        if not isinstance(top_candidate, str) or not top_candidate or score is None or score < 0.0:
+            continue
+        suffix = "%" if entry.get("score_unit") == "profile_pct" else ""
+        parts.append(f"{category_name}:{top_candidate}={score:.1f}{suffix}")
+    if not parts:
+        return ""
+    return f"pressure({','.join(parts)})"
 
 
 def _format_summary_row(row: dict) -> str:
@@ -396,6 +422,9 @@ def _format_summary_row(row: dict) -> str:
     bottleneck_text = _format_top_bottleneck_candidate(row)
     if bottleneck_text:
         profile_parts.append(bottleneck_text)
+    bottleneck_pressure = _format_bottleneck_pressure(row)
+    if bottleneck_pressure:
+        profile_parts.append(bottleneck_pressure)
     scheduler_failures = _measured_summary_value(row, "mean_scheduler_step_failures")
     if scheduler_failures is not None and scheduler_failures > 0.0:
         profile_parts.append(f"scheduler(failures={scheduler_failures:.1f})")

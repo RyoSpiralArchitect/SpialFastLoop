@@ -89,9 +89,10 @@ each candidate carries a reason, next-step hint, rank, and returned/omitted
 candidate counts when the list is capped. Summaries also expose
 `profile_bottleneck_top_candidate` and `profile_bottleneck_category_summary`
 for dashboards that compare phase-share, coverage-gap, child-hotspot, and
-readiness-span pressure directly. The transactional benchmark also prints a
-compact `Bottleneck:` line before the aggregate JSON when candidates are
-available.
+readiness-span pressure directly. Matrix summaries surface the same signal as
+compact `hotspot=...` and `pressure(...)` fragments, and the transactional
+benchmark prints a `Bottleneck:` line before the aggregate JSON when candidates
+are available.
 The ResNet drilldown script prints the same top-phase tail fields. Throughput
 summaries include `p99_s` and `std_batch_s`. Set `profile_sync=True` only when
 you need stricter accelerator timings; it synchronizes around profiled regions
