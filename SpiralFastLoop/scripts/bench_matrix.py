@@ -21,9 +21,11 @@ from bench_parallel_transactions import (
     _format_profile_model_hook_summary,
     _format_scheduler_summary,
     _format_setup_breakdown,
+    _add_summary_diagnostic_totals,
     _int_arg,
     _positive_sample_count_value,
     _profile_model_status_counts,
+    _summary_metric_diagnostic,
     _summary_metric_max_value,
     _summary_metric_min_value,
     _summary_row,
@@ -128,6 +130,9 @@ def summarize_rows(rows: list[dict]) -> dict:
 
     summaries = []
     for (dataset_mode, compile_mode, workers), group_rows in sorted(groups.items()):
+        present_fields = set()
+        for row in group_rows:
+            present_fields.update(row.keys())
         summary = {
             "dataset_mode": dataset_mode,
             "compile_mode": compile_mode,
@@ -141,6 +146,7 @@ def summarize_rows(rows: list[dict]) -> dict:
                 for row in group_rows
             ),
         }
+        summary_diagnostics: list[dict[str, object]] = []
         profiled_runs = count_profiled_rows(group_rows)
         if profiled_runs > 0:
             summary["profiled_runs"] = profiled_runs
@@ -149,17 +155,30 @@ def summarize_rows(rows: list[dict]) -> dict:
             summary["profile_model_status_counts"] = status_counts
         if status_invalid_count > 0:
             summary["profile_model_status_invalid_count"] = status_invalid_count
+            summary_diagnostics.append({
+                "field": "profile_model_status",
+                "invalid_count": status_invalid_count,
+            })
         for field in summary_fields_for_rows(group_rows):
             missing_as_zero = field in BASE_SUMMARY_FIELDS
-            for stat_name, value in summarize_metric(
+            metric_stats = summarize_metric(
                 group_rows,
                 field,
                 missing_as_zero=missing_as_zero,
                 min_value=_summary_metric_min_value(field),
                 max_value=_summary_metric_max_value(field),
                 integer=field in SUMMARY_INTEGER_FIELDS,
-            ).items():
+            )
+            diagnostic = _summary_metric_diagnostic(
+                field,
+                metric_stats,
+                field_present=field in present_fields,
+            )
+            if diagnostic is not None:
+                summary_diagnostics.append(diagnostic)
+            for stat_name, value in metric_stats.items():
                 summary[f"{stat_name}_{field}"] = value
+        _add_summary_diagnostic_totals(summary, summary_diagnostics)
         summaries.append(summary)
 
     best_reported = None

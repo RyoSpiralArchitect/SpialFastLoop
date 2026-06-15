@@ -1216,6 +1216,57 @@ def test_summarize_rows_skips_profile_fields_when_absent() -> None:
     assert "profiled_runs" not in group
 
 
+def test_summarize_rows_surfaces_group_diagnostic_fields() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 90.0,
+            "end_to_end_wall_time_s": 1.1,
+            "setup_time_s": 0.1,
+            "wall_time_s": 1.0,
+            "cold_start_time_s": 0.2,
+            "grad_accum": 2,
+            "profile_forward_backward_pct": 50.0,
+            "profile_model_status": "unknown_status",
+        },
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": float("nan"),
+            "samples_per_sec": 95.0,
+            "end_to_end_wall_time_s": 0.9,
+            "setup_time_s": 0.1,
+            "wall_time_s": 0.8,
+            "grad_accum": 0,
+            "profile_forward_backward_pct": 125.0,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+    diagnostics = {
+        diagnostic["field"]: diagnostic
+        for diagnostic in group["summary_diagnostic_fields"]
+    }
+
+    assert group["summary_diagnostic_field_count"] == 5
+    assert group["summary_missing_field_count"] == 1
+    assert group["summary_non_finite_field_count"] == 1
+    assert group["summary_invalid_field_count"] == 3
+    assert diagnostics["profile_model_status"]["invalid_count"] == 1
+    assert diagnostics["reported_samples_per_sec"]["non_finite_count"] == 1
+    assert diagnostics["cold_start_time_s"]["missing_count"] == 1
+    assert diagnostics["grad_accum"]["invalid_count"] == 1
+    assert diagnostics["profile_forward_backward_pct"]["invalid_count"] == 1
+    assert summary["best_reported"]["summary_diagnostic_fields"] == group["summary_diagnostic_fields"]
+    assert "samples_per_sec" not in diagnostics
+    json.dumps(summary, allow_nan=False)
+
+
 def test_summarize_rows_preserves_top_profile_distribution_metrics() -> None:
     rows = [
         {

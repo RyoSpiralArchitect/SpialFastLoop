@@ -192,7 +192,8 @@ python3 scripts/bench_matrix.py \
 Matrix summaries include per-config means, min/max values, stddev, setup
 breakdowns, best steady throughput, and best end-to-end configuration. Profile
 summaries preserve phase fields such as `user_metrics`, `postprocess`, and
-`collect_output` when a run emits them.
+`collect_output` when a run emits them. Per-config groups also carry
+`summary_diagnostic_fields` for missing, non-finite, or out-of-range inputs.
 
 ## License
 
