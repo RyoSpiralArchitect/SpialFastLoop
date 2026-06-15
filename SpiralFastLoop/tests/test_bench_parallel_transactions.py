@@ -856,6 +856,72 @@ def test_summarize_results_preserves_best_run_profile_model_failure_context() ->
     json.dumps(summary, allow_nan=False)
 
 
+def test_summarize_results_preserves_top_profile_distribution_metrics() -> None:
+    summary = summarize_results([
+        {
+            "run": 0,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 200.0,
+            "samples_per_sec": 180.0,
+            "wall_time_s": 1.2,
+            "profile_forward_top_p50_ms": 2.0,
+            "profile_forward_top_p95_ms": 4.0,
+            "profile_forward_top_p99_ms": 6.0,
+            "profile_forward_top_std_ms": 0.5,
+            "profile_forward_top_min_ms": 1.0,
+            "profile_forward_top_max_ms": 7.0,
+            "profile_forward_top_sample_count": 3,
+            "profile_forward_top_window_sample_count": 2,
+            "profile_backward_grad_ready_top_p99_ms": 5.0,
+            "profile_backward_grad_ready_top_std_ms": 0.4,
+            "profile_backward_grad_ready_top_sample_count": 3,
+            "profile_optimizer_top_p99_ms": 3.0,
+            "profile_optimizer_top_std_ms": 0.3,
+            "profile_optimizer_top_window_sample_count": 2,
+        },
+        {
+            "run": 1,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 300.0,
+            "samples_per_sec": 280.0,
+            "wall_time_s": 1.0,
+            "profile_forward_top_p50_ms": 3.0,
+            "profile_forward_top_p95_ms": 5.0,
+            "profile_forward_top_p99_ms": 9.0,
+            "profile_forward_top_std_ms": 0.7,
+            "profile_forward_top_min_ms": 2.0,
+            "profile_forward_top_max_ms": 10.0,
+            "profile_forward_top_sample_count": 4,
+            "profile_forward_top_window_sample_count": 3,
+            "profile_backward_grad_ready_top_p99_ms": 8.0,
+            "profile_backward_grad_ready_top_std_ms": 0.6,
+            "profile_backward_grad_ready_top_sample_count": 4,
+            "profile_optimizer_top_p99_ms": 4.0,
+            "profile_optimizer_top_std_ms": 0.5,
+            "profile_optimizer_top_window_sample_count": 3,
+        },
+    ])
+
+    assert summary["mean_profile_forward_top_p50_ms"] == pytest.approx(2.5)
+    assert summary["mean_profile_forward_top_p99_ms"] == pytest.approx(7.5)
+    assert summary["mean_profile_forward_top_std_ms"] == pytest.approx(0.6)
+    assert summary["mean_profile_forward_top_min_ms"] == pytest.approx(1.5)
+    assert summary["max_profile_forward_top_max_ms"] == pytest.approx(10.0)
+    assert summary["mean_profile_forward_top_sample_count"] == pytest.approx(3.5)
+    assert summary["mean_profile_forward_top_window_sample_count"] == pytest.approx(2.5)
+    assert summary["mean_profile_backward_grad_ready_top_p99_ms"] == pytest.approx(6.5)
+    assert summary["mean_profile_backward_grad_ready_top_std_ms"] == pytest.approx(0.5)
+    assert summary["mean_profile_backward_grad_ready_top_sample_count"] == pytest.approx(3.5)
+    assert summary["mean_profile_optimizer_top_p99_ms"] == pytest.approx(3.5)
+    assert summary["mean_profile_optimizer_top_std_ms"] == pytest.approx(0.4)
+    assert summary["mean_profile_optimizer_top_window_sample_count"] == pytest.approx(2.5)
+    assert summary["best_reported"]["profile_forward_top_p99_ms"] == pytest.approx(9.0)
+    assert summary["best_reported"]["profile_forward_top_sample_count"] == 4
+    assert summary["best_reported"]["profile_backward_grad_ready_top_p99_ms"] == pytest.approx(8.0)
+    assert summary["best_reported"]["profile_optimizer_top_window_sample_count"] == 3
+    json.dumps(summary, allow_nan=False)
+
+
 def test_summarize_results_omits_zero_only_scheduler_diagnostics() -> None:
     summary = summarize_results([
         {
@@ -1673,21 +1739,25 @@ def test_format_profile_breakdown_summary_omits_malformed_values() -> None:
     assert _format_profile_breakdown_summary(profile, "loss") == ""
 
 
-def test_format_profile_breakdown_child_timing_includes_avg_and_p95() -> None:
+def test_format_profile_breakdown_child_timing_includes_avg_and_tail() -> None:
     formatted = _format_profile_breakdown_child_timing({
         "pct_of_parent": 42.5,
         "avg_ms": 1.25,
         "p95_ms": 2.5,
+        "p99_ms": 3.5,
+        "std_ms": 0.25,
     })
 
-    assert formatted == "42.5% avg=1.25ms p95=2.50ms"
+    assert formatted == "42.5% avg=1.25ms p95=2.50ms p99=3.50ms std=0.25ms"
 
 
-def test_format_profile_breakdown_child_timing_omits_malformed_avg_and_p95() -> None:
+def test_format_profile_breakdown_child_timing_omits_malformed_tail() -> None:
     formatted = _format_profile_breakdown_child_timing({
         "pct_of_parent": "slow",
         "avg_ms": -1.0,
         "p95_ms": True,
+        "p99_ms": "fast",
+        "std_ms": float("nan"),
     })
 
     assert formatted == "n/a"
@@ -1705,16 +1775,20 @@ def test_format_profile_event_timing_includes_parent_position() -> None:
     }) == "n/a"
 
 
-def test_format_profile_event_timing_can_include_p95() -> None:
+def test_format_profile_event_timing_can_include_tail() -> None:
     assert _format_profile_event_timing({
         "avg_ms": 4.25,
         "avg_pct_of_parent": 42.5,
         "p95_ms": 6.5,
-    }, include_p95=True) == "4.2ms@42.5% p95=6.5ms"
+        "p99_ms": 7.5,
+        "std_ms": 0.5,
+    }, include_p95=True) == "4.2ms@42.5% p95=6.5ms p99=7.5ms std=0.5ms"
     assert _format_profile_event_timing({
         "avg_ms": 4.25,
         "p95_ms": 6.5,
-    }, include_p95=True) == "4.2ms p95=6.5ms"
+        "p99_ms": 7.5,
+        "std_ms": 0.5,
+    }, include_p95=True) == "4.2ms p95=6.5ms p99=7.5ms std=0.5ms"
 
 
 def test_format_profile_phase_timing_includes_tail_latency() -> None:

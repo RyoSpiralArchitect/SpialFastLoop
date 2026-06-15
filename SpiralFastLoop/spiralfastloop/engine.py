@@ -60,6 +60,18 @@ _PROFILE_PHASE_METRIC_NAMES = (
     "metrics",
 )
 _PROFILE_METRIC_MISSING = object()
+_PROFILE_TOP_DISTRIBUTION_METRIC_NAMES = (
+    "p50_ms",
+    "p95_ms",
+    "p99_ms",
+    "std_ms",
+    "min_ms",
+    "max_ms",
+)
+_PROFILE_TOP_COUNT_METRIC_NAMES = (
+    "sample_count",
+    "window_sample_count",
+)
 
 _BATCH_SIZE_INFERENCE_FAILURE_REASONS = (
     "tensor_scalar",
@@ -234,6 +246,30 @@ def _set_profile_count_metric_if_present(
     return _set_profile_count_metric(metrics, name, source[source_name], invalid_fields)
 
 
+def _add_profile_top_distribution_metrics(
+    metrics: Dict[str, Any],
+    metric_prefix: str,
+    top_child: Mapping[str, Any],
+    invalid_fields: list[str],
+) -> None:
+    for field_name in _PROFILE_TOP_DISTRIBUTION_METRIC_NAMES:
+        _set_profile_metric_if_present(
+            metrics,
+            f"{metric_prefix}_top_{field_name}",
+            top_child,
+            field_name,
+            invalid_fields,
+        )
+    for field_name in _PROFILE_TOP_COUNT_METRIC_NAMES:
+        _set_profile_count_metric_if_present(
+            metrics,
+            f"{metric_prefix}_top_{field_name}",
+            top_child,
+            field_name,
+            invalid_fields,
+        )
+
+
 def _add_profile_breakdown_metrics(
     metrics: Dict[str, Any],
     profile: Mapping[str, Any],
@@ -288,13 +324,7 @@ def _add_profile_breakdown_metrics(
         "avg_ms",
         invalid_fields,
     )
-    _set_profile_metric_if_present(
-        metrics,
-        f"{metric_prefix}_top_p95_ms",
-        top_child,
-        "p95_ms",
-        invalid_fields,
-    )
+    _add_profile_top_distribution_metrics(metrics, metric_prefix, top_child, invalid_fields)
     _set_profile_count_metric_if_present(
         metrics,
         f"{metric_prefix}_top_calls",
@@ -350,13 +380,7 @@ def _add_profile_backward_event_metrics(
         invalid_fields,
         max_value=100.0,
     )
-    _set_profile_metric_if_present(
-        metrics,
-        "profile_backward_grad_ready_top_p95_ms",
-        top_child,
-        "p95_ms",
-        invalid_fields,
-    )
+    _add_profile_top_distribution_metrics(metrics, "profile_backward_grad_ready", top_child, invalid_fields)
     _set_profile_count_metric_if_present(
         metrics,
         "profile_backward_grad_ready_top_calls",

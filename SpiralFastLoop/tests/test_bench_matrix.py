@@ -1155,6 +1155,58 @@ def test_summarize_rows_skips_profile_fields_when_absent() -> None:
     assert "profiled_runs" not in group
 
 
+def test_summarize_rows_preserves_top_profile_distribution_metrics() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+            "profile_forward_top_p99_ms": 6.0,
+            "profile_forward_top_std_ms": 0.5,
+            "profile_forward_top_sample_count": 3,
+            "profile_backward_grad_ready_top_p99_ms": 5.0,
+            "profile_optimizer_top_p99_ms": 3.0,
+            "profile_optimizer_top_window_sample_count": 2,
+        },
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 300.0,
+            "samples_per_sec": 280.0,
+            "end_to_end_wall_time_s": 0.5,
+            "setup_time_s": 0.15,
+            "wall_time_s": 0.35,
+            "dataset_materialized_bytes": 0,
+            "profile_forward_top_p99_ms": 8.0,
+            "profile_forward_top_std_ms": 0.7,
+            "profile_forward_top_sample_count": 5,
+            "profile_backward_grad_ready_top_p99_ms": 7.0,
+            "profile_optimizer_top_p99_ms": 4.0,
+            "profile_optimizer_top_window_sample_count": 4,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert group["mean_profile_forward_top_p99_ms"] == pytest.approx(7.0)
+    assert group["mean_profile_forward_top_std_ms"] == pytest.approx(0.6)
+    assert group["mean_profile_forward_top_sample_count"] == pytest.approx(4.0)
+    assert group["mean_profile_backward_grad_ready_top_p99_ms"] == pytest.approx(6.0)
+    assert group["mean_profile_optimizer_top_p99_ms"] == pytest.approx(3.5)
+    assert group["mean_profile_optimizer_top_window_sample_count"] == pytest.approx(3.0)
+    assert summary["best_reported"]["mean_profile_forward_top_p99_ms"] == pytest.approx(7.0)
+    assert summary["best_reported"]["mean_profile_forward_top_sample_count"] == pytest.approx(4.0)
+    json.dumps(summary, allow_nan=False)
+
+
 def test_summarize_rows_omits_not_requested_profile_model_fields() -> None:
     rows = [
         {

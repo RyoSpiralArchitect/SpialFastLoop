@@ -274,7 +274,8 @@ def test_phase_profiler_respects_exact_distribution_window() -> None:
 
     forward = profile["phases"]["forward"]
     assert forward["calls"] == 2
-    assert forward["sample_count"] == 1
+    assert forward["sample_count"] == 2
+    assert forward["window_sample_count"] == 1
     assert forward["p50_ms"] == pytest.approx(3.0)
 
 
@@ -882,6 +883,34 @@ def test_train_one_epoch_rejects_invalid_profile_model_include(
             profile_model=True,
             profile_model_include=profile_model_include,  # type: ignore[arg-type]
         )
+
+
+def test_train_one_epoch_flattens_top_profile_distribution_metrics() -> None:
+    loader, model, optimizer = _make_supervised_components()
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    metrics = trainer.train_one_epoch(
+        loader,
+        nn.CrossEntropyLoss(),
+        steps=2,
+        collect_profile=True,
+        profile_distribution=True,
+        profile_window=8,
+        profile_model=True,
+        profile_model_include="0",
+        profile_model_depth=1,
+        profile_model_max_modules=1,
+    )
+
+    assert metrics["profile_forward_top_p50_ms"] >= 0.0
+    assert metrics["profile_forward_top_p95_ms"] >= 0.0
+    assert metrics["profile_forward_top_p99_ms"] >= 0.0
+    assert metrics["profile_forward_top_std_ms"] >= 0.0
+    assert metrics["profile_forward_top_sample_count"] >= 1
+    assert metrics["profile_forward_top_window_sample_count"] >= 1
+    assert metrics["profile_backward_grad_ready_top_p99_ms"] >= 0.0
+    assert metrics["profile_backward_grad_ready_top_std_ms"] >= 0.0
+    assert metrics["profile_backward_grad_ready_top_sample_count"] >= 1
 
 
 def test_eval_and_predict_reject_invalid_step_limits() -> None:
@@ -2811,7 +2840,14 @@ def test_profile_flat_metrics_include_forward_drilldown_position() -> None:
                         "total_s": 0.04,
                         "pct_of_parent": 40.0,
                         "avg_ms": 4.0,
+                        "p50_ms": 4.25,
                         "p95_ms": 4.5,
+                        "p99_ms": 4.75,
+                        "std_ms": 0.25,
+                        "min_ms": 4.0,
+                        "max_ms": 5.0,
+                        "sample_count": 2,
+                        "window_sample_count": 2,
                         "calls": 2,
                     },
                 ],
@@ -2828,7 +2864,14 @@ def test_profile_flat_metrics_include_forward_drilldown_position() -> None:
     assert metrics["profile_forward_top_time_s"] == pytest.approx(0.04)
     assert metrics["profile_forward_top_pct_of_parent"] == pytest.approx(40.0)
     assert metrics["profile_forward_top_avg_ms"] == pytest.approx(4.0)
+    assert metrics["profile_forward_top_p50_ms"] == pytest.approx(4.25)
     assert metrics["profile_forward_top_p95_ms"] == pytest.approx(4.5)
+    assert metrics["profile_forward_top_p99_ms"] == pytest.approx(4.75)
+    assert metrics["profile_forward_top_std_ms"] == pytest.approx(0.25)
+    assert metrics["profile_forward_top_min_ms"] == pytest.approx(4.0)
+    assert metrics["profile_forward_top_max_ms"] == pytest.approx(5.0)
+    assert metrics["profile_forward_top_sample_count"] == 2
+    assert metrics["profile_forward_top_window_sample_count"] == 2
     assert metrics["profile_forward_top_calls"] == 2
     assert metrics["profile_flat_metric_invalid_count"] == 0
     assert "profile_flat_metric_invalid_fields" not in metrics
@@ -2884,7 +2927,14 @@ def test_profile_flat_metrics_reject_invalid_forward_drilldown_values() -> None:
                         "total_s": float("nan"),
                         "pct_of_parent": "bad",
                         "avg_ms": -4.0,
+                        "p50_ms": -1.0,
                         "p95_ms": True,
+                        "p99_ms": "slow",
+                        "std_ms": float("inf"),
+                        "min_ms": None,
+                        "max_ms": -5.0,
+                        "sample_count": 1.5,
+                        "window_sample_count": "2",
                         "calls": 1.5,
                     },
                 ],
@@ -2901,9 +2951,16 @@ def test_profile_flat_metrics_reject_invalid_forward_drilldown_values() -> None:
     assert "profile_forward_top_time_s" not in metrics
     assert "profile_forward_top_pct_of_parent" not in metrics
     assert "profile_forward_top_avg_ms" not in metrics
+    assert "profile_forward_top_p50_ms" not in metrics
     assert "profile_forward_top_p95_ms" not in metrics
+    assert "profile_forward_top_p99_ms" not in metrics
+    assert "profile_forward_top_std_ms" not in metrics
+    assert "profile_forward_top_min_ms" not in metrics
+    assert "profile_forward_top_max_ms" not in metrics
+    assert "profile_forward_top_sample_count" not in metrics
+    assert "profile_forward_top_window_sample_count" not in metrics
     assert "profile_forward_top_calls" not in metrics
-    assert metrics["profile_flat_metric_invalid_count"] == 8
+    assert metrics["profile_flat_metric_invalid_count"] == 15
     assert metrics["profile_flat_metric_invalid_fields"] == [
         "profile_forward_tracked_time_s",
         "profile_forward_untracked_time_s",
@@ -2911,7 +2968,14 @@ def test_profile_flat_metrics_reject_invalid_forward_drilldown_values() -> None:
         "profile_forward_top_time_s",
         "profile_forward_top_pct_of_parent",
         "profile_forward_top_avg_ms",
+        "profile_forward_top_p50_ms",
         "profile_forward_top_p95_ms",
+        "profile_forward_top_p99_ms",
+        "profile_forward_top_std_ms",
+        "profile_forward_top_min_ms",
+        "profile_forward_top_max_ms",
+        "profile_forward_top_sample_count",
+        "profile_forward_top_window_sample_count",
         "profile_forward_top_calls",
     ]
 
@@ -2938,7 +3002,14 @@ def test_profile_flat_metrics_include_optimizer_drilldown_position() -> None:
                         "total_s": 0.03,
                         "pct_of_parent": 60.0,
                         "avg_ms": 3.0,
+                        "p50_ms": 3.25,
                         "p95_ms": 3.5,
+                        "p99_ms": 3.75,
+                        "std_ms": 0.2,
+                        "min_ms": 3.0,
+                        "max_ms": 4.0,
+                        "sample_count": 2,
+                        "window_sample_count": 2,
                         "calls": 2,
                     },
                 ],
@@ -2955,7 +3026,14 @@ def test_profile_flat_metrics_include_optimizer_drilldown_position() -> None:
     assert metrics["profile_optimizer_top_time_s"] == pytest.approx(0.03)
     assert metrics["profile_optimizer_top_pct_of_parent"] == pytest.approx(60.0)
     assert metrics["profile_optimizer_top_avg_ms"] == pytest.approx(3.0)
+    assert metrics["profile_optimizer_top_p50_ms"] == pytest.approx(3.25)
     assert metrics["profile_optimizer_top_p95_ms"] == pytest.approx(3.5)
+    assert metrics["profile_optimizer_top_p99_ms"] == pytest.approx(3.75)
+    assert metrics["profile_optimizer_top_std_ms"] == pytest.approx(0.2)
+    assert metrics["profile_optimizer_top_min_ms"] == pytest.approx(3.0)
+    assert metrics["profile_optimizer_top_max_ms"] == pytest.approx(4.0)
+    assert metrics["profile_optimizer_top_sample_count"] == 2
+    assert metrics["profile_optimizer_top_window_sample_count"] == 2
     assert metrics["profile_optimizer_top_calls"] == 2
     assert metrics["profile_flat_metric_invalid_count"] == 0
     assert "profile_flat_metric_invalid_fields" not in metrics
@@ -3011,7 +3089,14 @@ def test_profile_flat_metrics_reject_invalid_optimizer_drilldown_values() -> Non
                         "total_s": float("nan"),
                         "pct_of_parent": "bad",
                         "avg_ms": -3.0,
+                        "p50_ms": -1.0,
                         "p95_ms": True,
+                        "p99_ms": "slow",
+                        "std_ms": float("inf"),
+                        "min_ms": None,
+                        "max_ms": -4.0,
+                        "sample_count": 1.5,
+                        "window_sample_count": "2",
                         "calls": 1.5,
                     },
                 ],
@@ -3028,9 +3113,16 @@ def test_profile_flat_metrics_reject_invalid_optimizer_drilldown_values() -> Non
     assert "profile_optimizer_top_time_s" not in metrics
     assert "profile_optimizer_top_pct_of_parent" not in metrics
     assert "profile_optimizer_top_avg_ms" not in metrics
+    assert "profile_optimizer_top_p50_ms" not in metrics
     assert "profile_optimizer_top_p95_ms" not in metrics
+    assert "profile_optimizer_top_p99_ms" not in metrics
+    assert "profile_optimizer_top_std_ms" not in metrics
+    assert "profile_optimizer_top_min_ms" not in metrics
+    assert "profile_optimizer_top_max_ms" not in metrics
+    assert "profile_optimizer_top_sample_count" not in metrics
+    assert "profile_optimizer_top_window_sample_count" not in metrics
     assert "profile_optimizer_top_calls" not in metrics
-    assert metrics["profile_flat_metric_invalid_count"] == 8
+    assert metrics["profile_flat_metric_invalid_count"] == 15
     assert metrics["profile_flat_metric_invalid_fields"] == [
         "profile_optimizer_tracked_time_s",
         "profile_optimizer_untracked_time_s",
@@ -3038,7 +3130,14 @@ def test_profile_flat_metrics_reject_invalid_optimizer_drilldown_values() -> Non
         "profile_optimizer_top_time_s",
         "profile_optimizer_top_pct_of_parent",
         "profile_optimizer_top_avg_ms",
+        "profile_optimizer_top_p50_ms",
         "profile_optimizer_top_p95_ms",
+        "profile_optimizer_top_p99_ms",
+        "profile_optimizer_top_std_ms",
+        "profile_optimizer_top_min_ms",
+        "profile_optimizer_top_max_ms",
+        "profile_optimizer_top_sample_count",
+        "profile_optimizer_top_window_sample_count",
         "profile_optimizer_top_calls",
     ]
 
@@ -3063,7 +3162,14 @@ def test_profile_flat_metrics_include_backward_event_position() -> None:
                         "name": "model.0",
                         "avg_ms": 8.0,
                         "avg_pct_of_parent": 40.0,
+                        "p50_ms": 8.5,
                         "p95_ms": 9.0,
+                        "p99_ms": 9.5,
+                        "std_ms": 0.5,
+                        "min_ms": 8.0,
+                        "max_ms": 10.0,
+                        "sample_count": 2,
+                        "window_sample_count": 2,
                         "calls": 2,
                     },
                 ],
@@ -3077,7 +3183,14 @@ def test_profile_flat_metrics_include_backward_event_position() -> None:
     assert metrics["profile_backward_grad_ready_parent_avg_ms"] == pytest.approx(20.0)
     assert metrics["profile_backward_grad_ready_top_avg_ms"] == pytest.approx(8.0)
     assert metrics["profile_backward_grad_ready_top_pct"] == pytest.approx(40.0)
+    assert metrics["profile_backward_grad_ready_top_p50_ms"] == pytest.approx(8.5)
     assert metrics["profile_backward_grad_ready_top_p95_ms"] == pytest.approx(9.0)
+    assert metrics["profile_backward_grad_ready_top_p99_ms"] == pytest.approx(9.5)
+    assert metrics["profile_backward_grad_ready_top_std_ms"] == pytest.approx(0.5)
+    assert metrics["profile_backward_grad_ready_top_min_ms"] == pytest.approx(8.0)
+    assert metrics["profile_backward_grad_ready_top_max_ms"] == pytest.approx(10.0)
+    assert metrics["profile_backward_grad_ready_top_sample_count"] == 2
+    assert metrics["profile_backward_grad_ready_top_window_sample_count"] == 2
     assert metrics["profile_backward_grad_ready_top_calls"] == 2
     assert metrics["profile_flat_metric_invalid_count"] == 0
     assert "profile_flat_metric_invalid_fields" not in metrics
@@ -3127,7 +3240,14 @@ def test_profile_flat_metrics_reject_invalid_backward_event_values() -> None:
                         "name": "model.0",
                         "avg_ms": float("nan"),
                         "avg_pct_of_parent": 125.0,
+                        "p50_ms": -1.0,
                         "p95_ms": True,
+                        "p99_ms": "slow",
+                        "std_ms": float("inf"),
+                        "min_ms": None,
+                        "max_ms": -10.0,
+                        "sample_count": 1.5,
+                        "window_sample_count": "2",
                         "calls": 1.5,
                     },
                 ],
@@ -3141,14 +3261,28 @@ def test_profile_flat_metrics_reject_invalid_backward_event_values() -> None:
     assert "profile_backward_grad_ready_parent_avg_ms" not in metrics
     assert "profile_backward_grad_ready_top_avg_ms" not in metrics
     assert "profile_backward_grad_ready_top_pct" not in metrics
+    assert "profile_backward_grad_ready_top_p50_ms" not in metrics
     assert "profile_backward_grad_ready_top_p95_ms" not in metrics
+    assert "profile_backward_grad_ready_top_p99_ms" not in metrics
+    assert "profile_backward_grad_ready_top_std_ms" not in metrics
+    assert "profile_backward_grad_ready_top_min_ms" not in metrics
+    assert "profile_backward_grad_ready_top_max_ms" not in metrics
+    assert "profile_backward_grad_ready_top_sample_count" not in metrics
+    assert "profile_backward_grad_ready_top_window_sample_count" not in metrics
     assert "profile_backward_grad_ready_top_calls" not in metrics
-    assert metrics["profile_flat_metric_invalid_count"] == 5
+    assert metrics["profile_flat_metric_invalid_count"] == 12
     assert metrics["profile_flat_metric_invalid_fields"] == [
         "profile_backward_grad_ready_parent_avg_ms",
         "profile_backward_grad_ready_top_avg_ms",
         "profile_backward_grad_ready_top_pct",
+        "profile_backward_grad_ready_top_p50_ms",
         "profile_backward_grad_ready_top_p95_ms",
+        "profile_backward_grad_ready_top_p99_ms",
+        "profile_backward_grad_ready_top_std_ms",
+        "profile_backward_grad_ready_top_min_ms",
+        "profile_backward_grad_ready_top_max_ms",
+        "profile_backward_grad_ready_top_sample_count",
+        "profile_backward_grad_ready_top_window_sample_count",
         "profile_backward_grad_ready_top_calls",
     ]
 
@@ -3345,6 +3479,7 @@ def test_phase_profiler_top_rows_include_distribution_fields_when_enabled() -> N
     top_event = profile["phase_events"]["backward_grad_ready"]["top_children"][0]
 
     assert top_phase["sample_count"] == 3
+    assert top_phase["window_sample_count"] == 3
     assert top_phase["p50_ms"] == pytest.approx(3.0)
     assert top_phase["p95_ms"] == pytest.approx(5.0)
     assert top_phase["p99_ms"] == pytest.approx(5.0)
@@ -3353,6 +3488,7 @@ def test_phase_profiler_top_rows_include_distribution_fields_when_enabled() -> N
     assert top_phase["max_ms"] == pytest.approx(5.0)
 
     assert top_detail["sample_count"] == 2
+    assert top_detail["window_sample_count"] == 2
     assert top_detail["p50_ms"] == pytest.approx(2.0)
     assert top_detail["p95_ms"] == pytest.approx(4.0)
     assert top_detail["p99_ms"] == pytest.approx(4.0)

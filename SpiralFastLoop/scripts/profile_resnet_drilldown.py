@@ -27,6 +27,7 @@ from scripts.bench_parallel_transactions import (
     _format_metric_value,
     _format_non_negative_metric_value,
     _format_profile_open_timer_summary,
+    _format_profile_breakdown_child_timing,
     _format_profile_breakdown_summary,
     _format_profile_event_timing,
     _has_positive_display_value,
@@ -168,9 +169,7 @@ def _print_summary(metrics: dict[str, Any], topk: int) -> None:
         for row in forward:
             print(
                 f"  {_profile_row_name(row)}: "
-                f"{_format_metric_value(row.get('pct_of_parent'), precision=1, suffix='%')} "
-                f"avg={_format_metric_value(row.get('avg_ms'), precision=2, suffix='ms')} "
-                f"p95={_format_metric_value(row.get('p95_ms'), precision=2, suffix='ms')}"
+                f"{_format_profile_breakdown_child_timing(row)}"
             )
 
     backward = _top_rows(profile, "backward_grad_ready", "backward", topk)
@@ -179,8 +178,7 @@ def _print_summary(metrics: dict[str, Any], topk: int) -> None:
         for row in backward:
             print(
                 f"  {_profile_row_name(row)}: "
-                f"avg={_format_profile_event_timing(row, precision=2)} "
-                f"p95={_format_metric_value(row.get('p95_ms'), precision=2, suffix='ms')}"
+                f"avg={_format_profile_event_timing(row, precision=2, include_p95=True)}"
             )
 
     optimizer = _top_rows(profile, "optimizer", "breakdown", topk)
@@ -190,9 +188,7 @@ def _print_summary(metrics: dict[str, Any], topk: int) -> None:
         for row in optimizer:
             print(
                 f"  {_profile_row_name(row)}: "
-                f"{_format_metric_value(row.get('pct_of_parent'), precision=1, suffix='%')} "
-                f"avg={_format_metric_value(row.get('avg_ms'), precision=2, suffix='ms')} "
-                f"p95={_format_metric_value(row.get('p95_ms'), precision=2, suffix='ms')}"
+                f"{_format_profile_breakdown_child_timing(row)}"
             )
 
 

@@ -185,6 +185,27 @@ PROFILE_PHASE_DISTRIBUTION_SUMMARY_FIELDS = tuple(
     for field_name in ("p50_ms", "p95_ms", "p99_ms", "std_ms")
 )
 
+PROFILE_TOP_DISTRIBUTION_SUMMARY_FIELD_NAMES = (
+    "p50_ms",
+    "p95_ms",
+    "p99_ms",
+    "std_ms",
+    "min_ms",
+    "max_ms",
+)
+PROFILE_TOP_COUNT_SUMMARY_FIELD_NAMES = (
+    "sample_count",
+    "window_sample_count",
+)
+
+
+def _profile_top_summary_fields(prefix: str) -> tuple[str, ...]:
+    return tuple(
+        f"{prefix}_top_{field_name}"
+        for field_name in PROFILE_TOP_DISTRIBUTION_SUMMARY_FIELD_NAMES + PROFILE_TOP_COUNT_SUMMARY_FIELD_NAMES
+    )
+
+
 PROFILE_FORWARD_BREAKDOWN_SUMMARY_FIELDS = (
     "profile_forward_child_count",
     "profile_forward_tracked_time_s",
@@ -193,7 +214,7 @@ PROFILE_FORWARD_BREAKDOWN_SUMMARY_FIELDS = (
     "profile_forward_top_time_s",
     "profile_forward_top_pct_of_parent",
     "profile_forward_top_avg_ms",
-    "profile_forward_top_p95_ms",
+    *_profile_top_summary_fields("profile_forward"),
     "profile_forward_top_calls",
 )
 
@@ -205,7 +226,7 @@ PROFILE_OPTIMIZER_BREAKDOWN_SUMMARY_FIELDS = (
     "profile_optimizer_top_time_s",
     "profile_optimizer_top_pct_of_parent",
     "profile_optimizer_top_avg_ms",
-    "profile_optimizer_top_p95_ms",
+    *_profile_top_summary_fields("profile_optimizer"),
     "profile_optimizer_top_calls",
 )
 
@@ -214,7 +235,7 @@ PROFILE_EVENT_SUMMARY_FIELDS = (
     "profile_backward_grad_ready_parent_avg_ms",
     "profile_backward_grad_ready_top_avg_ms",
     "profile_backward_grad_ready_top_pct",
-    "profile_backward_grad_ready_top_p95_ms",
+    *_profile_top_summary_fields("profile_backward_grad_ready"),
     "profile_backward_grad_ready_top_calls",
 )
 
@@ -258,10 +279,16 @@ SUMMARY_INTEGER_FIELDS = (
         "profile_open_phase_count",
         "profile_open_detail_count",
         "profile_forward_child_count",
+        "profile_forward_top_sample_count",
+        "profile_forward_top_window_sample_count",
         "profile_forward_top_calls",
         "profile_optimizer_child_count",
+        "profile_optimizer_top_sample_count",
+        "profile_optimizer_top_window_sample_count",
         "profile_optimizer_top_calls",
         "profile_backward_grad_ready_child_count",
+        "profile_backward_grad_ready_top_sample_count",
+        "profile_backward_grad_ready_top_window_sample_count",
         "profile_backward_grad_ready_top_calls",
         "profile_model_modules_selected",
         "profile_model_hook_count",
@@ -362,7 +389,14 @@ BEST_RUN_FIELDS = (
     "profile_forward_top_time_s",
     "profile_forward_top_pct_of_parent",
     "profile_forward_top_avg_ms",
+    "profile_forward_top_p50_ms",
     "profile_forward_top_p95_ms",
+    "profile_forward_top_p99_ms",
+    "profile_forward_top_std_ms",
+    "profile_forward_top_min_ms",
+    "profile_forward_top_max_ms",
+    "profile_forward_top_sample_count",
+    "profile_forward_top_window_sample_count",
     "profile_forward_top_calls",
     "profile_loss_pct",
     "profile_loss_reduce_pct",
@@ -375,7 +409,14 @@ BEST_RUN_FIELDS = (
     "profile_optimizer_top_time_s",
     "profile_optimizer_top_pct_of_parent",
     "profile_optimizer_top_avg_ms",
+    "profile_optimizer_top_p50_ms",
     "profile_optimizer_top_p95_ms",
+    "profile_optimizer_top_p99_ms",
+    "profile_optimizer_top_std_ms",
+    "profile_optimizer_top_min_ms",
+    "profile_optimizer_top_max_ms",
+    "profile_optimizer_top_sample_count",
+    "profile_optimizer_top_window_sample_count",
     "profile_optimizer_top_calls",
     "profile_user_metrics_pct",
     "profile_postprocess_pct",
@@ -385,7 +426,14 @@ BEST_RUN_FIELDS = (
     "profile_backward_grad_ready_parent_avg_ms",
     "profile_backward_grad_ready_top_avg_ms",
     "profile_backward_grad_ready_top_pct",
+    "profile_backward_grad_ready_top_p50_ms",
     "profile_backward_grad_ready_top_p95_ms",
+    "profile_backward_grad_ready_top_p99_ms",
+    "profile_backward_grad_ready_top_std_ms",
+    "profile_backward_grad_ready_top_min_ms",
+    "profile_backward_grad_ready_top_max_ms",
+    "profile_backward_grad_ready_top_sample_count",
+    "profile_backward_grad_ready_top_window_sample_count",
     "profile_backward_grad_ready_top_calls",
     *PROFILE_PHASE_DISTRIBUTION_SUMMARY_FIELDS,
     "cuda_current_mem_bytes",
@@ -452,10 +500,16 @@ BEST_RUN_INTEGER_FIELDS = frozenset({
     "profile_open_phase_count",
     "profile_open_detail_count",
     "profile_forward_child_count",
+    "profile_forward_top_sample_count",
+    "profile_forward_top_window_sample_count",
     "profile_forward_top_calls",
     "profile_optimizer_child_count",
+    "profile_optimizer_top_sample_count",
+    "profile_optimizer_top_window_sample_count",
     "profile_optimizer_top_calls",
     "profile_backward_grad_ready_child_count",
+    "profile_backward_grad_ready_top_sample_count",
+    "profile_backward_grad_ready_top_window_sample_count",
     "profile_backward_grad_ready_top_calls",
     "profile_model_modules_selected",
     "profile_model_hook_count",
@@ -1129,6 +1183,17 @@ def _format_profile_event_timing(
         )
         if p95_text is not None:
             parts.append(f"p95={p95_text}")
+        for field, label in (
+            ("p99_ms", "p99"),
+            ("std_ms", "std"),
+        ):
+            value_text = _format_non_negative_metric_value(
+                row.get(field),
+                precision=precision,
+                suffix="ms",
+            )
+            if value_text is not None:
+                parts.append(f"{label}={value_text}")
     return " ".join(parts)
 
 
@@ -1137,9 +1202,14 @@ def _format_profile_breakdown_child_timing(row: dict[str, Any]) -> str:
     avg_text = _format_non_negative_metric_value(row.get("avg_ms"), precision=2, suffix="ms")
     if avg_text is not None:
         parts.append(f"avg={avg_text}")
-    p95_text = _format_non_negative_metric_value(row.get("p95_ms"), precision=2, suffix="ms")
-    if p95_text is not None:
-        parts.append(f"p95={p95_text}")
+    for field, label in (
+        ("p95_ms", "p95"),
+        ("p99_ms", "p99"),
+        ("std_ms", "std"),
+    ):
+        value_text = _format_non_negative_metric_value(row.get(field), precision=2, suffix="ms")
+        if value_text is not None:
+            parts.append(f"{label}={value_text}")
     return " ".join(parts)
 
 

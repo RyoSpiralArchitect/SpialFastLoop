@@ -249,10 +249,10 @@ def test_print_summary_formats_malformed_metrics_as_na(
     assert "forward: n/a avg=n/a p95=n/a" in output
     assert "<unnamed>: 12.0% avg=1.00ms" in output
     assert "forward drilldown: tracked=" not in output
-    assert "conv: n/a avg=n/a p95=1.00ms" in output
-    assert "layer4: avg=n/a p95=n/a" in output
+    assert "conv: n/a p95=1.00ms" in output
+    assert "layer4: avg=n/a" in output
     assert "optimizer drilldown: tracked=" not in output
-    assert "<unnamed>: n/a avg=0.50ms p95=n/a" in output
+    assert "<unnamed>: n/a avg=0.50ms" in output
 
 
 def test_print_summary_shows_breakdown_tracking_totals(
@@ -275,7 +275,14 @@ def test_print_summary_shows_breakdown_tracking_totals(
                     "untracked_s": 0.01,
                     "overtracked_s": 0.0,
                     "top_children": [
-                        {"name": "step", "pct_of_parent": 80.0, "avg_ms": 0.5, "p95_ms": 0.75},
+                        {
+                            "name": "step",
+                            "pct_of_parent": 80.0,
+                            "avg_ms": 0.5,
+                            "p95_ms": 0.75,
+                            "p99_ms": 0.95,
+                            "std_ms": 0.05,
+                        },
                     ],
                 },
             },
@@ -287,7 +294,7 @@ def test_print_summary_shows_breakdown_tracking_totals(
     output = capsys.readouterr().out
     assert "forward drilldown: tracked=70.00ms untracked=30.00ms overtracked=20.00ms" in output
     assert "optimizer drilldown: tracked=40.00ms untracked=10.00ms" in output
-    assert "step: 80.0% avg=0.50ms p95=0.75ms" in output
+    assert "step: 80.0% avg=0.50ms p95=0.75ms p99=0.95ms std=0.05ms" in output
 
 
 def test_print_summary_shows_top_phase_tail_latency(
@@ -329,6 +336,8 @@ def test_print_summary_shows_backward_parent_position(
                             "avg_ms": 2.25,
                             "avg_pct_of_parent": 45.0,
                             "p95_ms": 3.5,
+                            "p99_ms": 4.5,
+                            "std_ms": 0.4,
                         },
                     ],
                 },
@@ -339,7 +348,7 @@ def test_print_summary_shows_backward_parent_position(
     drilldown._print_summary(metrics, topk=4)
 
     output = capsys.readouterr().out
-    assert "layer4: avg=2.25ms@45.0% p95=3.50ms" in output
+    assert "layer4: avg=2.25ms@45.0% p95=3.50ms p99=4.50ms std=0.40ms" in output
 
 
 def test_print_summary_shows_open_profile_timers(

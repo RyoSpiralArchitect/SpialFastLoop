@@ -986,7 +986,8 @@ class PhaseProfiler:
         sample_values = list(samples or ())
         if self.track_distribution and sample_values:
             row.update({
-                "sample_count": len(sample_values),
+                "sample_count": calls,
+                "window_sample_count": len(sample_values),
                 "p50_ms": self._percentile(sample_values, 50) * 1e3,
                 "p95_ms": self._percentile(sample_values, 95) * 1e3,
                 "p99_ms": self._percentile(sample_values, 99) * 1e3,
