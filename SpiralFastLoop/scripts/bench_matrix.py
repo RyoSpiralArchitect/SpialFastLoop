@@ -242,6 +242,13 @@ def _format_summary_row(row: dict) -> str:
     optimizer_pct = _measured_summary_value(row, "mean_profile_optimizer_pct")
     if optimizer_pct is not None:
         profile_parts.append(f"opt={optimizer_pct:.1f}%")
+    backward_ready_pct = _measured_summary_value(row, "mean_profile_backward_grad_ready_top_pct")
+    backward_ready_avg_ms = _measured_summary_value(row, "mean_profile_backward_grad_ready_top_avg_ms")
+    if backward_ready_pct is not None:
+        ready_text = f"bwd_ready={backward_ready_pct:.1f}%"
+        if backward_ready_avg_ms is not None:
+            ready_text = f"{ready_text}@{backward_ready_avg_ms:.2f}ms"
+        profile_parts.append(ready_text)
     open_phase_count = _measured_summary_value(row, "mean_profile_open_phase_count")
     open_detail_count = _measured_summary_value(row, "mean_profile_open_detail_count")
     open_parts = []

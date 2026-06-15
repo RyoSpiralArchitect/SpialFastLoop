@@ -165,13 +165,25 @@ PROFILE_PHASE_SUMMARY_FIELDS = (
     "profile_metrics_avg_ms",
 )
 
+PROFILE_EVENT_SUMMARY_FIELDS = (
+    "profile_backward_grad_ready_child_count",
+    "profile_backward_grad_ready_parent_avg_ms",
+    "profile_backward_grad_ready_top_avg_ms",
+    "profile_backward_grad_ready_top_pct",
+    "profile_backward_grad_ready_top_calls",
+)
+
 PROFILE_MODEL_SUMMARY_FIELDS = (
     "profile_model_modules_selected",
     "profile_model_hook_count",
     "profile_model_hook_failures",
 )
 
-PROFILE_SUMMARY_FIELDS = PROFILE_PHASE_SUMMARY_FIELDS + PROFILE_MODEL_SUMMARY_FIELDS
+PROFILE_SUMMARY_FIELDS = (
+    PROFILE_PHASE_SUMMARY_FIELDS
+    + PROFILE_EVENT_SUMMARY_FIELDS
+    + PROFILE_MODEL_SUMMARY_FIELDS
+)
 
 DEVICE_MEMORY_SUMMARY_FIELDS = (
     "cuda_current_mem_bytes",
@@ -197,6 +209,8 @@ SUMMARY_INTEGER_FIELDS = (
         "profile_flat_metric_invalid_count",
         "profile_open_phase_count",
         "profile_open_detail_count",
+        "profile_backward_grad_ready_child_count",
+        "profile_backward_grad_ready_top_calls",
         "profile_model_modules_selected",
         "profile_model_hook_count",
         "profile_model_hook_failures",
@@ -297,6 +311,11 @@ BEST_RUN_FIELDS = (
     "profile_postprocess_pct",
     "profile_collect_output_pct",
     "profile_metrics_pct",
+    "profile_backward_grad_ready_child_count",
+    "profile_backward_grad_ready_parent_avg_ms",
+    "profile_backward_grad_ready_top_avg_ms",
+    "profile_backward_grad_ready_top_pct",
+    "profile_backward_grad_ready_top_calls",
     "cuda_current_mem_bytes",
     "cuda_max_mem_bytes",
     "cuda_reserved_mem_bytes",
@@ -360,6 +379,8 @@ BEST_RUN_INTEGER_FIELDS = frozenset({
     "profile_flat_metric_invalid_count",
     "profile_open_phase_count",
     "profile_open_detail_count",
+    "profile_backward_grad_ready_child_count",
+    "profile_backward_grad_ready_top_calls",
     "profile_model_modules_selected",
     "profile_model_hook_count",
     "profile_model_hook_failures",

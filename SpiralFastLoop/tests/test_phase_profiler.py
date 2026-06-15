@@ -2727,6 +2727,81 @@ def test_profile_flat_metrics_include_open_timer_counts() -> None:
     assert "profile_flat_metric_invalid_fields" not in metrics
 
 
+def test_profile_flat_metrics_include_backward_event_position() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "profile_total_s": 1.0,
+        "phases": {
+            "backward": {"total_s": 0.2, "pct": 20.0, "avg_ms": 20.0},
+        },
+        "phase_events": {
+            "backward_grad_ready": {
+                "parent": "backward",
+                "parent_avg_ms": 20.0,
+                "children": {
+                    "model.0": {"avg_ms": 8.0},
+                    "model.2": {"avg_ms": 4.0},
+                },
+                "top_children": [
+                    {
+                        "name": "model.0",
+                        "avg_ms": 8.0,
+                        "avg_pct_of_parent": 40.0,
+                        "calls": 2,
+                    },
+                ],
+            },
+        },
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert metrics["profile_backward_grad_ready_child_count"] == 2
+    assert metrics["profile_backward_grad_ready_parent_avg_ms"] == pytest.approx(20.0)
+    assert metrics["profile_backward_grad_ready_top_avg_ms"] == pytest.approx(8.0)
+    assert metrics["profile_backward_grad_ready_top_pct"] == pytest.approx(40.0)
+    assert metrics["profile_backward_grad_ready_top_calls"] == 2
+    assert metrics["profile_flat_metric_invalid_count"] == 0
+    assert "profile_flat_metric_invalid_fields" not in metrics
+
+
+def test_profile_flat_metrics_reject_invalid_backward_event_values() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "profile_total_s": 1.0,
+        "phases": {},
+        "phase_events": {
+            "backward_grad_ready": {
+                "parent_avg_ms": "slow",
+                "children": {"model.0": {}},
+                "top_children": [
+                    {
+                        "name": "model.0",
+                        "avg_ms": float("nan"),
+                        "avg_pct_of_parent": 125.0,
+                        "calls": 1.5,
+                    },
+                ],
+            },
+        },
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert metrics["profile_backward_grad_ready_child_count"] == 1
+    assert "profile_backward_grad_ready_parent_avg_ms" not in metrics
+    assert "profile_backward_grad_ready_top_avg_ms" not in metrics
+    assert "profile_backward_grad_ready_top_pct" not in metrics
+    assert "profile_backward_grad_ready_top_calls" not in metrics
+    assert metrics["profile_flat_metric_invalid_count"] == 4
+    assert metrics["profile_flat_metric_invalid_fields"] == [
+        "profile_backward_grad_ready_parent_avg_ms",
+        "profile_backward_grad_ready_top_avg_ms",
+        "profile_backward_grad_ready_top_pct",
+        "profile_backward_grad_ready_top_calls",
+    ]
+
+
 def test_profile_flat_metrics_reject_invalid_open_timer_counts() -> None:
     metrics: dict[str, object] = {}
     profile = {

@@ -517,6 +517,11 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "profile_loss_pct": 5.0,
             "profile_loss_reduce_pct": 2.0,
             "profile_backward_pct": 25.0,
+            "profile_backward_grad_ready_child_count": 1,
+            "profile_backward_grad_ready_parent_avg_ms": 12.0,
+            "profile_backward_grad_ready_top_avg_ms": 4.0,
+            "profile_backward_grad_ready_top_pct": 30.0,
+            "profile_backward_grad_ready_top_calls": 2,
             "profile_optimizer_pct": 10.0,
             "profile_user_metrics_pct": 4.0,
             "profile_postprocess_pct": 6.0,
@@ -597,6 +602,11 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "profile_loss_pct": 7.0,
             "profile_loss_reduce_pct": 3.0,
             "profile_backward_pct": 40.0,
+            "profile_backward_grad_ready_child_count": 2,
+            "profile_backward_grad_ready_parent_avg_ms": 14.0,
+            "profile_backward_grad_ready_top_avg_ms": 6.0,
+            "profile_backward_grad_ready_top_pct": 50.0,
+            "profile_backward_grad_ready_top_calls": 3,
             "profile_optimizer_pct": 15.0,
             "profile_user_metrics_pct": 8.0,
             "profile_postprocess_pct": 10.0,
@@ -663,6 +673,11 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["mean_profile_collect_output_pct"] == pytest.approx(4.0)
     assert summary["mean_profile_metrics_pct"] == pytest.approx(1.5)
     assert summary["max_profile_backward_pct"] == pytest.approx(40.0)
+    assert summary["mean_profile_backward_grad_ready_child_count"] == pytest.approx(1.5)
+    assert summary["mean_profile_backward_grad_ready_parent_avg_ms"] == pytest.approx(13.0)
+    assert summary["mean_profile_backward_grad_ready_top_avg_ms"] == pytest.approx(5.0)
+    assert summary["mean_profile_backward_grad_ready_top_pct"] == pytest.approx(40.0)
+    assert summary["mean_profile_backward_grad_ready_top_calls"] == pytest.approx(2.5)
     assert summary["profiled_runs"] == 2
     assert summary["profile_model_status_counts"] == {"hook_failures": 1, "ok": 1}
     assert summary["best_reported"]["run"] == 1
@@ -678,6 +693,11 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert "profile_model_hook_last_error" not in summary["best_reported"]
     assert summary["best_reported"]["profile_forward_backward_pct"] == pytest.approx(60.0)
     assert summary["best_reported"]["profile_loss_pct"] == pytest.approx(7.0)
+    assert summary["best_reported"]["profile_backward_grad_ready_child_count"] == 2
+    assert summary["best_reported"]["profile_backward_grad_ready_parent_avg_ms"] == pytest.approx(14.0)
+    assert summary["best_reported"]["profile_backward_grad_ready_top_avg_ms"] == pytest.approx(6.0)
+    assert summary["best_reported"]["profile_backward_grad_ready_top_pct"] == pytest.approx(50.0)
+    assert summary["best_reported"]["profile_backward_grad_ready_top_calls"] == 3
     assert summary["best_reported"]["profile_postprocess_pct"] == pytest.approx(10.0)
     assert summary["best_reported"]["profile_collect_output_pct"] == pytest.approx(5.0)
     assert summary["best_reported"]["device"] == "cpu"
@@ -905,7 +925,9 @@ def test_summarize_results_skips_profile_fields_when_absent() -> None:
 
     assert summary["mean_reported_samples_per_sec"] == pytest.approx(100.0)
     assert "mean_profile_forward_backward_pct" not in summary
+    assert "mean_profile_backward_grad_ready_top_pct" not in summary
     assert "profile_forward_backward_pct" not in summary["best_reported"]
+    assert "profile_backward_grad_ready_top_pct" not in summary["best_reported"]
     assert "profiled_runs" not in summary
 
 

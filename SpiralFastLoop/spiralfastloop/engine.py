@@ -200,6 +200,57 @@ def _record_profile_flat_metric_invalids(metrics: Dict[str, Any], invalid_fields
         metrics["profile_flat_metric_invalid_fields"] = invalid_fields
 
 
+def _add_profile_backward_event_metrics(
+    metrics: Dict[str, Any],
+    profile: Mapping[str, Any],
+    invalid_fields: list[str],
+) -> None:
+    events = profile.get("phase_events", {})
+    if not isinstance(events, Mapping):
+        return
+    group = events.get("backward_grad_ready")
+    if not isinstance(group, Mapping):
+        return
+
+    children = group.get("children", {})
+    if isinstance(children, Mapping):
+        metrics["profile_backward_grad_ready_child_count"] = len(children)
+    _set_profile_metric(
+        metrics,
+        "profile_backward_grad_ready_parent_avg_ms",
+        group.get("parent_avg_ms", _PROFILE_METRIC_MISSING),
+        invalid_fields,
+    )
+
+    top_children = group.get("top_children", ())
+    if not isinstance(top_children, Sequence) or isinstance(top_children, (str, bytes)):
+        invalid_fields.append("profile_backward_grad_ready_top_child")
+        return
+    top_child = next((row for row in top_children if isinstance(row, Mapping)), None)
+    if top_child is None:
+        return
+
+    _set_profile_metric(
+        metrics,
+        "profile_backward_grad_ready_top_avg_ms",
+        top_child.get("avg_ms", _PROFILE_METRIC_MISSING),
+        invalid_fields,
+    )
+    _set_profile_metric(
+        metrics,
+        "profile_backward_grad_ready_top_pct",
+        top_child.get("avg_pct_of_parent", _PROFILE_METRIC_MISSING),
+        invalid_fields,
+        max_value=100.0,
+    )
+    _set_profile_count_metric(
+        metrics,
+        "profile_backward_grad_ready_top_calls",
+        top_child.get("calls", _PROFILE_METRIC_MISSING),
+        invalid_fields,
+    )
+
+
 def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, Any]) -> None:
     """Expose common phase timers as flat metrics for benchmark tables."""
     invalid_fields: list[str] = []
@@ -258,6 +309,7 @@ def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, An
             metrics["profile_forward_backward_pct"] = forward_backward_pct
         else:
             invalid_fields.append("profile_forward_backward_pct")
+    _add_profile_backward_event_metrics(metrics, profile, invalid_fields)
     _record_profile_flat_metric_invalids(metrics, invalid_fields)
 
 
