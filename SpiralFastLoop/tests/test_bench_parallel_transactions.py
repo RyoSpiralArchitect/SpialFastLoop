@@ -22,6 +22,7 @@ from scripts.bench_parallel_transactions import (
     _format_count,
     _format_metric_value,
     _format_profile_breakdown_summary,
+    _format_profile_event_timing,
     _format_profile_model_hook_summary,
     _format_profile_open_timer_summary,
     _format_scheduler_summary,
@@ -1552,6 +1553,18 @@ def test_format_profile_breakdown_summary_omits_malformed_values() -> None:
     assert _format_profile_breakdown_summary(profile, "loss") == ""
 
 
+def test_format_profile_event_timing_includes_parent_position() -> None:
+    assert _format_profile_event_timing({
+        "avg_ms": 4.25,
+        "avg_pct_of_parent": 42.5,
+    }) == "4.2ms@42.5%"
+    assert _format_profile_event_timing({"avg_ms": 4.25}) == "4.2ms"
+    assert _format_profile_event_timing({
+        "avg_ms": "slow",
+        "avg_pct_of_parent": 42.5,
+    }) == "n/a"
+
+
 def test_format_profile_open_timer_summary_reports_open_work() -> None:
     profile = {
         "profile_open_phase_count": 2,
@@ -1848,6 +1861,58 @@ def test_main_prints_setup_breakdown(
         "setup=0.27s "
         "init(dataset=0.05s,loader=0.07s,model=0.13s,compile=0.02s) "
         "e2e=0.77s"
+    ) in capsys.readouterr().out
+
+
+def test_main_prints_backward_event_parent_position(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    args = Namespace(
+        profile_model=False,
+        collect_profile=True,
+        runs=1,
+        json_out=None,
+        summary_out=None,
+    )
+
+    def fake_run_once(_args: Namespace, run_index: int) -> BenchmarkResult:
+        return BenchmarkResult(
+            wall_time_s=0.50,
+            trainer_metrics={
+                "run": run_index,
+                "reported_samples_per_sec": 200.0,
+                "samples_per_sec": 180.0,
+                "p99_s": 0.010,
+                "std_batch_s": 0.002,
+                "avg_loss": 0.1234,
+                "setup_time_s": 0.0,
+                "end_to_end_wall_time_s": 0.50,
+                "profile": {
+                    "phase_events": {
+                        "backward_grad_ready": {
+                            "top_children": [
+                                {
+                                    "name": "model.0",
+                                    "avg_ms": 3.5,
+                                    "avg_pct_of_parent": 35.0,
+                                },
+                                {"name": "model.2", "avg_ms": 1.2},
+                            ],
+                        },
+                    },
+                },
+            },
+            run_index=run_index,
+        )
+
+    monkeypatch.setattr(bpt, "parse_args", lambda: args)
+    monkeypatch.setattr(bpt, "run_once", fake_run_once)
+
+    bpt.main()
+
+    assert (
+        "backward_grad_ready: model.0=3.5ms@35.0%, model.2=1.2ms"
     ) in capsys.readouterr().out
 
 

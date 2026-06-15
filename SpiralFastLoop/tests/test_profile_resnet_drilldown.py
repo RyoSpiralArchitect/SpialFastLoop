@@ -284,6 +284,33 @@ def test_print_summary_shows_breakdown_tracking_totals(
     assert "optimizer drilldown: tracked=40.00ms untracked=10.00ms" in output
 
 
+def test_print_summary_shows_backward_parent_position(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    metrics = {
+        "samples_per_sec": 1.0,
+        "profile": {
+            "phase_events": {
+                "backward_grad_ready": {
+                    "top_children": [
+                        {
+                            "name": "layer4",
+                            "avg_ms": 2.25,
+                            "avg_pct_of_parent": 45.0,
+                            "p95_ms": 3.5,
+                        },
+                    ],
+                },
+            },
+        },
+    }
+
+    drilldown._print_summary(metrics, topk=4)
+
+    output = capsys.readouterr().out
+    assert "layer4: avg=2.25ms@45.0% p95=3.50ms" in output
+
+
 def test_print_summary_shows_open_profile_timers(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

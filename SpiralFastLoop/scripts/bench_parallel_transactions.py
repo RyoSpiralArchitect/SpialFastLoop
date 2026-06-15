@@ -1006,6 +1006,20 @@ def _profile_child_rows(profile: dict[str, Any], section: str, group: str) -> li
     return _list_value(group_profile.get("top_children"))
 
 
+def _format_profile_event_timing(row: dict[str, Any], *, precision: int = 1) -> str:
+    avg_text = _format_metric_value(row.get("avg_ms"), precision=precision, suffix="ms")
+    if avg_text == "n/a":
+        return avg_text
+    pct_text = _format_non_negative_metric_value(
+        row.get("avg_pct_of_parent"),
+        precision=1,
+        suffix="%",
+    )
+    if pct_text is None:
+        return avg_text
+    return f"{avg_text}@{pct_text}"
+
+
 def _profile_breakdown(profile: dict[str, Any], group: str) -> dict[str, Any]:
     breakdowns = _dict_value(profile.get("phase_breakdowns"))
     return _dict_value(breakdowns.get(group))
@@ -1385,7 +1399,7 @@ def main() -> None:
             backward = _profile_child_rows(profile, "phase_events", "backward_grad_ready")
             if backward:
                 top_backward = ", ".join(
-                    f"{_profile_row_name(row)}={_format_metric_value(row.get('avg_ms'), precision=1, suffix='ms')}"
+                    f"{_profile_row_name(row)}={_format_profile_event_timing(row)}"
                     for row in backward[:4]
                     if isinstance(row, dict)
                 )

@@ -165,6 +165,8 @@ breakdown for dataset, loader, model, and compile setup. It also records
 `dataset_materialized_bytes` so materialized-data runs remain transparent.
 Use `--summary-out` to capture mean/min/max/stddev timing, setup, throughput,
 and run-context stats across repeated runs.
+With `--profile-model`, backward grad-ready rows print `avg_ms@pct`, where
+`pct` is the average event position within the parent backward phase.
 
 ```bash
 python3 scripts/bench_matrix.py \

@@ -896,6 +896,7 @@ class PhaseProfiler:
         self.event_totals: Dict[str, Dict[str, float]] = {}
         self.event_calls: Dict[str, Dict[str, int]] = {}
         self.event_samples: Dict[str, Dict[str, deque[float]]] = {}
+        self.event_parents: Dict[str, str] = {}
 
     @staticmethod
     def _percentile(values: list[float], percentile: float) -> float:
@@ -1096,6 +1097,12 @@ class PhaseProfiler:
         except ValueError:
             if not exception_active:
                 raise
+        else:
+            previous_parent = self.event_parents.get(group_key)
+            if previous_parent is None:
+                self.event_parents[group_key] = parent_key
+            elif previous_parent != parent_key:
+                self.event_parents[group_key] = ""
 
     def summary(self) -> Dict[str, Any]:
         if not self.enabled:
@@ -1148,32 +1155,49 @@ class PhaseProfiler:
             }
         phase_events: Dict[str, Dict[str, Any]] = {}
         for group, totals in sorted(self.event_totals.items()):
-            children = {
-                name: self._event_row(
+            parent = self.event_parents.get(group, "")
+            event_parent_total = self.totals.get(parent)
+            event_parent_calls = self.calls.get(parent, 0)
+            event_parent_avg_s = (
+                event_parent_total / max(1, event_parent_calls)
+                if parent and event_parent_total is not None and event_parent_calls > 0
+                else None
+            )
+            children = {}
+            for name, total in sorted(totals.items()):
+                row = self._event_row(
                     total,
                     self.event_calls.get(group, {}).get(name, 0),
                     self.event_samples.get(group, {}).get(name, ()),
                 )
-                for name, total in sorted(totals.items())
-            }
+                if event_parent_avg_s is not None and event_parent_avg_s > 0.0:
+                    row["avg_pct_of_parent"] = (row["avg_ms"] / 1e3) * 100.0 / event_parent_avg_s
+                children[name] = row
+
+            def compact_event_child(name: str, row: Mapping[str, Any]) -> Dict[str, Any]:
+                compact: Dict[str, Any] = {
+                    "name": name,
+                    "total_s": row["total_s"],
+                    "avg_ms": row["avg_ms"],
+                    "calls": row["calls"],
+                    "sample_count": row["sample_count"],
+                }
+                if "avg_pct_of_parent" in row:
+                    compact["avg_pct_of_parent"] = row["avg_pct_of_parent"]
+                return self._with_optional_p95(compact, row)
+
             top_children = sorted(
-                (
-                    self._with_optional_p95(
-                        {
-                            "name": name,
-                            "total_s": row["total_s"],
-                            "avg_ms": row["avg_ms"],
-                            "calls": row["calls"],
-                            "sample_count": row["sample_count"],
-                        },
-                        row,
-                    )
-                    for name, row in children.items()
-                ),
+                (compact_event_child(name, row) for name, row in children.items()),
                 key=lambda row: row["avg_ms"],
                 reverse=True,
             )
-            phase_events[group] = {"children": children, "top_children": top_children}
+            event_group: Dict[str, Any] = {"children": children, "top_children": top_children}
+            if parent:
+                event_group["parent"] = parent
+            if event_parent_total is not None and event_parent_calls > 0 and event_parent_avg_s is not None:
+                event_group["parent_total_s"] = event_parent_total
+                event_group["parent_avg_ms"] = event_parent_avg_s * 1e3
+            phase_events[group] = event_group
         top_phases = sorted(
             (
                 self._with_optional_p95(

@@ -27,6 +27,7 @@ from scripts.bench_parallel_transactions import (
     _format_metric_value,
     _format_profile_open_timer_summary,
     _format_profile_breakdown_summary,
+    _format_profile_event_timing,
     _has_positive_display_value,
     _list_value,
     _optional_path_setting,
@@ -161,7 +162,7 @@ def _print_summary(metrics: dict[str, Any], topk: int) -> None:
         for row in backward:
             print(
                 f"  {_profile_row_name(row)}: "
-                f"avg={_format_metric_value(row.get('avg_ms'), precision=2, suffix='ms')} "
+                f"avg={_format_profile_event_timing(row, precision=2)} "
                 f"p95={_format_metric_value(row.get('p95_ms'), precision=2, suffix='ms')}"
             )
 

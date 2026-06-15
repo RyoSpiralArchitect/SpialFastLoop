@@ -493,6 +493,29 @@ def test_phase_profiler_event_preserves_body_exception_on_invalid_elapsed(
     assert profiler.summary() == profile_before
 
 
+def test_phase_profiler_events_report_parent_relative_position(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamps = iter([1.0, 1.04, 1.10])
+    monkeypatch.setattr(utils_mod.time, "perf_counter", lambda: next(timestamps))
+    profiler = PhaseProfiler(enabled=True)
+
+    profiler.start("backward")
+    profiler.record_event_since_start("backward", "backward_grad_ready", "model.0")
+    profiler.stop("backward")
+
+    event_group = profiler.summary()["phase_events"]["backward_grad_ready"]
+    child = event_group["children"]["model.0"]
+    top_child = event_group["top_children"][0]
+
+    assert event_group["parent"] == "backward"
+    assert event_group["parent_total_s"] == pytest.approx(0.10)
+    assert event_group["parent_avg_ms"] == pytest.approx(100.0)
+    assert child["avg_ms"] == pytest.approx(40.0)
+    assert child["avg_pct_of_parent"] == pytest.approx(40.0)
+    assert top_child["avg_pct_of_parent"] == pytest.approx(40.0)
+
+
 @pytest.mark.parametrize("name", [None, True, "", "   ", object()])
 def test_phase_profiler_rejects_invalid_phase_names_without_mutating_state(name: object) -> None:
     profiler = PhaseProfiler(enabled=True)
