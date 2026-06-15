@@ -1164,6 +1164,52 @@ def test_evaluate_rejects_coerced_user_metrics_and_bad_names() -> None:
     assert metrics["user_metric_skipped_count"] == 8
 
 
+def test_evaluate_rejects_user_metrics_that_collide_with_internal_metrics() -> None:
+    inputs = torch.randn(4, 4)
+    targets = torch.randint(0, 3, (4,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=4, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+
+    def metrics_fn(
+        _outputs: torch.Tensor,
+        _batch_targets: torch.Tensor,
+        _inputs: torch.Tensor,
+    ) -> dict[str, float]:
+        return {
+            "accuracy": 0.75,
+            "samples": 999.0,
+            "samples_per_sec": 999.0,
+            "reported_samples_per_sec": 999.0,
+            "user_metric_valid_count": 999.0,
+            "profile_forward_pct": 999.0,
+            "batch_size_inference_failures": 999.0,
+            "cuda_max_mem_bytes": 999.0,
+            "metrics_fn_calls": 999.0,
+        }
+
+    metrics = trainer.evaluate(
+        loader,
+        nn.CrossEntropyLoss(),
+        metrics_fn=metrics_fn,
+        steps=1,
+        collect_profile=True,
+    )
+
+    assert metrics["accuracy"] == pytest.approx(0.75)
+    assert metrics["samples"] == 4
+    assert metrics["samples_per_sec"] != 999.0
+    assert metrics["reported_samples_per_sec"] == metrics["samples_per_sec"]
+    assert metrics["user_metric_valid_count"] == 1
+    assert metrics["user_metric_invalid_count"] == 8
+    assert metrics["user_metric_skipped_count"] == 8
+    assert metrics["batch_size_inference_failures"] == 0
+    assert metrics["metrics_fn_calls"] == 1
+    assert "cuda_max_mem_bytes" not in metrics
+    assert metrics["profile_forward_pct"] != 999.0
+
+
 def test_evaluate_reports_non_mapping_user_metrics_as_invalid() -> None:
     inputs = torch.randn(4, 4)
     targets = torch.randint(0, 3, (4,))

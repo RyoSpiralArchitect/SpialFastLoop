@@ -82,6 +82,54 @@ _BATCH_SIZE_INFERENCE_FAILURE_MESSAGES = {
     "unsupported_type": "Unsupported batch structure for inferring batch size.",
 }
 
+_USER_METRIC_RESERVED_NAMES = frozenset({
+    "avg_loss",
+    "avg_batch_s",
+    "best_samples_per_sec",
+    "compile_fallback_reason",
+    "compile_init_time_s",
+    "compile_requested",
+    "compiled",
+    "device",
+    "eval_failed",
+    "eval_failure_stage",
+    "eval_failure_last_error",
+    "headroom_ratio",
+    "measured_steps",
+    "p50_s",
+    "p95_s",
+    "p99_s",
+    "postprocess_calls",
+    "postprocess_failures",
+    "postprocess_last_error",
+    "postprocess_requested",
+    "postprocess_successes",
+    "predict_failed",
+    "predict_failure_stage",
+    "predict_failure_last_error",
+    "profile",
+    "rank",
+    "reported_samples_per_sec",
+    "samples",
+    "samples_per_sec",
+    "steps",
+    "std_batch_s",
+    "total_time_s",
+    "train_failed",
+    "train_failure_stage",
+    "train_failure_last_error",
+    "unmeasured_steps",
+    "world_size",
+})
+_USER_METRIC_RESERVED_PREFIXES = (
+    "batch_size_inference_",
+    "cuda_",
+    "metrics_fn_",
+    "mps_",
+    "profile_",
+    "user_metric_",
+)
+
 
 def _format_exception_reason(exc: Exception, limit: int = 200) -> str:
     try:
@@ -512,7 +560,12 @@ def _metric_to_float(value: Any) -> tuple[Optional[float], str]:
 def _user_metric_name(key: Any) -> Optional[str]:
     if not isinstance(key, str) or not key.strip():
         return None
-    return key.strip()
+    name = key.strip()
+    if name in _USER_METRIC_RESERVED_NAMES:
+        return None
+    if any(name.startswith(prefix) for prefix in _USER_METRIC_RESERVED_PREFIXES):
+        return None
+    return name
 
 
 def _detach_to_cpu(obj: Any) -> Any:
