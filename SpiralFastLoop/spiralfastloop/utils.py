@@ -1168,11 +1168,22 @@ class PhaseProfiler:
             tracked_s = math.fsum(float(row["total_s"]) for row in children.values())
             untracked_s = max(0.0, parent_total - tracked_s)
             overtracked_s = max(0.0, tracked_s - parent_total)
+            if parent_total > 0.0:
+                coverage_pct = min(100.0, 100.0 * tracked_s / parent_total)
+                untracked_pct = 100.0 * untracked_s / parent_total
+                overtracked_pct_of_parent = 100.0 * overtracked_s / parent_total
+            else:
+                coverage_pct = 0.0
+                untracked_pct = 0.0
+                overtracked_pct_of_parent = 0.0
             phase_breakdowns[parent] = {
                 "parent_total_s": parent_total,
                 "tracked_s": tracked_s,
                 "untracked_s": untracked_s,
                 "overtracked_s": overtracked_s,
+                "coverage_pct": coverage_pct,
+                "untracked_pct": untracked_pct,
+                "overtracked_pct_of_parent": overtracked_pct_of_parent,
                 "children": children,
                 "top_children": top_children,
             }

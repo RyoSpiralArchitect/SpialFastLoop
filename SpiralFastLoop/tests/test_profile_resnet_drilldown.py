@@ -276,6 +276,7 @@ def test_print_summary_shows_breakdown_tracking_totals(
                     "tracked_s": 0.07,
                     "untracked_s": 0.03,
                     "overtracked_s": 0.02,
+                    "coverage_pct": 70.0,
                     "top_children": [
                         {"name": "conv", "pct_of_parent": 70.0, "avg_ms": 1.0},
                     ],
@@ -284,6 +285,7 @@ def test_print_summary_shows_breakdown_tracking_totals(
                     "tracked_s": 0.04,
                     "untracked_s": 0.01,
                     "overtracked_s": 0.0,
+                    "coverage_pct": 80.0,
                     "top_children": [
                         {
                             "name": "step",
@@ -302,8 +304,8 @@ def test_print_summary_shows_breakdown_tracking_totals(
     drilldown._print_summary(metrics, topk=4)
 
     output = capsys.readouterr().out
-    assert "forward drilldown: tracked=70.00ms untracked=30.00ms overtracked=20.00ms" in output
-    assert "optimizer drilldown: tracked=40.00ms untracked=10.00ms" in output
+    assert "forward drilldown: coverage=70.0% tracked=70.00ms untracked=30.00ms overtracked=20.00ms" in output
+    assert "optimizer drilldown: coverage=80.0% tracked=40.00ms untracked=10.00ms" in output
     assert "step: 80.0% avg=0.50ms p95=0.75ms p99=0.95ms std=0.05ms" in output
 
 

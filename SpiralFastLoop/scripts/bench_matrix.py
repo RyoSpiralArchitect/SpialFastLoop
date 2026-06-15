@@ -285,6 +285,9 @@ def _format_summary_row(row: dict) -> str:
     forward_backward_pct = _measured_summary_value(row, "mean_profile_forward_backward_pct")
     if forward_backward_pct is not None:
         profile_parts.append(f"fwd+bwd={forward_backward_pct:.1f}%")
+    forward_coverage_pct = _measured_summary_value(row, "mean_profile_forward_coverage_pct")
+    if forward_coverage_pct is not None:
+        profile_parts.append(f"fwd_cover={forward_coverage_pct:.1f}%")
     forward_top_pct = _measured_summary_value(row, "mean_profile_forward_top_pct_of_parent")
     forward_top_avg_ms = _measured_summary_value(row, "mean_profile_forward_top_avg_ms")
     if forward_top_pct is not None:
@@ -298,6 +301,9 @@ def _format_summary_row(row: dict) -> str:
     optimizer_pct = _measured_summary_value(row, "mean_profile_optimizer_pct")
     if optimizer_pct is not None:
         profile_parts.append(f"opt={optimizer_pct:.1f}%")
+    optimizer_coverage_pct = _measured_summary_value(row, "mean_profile_optimizer_coverage_pct")
+    if optimizer_coverage_pct is not None:
+        profile_parts.append(f"opt_cover={optimizer_coverage_pct:.1f}%")
     optimizer_top_pct = _measured_summary_value(row, "mean_profile_optimizer_top_pct_of_parent")
     optimizer_top_avg_ms = _measured_summary_value(row, "mean_profile_optimizer_top_avg_ms")
     if optimizer_top_pct is not None:

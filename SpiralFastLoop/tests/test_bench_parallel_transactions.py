@@ -529,6 +529,9 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "profile_forward_tracked_time_s": 0.05,
             "profile_forward_untracked_time_s": 0.01,
             "profile_forward_overtracked_time_s": 0.0,
+            "profile_forward_coverage_pct": 80.0,
+            "profile_forward_untracked_pct": 20.0,
+            "profile_forward_overtracked_pct_of_parent": 0.0,
             "profile_forward_top_time_s": 0.04,
             "profile_forward_top_pct_of_parent": 40.0,
             "profile_forward_top_avg_ms": 4.0,
@@ -549,6 +552,9 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "profile_optimizer_tracked_time_s": 0.03,
             "profile_optimizer_untracked_time_s": 0.01,
             "profile_optimizer_overtracked_time_s": 0.0,
+            "profile_optimizer_coverage_pct": 75.0,
+            "profile_optimizer_untracked_pct": 25.0,
+            "profile_optimizer_overtracked_pct_of_parent": 0.0,
             "profile_optimizer_top_time_s": 0.02,
             "profile_optimizer_top_pct_of_parent": 20.0,
             "profile_optimizer_top_avg_ms": 2.0,
@@ -642,6 +648,9 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "profile_forward_tracked_time_s": 0.08,
             "profile_forward_untracked_time_s": 0.02,
             "profile_forward_overtracked_time_s": 0.01,
+            "profile_forward_coverage_pct": 80.0,
+            "profile_forward_untracked_pct": 20.0,
+            "profile_forward_overtracked_pct_of_parent": 10.0,
             "profile_forward_top_time_s": 0.06,
             "profile_forward_top_pct_of_parent": 60.0,
             "profile_forward_top_avg_ms": 6.0,
@@ -662,6 +671,9 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "profile_optimizer_tracked_time_s": 0.04,
             "profile_optimizer_untracked_time_s": 0.02,
             "profile_optimizer_overtracked_time_s": 0.01,
+            "profile_optimizer_coverage_pct": 80.0,
+            "profile_optimizer_untracked_pct": 20.0,
+            "profile_optimizer_overtracked_pct_of_parent": 10.0,
             "profile_optimizer_top_time_s": 0.03,
             "profile_optimizer_top_pct_of_parent": 30.0,
             "profile_optimizer_top_avg_ms": 3.0,
@@ -737,6 +749,9 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["mean_profile_forward_tracked_time_s"] == pytest.approx(0.065)
     assert summary["mean_profile_forward_untracked_time_s"] == pytest.approx(0.015)
     assert summary["mean_profile_forward_overtracked_time_s"] == pytest.approx(0.005)
+    assert summary["mean_profile_forward_coverage_pct"] == pytest.approx(80.0)
+    assert summary["mean_profile_forward_untracked_pct"] == pytest.approx(20.0)
+    assert summary["mean_profile_forward_overtracked_pct_of_parent"] == pytest.approx(5.0)
     assert summary["mean_profile_forward_top_time_s"] == pytest.approx(0.05)
     assert summary["mean_profile_forward_top_pct_of_parent"] == pytest.approx(50.0)
     assert summary["mean_profile_forward_top_avg_ms"] == pytest.approx(5.0)
@@ -760,6 +775,9 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["mean_profile_optimizer_tracked_time_s"] == pytest.approx(0.035)
     assert summary["mean_profile_optimizer_untracked_time_s"] == pytest.approx(0.015)
     assert summary["mean_profile_optimizer_overtracked_time_s"] == pytest.approx(0.005)
+    assert summary["mean_profile_optimizer_coverage_pct"] == pytest.approx(77.5)
+    assert summary["mean_profile_optimizer_untracked_pct"] == pytest.approx(22.5)
+    assert summary["mean_profile_optimizer_overtracked_pct_of_parent"] == pytest.approx(5.0)
     assert summary["mean_profile_optimizer_top_time_s"] == pytest.approx(0.025)
     assert summary["mean_profile_optimizer_top_pct_of_parent"] == pytest.approx(25.0)
     assert summary["mean_profile_optimizer_top_avg_ms"] == pytest.approx(2.5)
@@ -791,6 +809,9 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["best_reported"]["profile_forward_tracked_time_s"] == pytest.approx(0.08)
     assert summary["best_reported"]["profile_forward_untracked_time_s"] == pytest.approx(0.02)
     assert summary["best_reported"]["profile_forward_overtracked_time_s"] == pytest.approx(0.01)
+    assert summary["best_reported"]["profile_forward_coverage_pct"] == pytest.approx(80.0)
+    assert summary["best_reported"]["profile_forward_untracked_pct"] == pytest.approx(20.0)
+    assert summary["best_reported"]["profile_forward_overtracked_pct_of_parent"] == pytest.approx(10.0)
     assert summary["best_reported"]["profile_forward_top_time_s"] == pytest.approx(0.06)
     assert summary["best_reported"]["profile_forward_top_pct_of_parent"] == pytest.approx(60.0)
     assert summary["best_reported"]["profile_forward_top_avg_ms"] == pytest.approx(6.0)
@@ -808,6 +829,9 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["best_reported"]["profile_optimizer_tracked_time_s"] == pytest.approx(0.04)
     assert summary["best_reported"]["profile_optimizer_untracked_time_s"] == pytest.approx(0.02)
     assert summary["best_reported"]["profile_optimizer_overtracked_time_s"] == pytest.approx(0.01)
+    assert summary["best_reported"]["profile_optimizer_coverage_pct"] == pytest.approx(80.0)
+    assert summary["best_reported"]["profile_optimizer_untracked_pct"] == pytest.approx(20.0)
+    assert summary["best_reported"]["profile_optimizer_overtracked_pct_of_parent"] == pytest.approx(10.0)
     assert summary["best_reported"]["profile_optimizer_top_time_s"] == pytest.approx(0.03)
     assert summary["best_reported"]["profile_optimizer_top_pct_of_parent"] == pytest.approx(30.0)
     assert summary["best_reported"]["profile_optimizer_top_avg_ms"] == pytest.approx(3.0)
@@ -1806,11 +1830,13 @@ def test_format_profile_breakdown_summary_includes_overtracked_when_positive() -
                 "tracked_s": 0.07,
                 "untracked_s": 0.03,
                 "overtracked_s": 0.02,
+                "coverage_pct": 70.0,
             },
             "optimizer": {
                 "tracked_s": 0.04,
                 "untracked_s": 0.01,
                 "overtracked_s": 0.0,
+                "coverage_pct": 80.0,
             },
         },
     }
@@ -1818,11 +1844,11 @@ def test_format_profile_breakdown_summary_includes_overtracked_when_positive() -
     assert _format_profile_breakdown_summary(
         profile,
         "forward",
-    ) == "tracked=70.00ms untracked=30.00ms overtracked=20.00ms"
+    ) == "coverage=70.0% tracked=70.00ms untracked=30.00ms overtracked=20.00ms"
     assert _format_profile_breakdown_summary(
         profile,
         "optimizer",
-    ) == "tracked=40.00ms untracked=10.00ms"
+    ) == "coverage=80.0% tracked=40.00ms untracked=10.00ms"
     assert _format_profile_breakdown_summary(profile, "loss") == ""
 
 

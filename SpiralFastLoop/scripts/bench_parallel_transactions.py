@@ -220,6 +220,9 @@ PROFILE_FORWARD_BREAKDOWN_SUMMARY_FIELDS = (
     "profile_forward_tracked_time_s",
     "profile_forward_untracked_time_s",
     "profile_forward_overtracked_time_s",
+    "profile_forward_coverage_pct",
+    "profile_forward_untracked_pct",
+    "profile_forward_overtracked_pct_of_parent",
     "profile_forward_top_time_s",
     "profile_forward_top_pct_of_parent",
     "profile_forward_top_avg_ms",
@@ -232,6 +235,9 @@ PROFILE_OPTIMIZER_BREAKDOWN_SUMMARY_FIELDS = (
     "profile_optimizer_tracked_time_s",
     "profile_optimizer_untracked_time_s",
     "profile_optimizer_overtracked_time_s",
+    "profile_optimizer_coverage_pct",
+    "profile_optimizer_untracked_pct",
+    "profile_optimizer_overtracked_pct_of_parent",
     "profile_optimizer_top_time_s",
     "profile_optimizer_top_pct_of_parent",
     "profile_optimizer_top_avg_ms",
@@ -400,6 +406,9 @@ BEST_RUN_FIELDS = (
     "profile_forward_tracked_time_s",
     "profile_forward_untracked_time_s",
     "profile_forward_overtracked_time_s",
+    "profile_forward_coverage_pct",
+    "profile_forward_untracked_pct",
+    "profile_forward_overtracked_pct_of_parent",
     "profile_forward_top_time_s",
     "profile_forward_top_pct_of_parent",
     "profile_forward_top_avg_ms",
@@ -420,6 +429,9 @@ BEST_RUN_FIELDS = (
     "profile_optimizer_tracked_time_s",
     "profile_optimizer_untracked_time_s",
     "profile_optimizer_overtracked_time_s",
+    "profile_optimizer_coverage_pct",
+    "profile_optimizer_untracked_pct",
+    "profile_optimizer_overtracked_pct_of_parent",
     "profile_optimizer_top_time_s",
     "profile_optimizer_top_pct_of_parent",
     "profile_optimizer_top_avg_ms",
@@ -1379,6 +1391,13 @@ def _format_profile_breakdown_summary(profile: dict[str, Any], group: str) -> st
     if not breakdown:
         return ""
     parts = []
+    coverage_text = _format_non_negative_metric_value(
+        breakdown.get("coverage_pct"),
+        precision=1,
+        suffix="%",
+    )
+    if coverage_text is not None:
+        parts.append(f"coverage={coverage_text}")
     tracked_text = _format_non_negative_metric_value(
         breakdown.get("tracked_s"),
         precision=2,

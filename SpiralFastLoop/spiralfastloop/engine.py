@@ -294,6 +294,19 @@ def _add_profile_breakdown_metrics(
         ("overtracked_s", f"{metric_prefix}_overtracked_time_s"),
     ):
         _set_profile_metric_if_present(metrics, metric_name, group, source_name, invalid_fields)
+    for source_name, metric_name, max_value in (
+        ("coverage_pct", f"{metric_prefix}_coverage_pct", 100.0),
+        ("untracked_pct", f"{metric_prefix}_untracked_pct", 100.0),
+        ("overtracked_pct_of_parent", f"{metric_prefix}_overtracked_pct_of_parent", None),
+    ):
+        _set_profile_metric_if_present(
+            metrics,
+            metric_name,
+            group,
+            source_name,
+            invalid_fields,
+            max_value=max_value,
+        )
 
     top_children = group.get("top_children", ())
     if not isinstance(top_children, Sequence) or isinstance(top_children, (str, bytes)):

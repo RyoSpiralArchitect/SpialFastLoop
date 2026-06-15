@@ -356,6 +356,9 @@ def test_phase_profiler_reports_non_negative_untracked_breakdown_time() -> None:
     assert breakdown["tracked_s"] == pytest.approx(0.07)
     assert breakdown["untracked_s"] == pytest.approx(0.03)
     assert breakdown["overtracked_s"] == pytest.approx(0.0)
+    assert breakdown["coverage_pct"] == pytest.approx(70.0)
+    assert breakdown["untracked_pct"] == pytest.approx(30.0)
+    assert breakdown["overtracked_pct_of_parent"] == pytest.approx(0.0)
 
 
 def test_phase_profiler_reports_overtracked_breakdown_time() -> None:
@@ -371,6 +374,9 @@ def test_phase_profiler_reports_overtracked_breakdown_time() -> None:
     assert breakdown["tracked_s"] == pytest.approx(0.13)
     assert breakdown["untracked_s"] == pytest.approx(0.0)
     assert breakdown["overtracked_s"] == pytest.approx(0.03)
+    assert breakdown["coverage_pct"] == pytest.approx(100.0)
+    assert breakdown["untracked_pct"] == pytest.approx(0.0)
+    assert breakdown["overtracked_pct_of_parent"] == pytest.approx(30.0)
 
 
 @pytest.mark.parametrize("seconds", [-0.1, float("nan"), float("inf"), True, object()])
@@ -2890,6 +2896,9 @@ def test_profile_flat_metrics_include_forward_drilldown_position() -> None:
                 "tracked_s": 0.07,
                 "untracked_s": 0.03,
                 "overtracked_s": 0.02,
+                "coverage_pct": 70.0,
+                "untracked_pct": 30.0,
+                "overtracked_pct_of_parent": 20.0,
                 "children": {
                     "model.0": {"total_s": 0.04},
                     "model.2": {"total_s": 0.03},
@@ -2921,6 +2930,9 @@ def test_profile_flat_metrics_include_forward_drilldown_position() -> None:
     assert metrics["profile_forward_tracked_time_s"] == pytest.approx(0.07)
     assert metrics["profile_forward_untracked_time_s"] == pytest.approx(0.03)
     assert metrics["profile_forward_overtracked_time_s"] == pytest.approx(0.02)
+    assert metrics["profile_forward_coverage_pct"] == pytest.approx(70.0)
+    assert metrics["profile_forward_untracked_pct"] == pytest.approx(30.0)
+    assert metrics["profile_forward_overtracked_pct_of_parent"] == pytest.approx(20.0)
     assert metrics["profile_forward_top_time_s"] == pytest.approx(0.04)
     assert metrics["profile_forward_top_pct_of_parent"] == pytest.approx(40.0)
     assert metrics["profile_forward_top_avg_ms"] == pytest.approx(4.0)
@@ -2962,6 +2974,9 @@ def test_profile_flat_metrics_tolerate_partial_forward_drilldown_rows() -> None:
     assert "profile_forward_tracked_time_s" not in metrics
     assert "profile_forward_untracked_time_s" not in metrics
     assert "profile_forward_overtracked_time_s" not in metrics
+    assert "profile_forward_coverage_pct" not in metrics
+    assert "profile_forward_untracked_pct" not in metrics
+    assert "profile_forward_overtracked_pct_of_parent" not in metrics
     assert "profile_forward_top_time_s" not in metrics
     assert "profile_forward_top_pct_of_parent" not in metrics
     assert "profile_forward_top_p95_ms" not in metrics
@@ -2980,6 +2995,9 @@ def test_profile_flat_metrics_reject_invalid_forward_drilldown_values() -> None:
                 "tracked_s": -0.07,
                 "untracked_s": "missing",
                 "overtracked_s": True,
+                "coverage_pct": 125.0,
+                "untracked_pct": -1.0,
+                "overtracked_pct_of_parent": "bad",
                 "children": {"model.0": {}},
                 "top_children": [
                     {
@@ -3008,6 +3026,9 @@ def test_profile_flat_metrics_reject_invalid_forward_drilldown_values() -> None:
     assert "profile_forward_tracked_time_s" not in metrics
     assert "profile_forward_untracked_time_s" not in metrics
     assert "profile_forward_overtracked_time_s" not in metrics
+    assert "profile_forward_coverage_pct" not in metrics
+    assert "profile_forward_untracked_pct" not in metrics
+    assert "profile_forward_overtracked_pct_of_parent" not in metrics
     assert "profile_forward_top_time_s" not in metrics
     assert "profile_forward_top_pct_of_parent" not in metrics
     assert "profile_forward_top_avg_ms" not in metrics
@@ -3020,11 +3041,14 @@ def test_profile_flat_metrics_reject_invalid_forward_drilldown_values() -> None:
     assert "profile_forward_top_sample_count" not in metrics
     assert "profile_forward_top_window_sample_count" not in metrics
     assert "profile_forward_top_calls" not in metrics
-    assert metrics["profile_flat_metric_invalid_count"] == 15
+    assert metrics["profile_flat_metric_invalid_count"] == 18
     assert metrics["profile_flat_metric_invalid_fields"] == [
         "profile_forward_tracked_time_s",
         "profile_forward_untracked_time_s",
         "profile_forward_overtracked_time_s",
+        "profile_forward_coverage_pct",
+        "profile_forward_untracked_pct",
+        "profile_forward_overtracked_pct_of_parent",
         "profile_forward_top_time_s",
         "profile_forward_top_pct_of_parent",
         "profile_forward_top_avg_ms",
@@ -3052,6 +3076,9 @@ def test_profile_flat_metrics_include_optimizer_drilldown_position() -> None:
                 "tracked_s": 0.04,
                 "untracked_s": 0.01,
                 "overtracked_s": 0.0,
+                "coverage_pct": 80.0,
+                "untracked_pct": 20.0,
+                "overtracked_pct_of_parent": 0.0,
                 "children": {
                     "optimizer.zero_grad": {"total_s": 0.01},
                     "optimizer.step": {"total_s": 0.03},
@@ -3083,6 +3110,9 @@ def test_profile_flat_metrics_include_optimizer_drilldown_position() -> None:
     assert metrics["profile_optimizer_tracked_time_s"] == pytest.approx(0.04)
     assert metrics["profile_optimizer_untracked_time_s"] == pytest.approx(0.01)
     assert metrics["profile_optimizer_overtracked_time_s"] == pytest.approx(0.0)
+    assert metrics["profile_optimizer_coverage_pct"] == pytest.approx(80.0)
+    assert metrics["profile_optimizer_untracked_pct"] == pytest.approx(20.0)
+    assert metrics["profile_optimizer_overtracked_pct_of_parent"] == pytest.approx(0.0)
     assert metrics["profile_optimizer_top_time_s"] == pytest.approx(0.03)
     assert metrics["profile_optimizer_top_pct_of_parent"] == pytest.approx(60.0)
     assert metrics["profile_optimizer_top_avg_ms"] == pytest.approx(3.0)
@@ -3124,6 +3154,9 @@ def test_profile_flat_metrics_tolerate_partial_optimizer_drilldown_rows() -> Non
     assert "profile_optimizer_tracked_time_s" not in metrics
     assert "profile_optimizer_untracked_time_s" not in metrics
     assert "profile_optimizer_overtracked_time_s" not in metrics
+    assert "profile_optimizer_coverage_pct" not in metrics
+    assert "profile_optimizer_untracked_pct" not in metrics
+    assert "profile_optimizer_overtracked_pct_of_parent" not in metrics
     assert "profile_optimizer_top_time_s" not in metrics
     assert "profile_optimizer_top_pct_of_parent" not in metrics
     assert "profile_optimizer_top_p95_ms" not in metrics
@@ -3142,6 +3175,9 @@ def test_profile_flat_metrics_reject_invalid_optimizer_drilldown_values() -> Non
                 "tracked_s": -0.04,
                 "untracked_s": "missing",
                 "overtracked_s": True,
+                "coverage_pct": 125.0,
+                "untracked_pct": -1.0,
+                "overtracked_pct_of_parent": "bad",
                 "children": {"optimizer.step": {}},
                 "top_children": [
                     {
@@ -3170,6 +3206,9 @@ def test_profile_flat_metrics_reject_invalid_optimizer_drilldown_values() -> Non
     assert "profile_optimizer_tracked_time_s" not in metrics
     assert "profile_optimizer_untracked_time_s" not in metrics
     assert "profile_optimizer_overtracked_time_s" not in metrics
+    assert "profile_optimizer_coverage_pct" not in metrics
+    assert "profile_optimizer_untracked_pct" not in metrics
+    assert "profile_optimizer_overtracked_pct_of_parent" not in metrics
     assert "profile_optimizer_top_time_s" not in metrics
     assert "profile_optimizer_top_pct_of_parent" not in metrics
     assert "profile_optimizer_top_avg_ms" not in metrics
@@ -3182,11 +3221,14 @@ def test_profile_flat_metrics_reject_invalid_optimizer_drilldown_values() -> Non
     assert "profile_optimizer_top_sample_count" not in metrics
     assert "profile_optimizer_top_window_sample_count" not in metrics
     assert "profile_optimizer_top_calls" not in metrics
-    assert metrics["profile_flat_metric_invalid_count"] == 15
+    assert metrics["profile_flat_metric_invalid_count"] == 18
     assert metrics["profile_flat_metric_invalid_fields"] == [
         "profile_optimizer_tracked_time_s",
         "profile_optimizer_untracked_time_s",
         "profile_optimizer_overtracked_time_s",
+        "profile_optimizer_coverage_pct",
+        "profile_optimizer_untracked_pct",
+        "profile_optimizer_overtracked_pct_of_parent",
         "profile_optimizer_top_time_s",
         "profile_optimizer_top_pct_of_parent",
         "profile_optimizer_top_avg_ms",
