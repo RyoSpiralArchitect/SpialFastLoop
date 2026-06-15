@@ -909,6 +909,8 @@ def _set_profile_bottleneck_category_top_fields(
     entry["top_candidate"] = candidate.get("name", "")
     entry["top_rank"] = candidate.get("rank", 0)
     entry["top_severity"] = candidate.get("severity", "")
+    entry["top_score"] = candidate.get("score", 0.0)
+    entry["top_score_unit"] = candidate.get("score_unit", "")
     entry["top_metric"] = candidate.get("metric", "")
     entry["top_value"] = candidate.get("value", 0.0)
     entry["top_unit"] = candidate.get("unit", "")
