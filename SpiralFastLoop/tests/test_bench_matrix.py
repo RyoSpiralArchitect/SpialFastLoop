@@ -1562,6 +1562,11 @@ def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
     }
     assert generated["profile_bottleneck_severity_counts"] == {"high": 1, "medium": 3}
     assert generated["profile_bottleneck_top_candidate"] == generated["profile_bottleneck_candidates"][0]
+    assert generated["profile_bottleneck_category_order"] == [
+        "phase_share",
+        "readiness_span",
+        "child_hotspot",
+    ]
     assert generated["profile_bottleneck_top_category"] == {
         "category": "phase_share",
         "count": 2,
@@ -1575,6 +1580,7 @@ def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
         "top_rank": 1,
         "top_severity": "high",
         "severity_counts": {"high": 1, "medium": 1},
+        "pressure_rank": 1,
     }
     assert generated["profile_bottleneck_category_summary"]["phase_share"] == {
         "count": 2,
@@ -1588,6 +1594,7 @@ def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
         "top_rank": 1,
         "top_severity": "high",
         "severity_counts": {"high": 1, "medium": 1},
+        "pressure_rank": 1,
     }
     assert generated["profile_bottleneck_category_summary"]["readiness_span"] == {
         "count": 1,
@@ -1601,6 +1608,7 @@ def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
         "top_rank": 3,
         "top_severity": "medium",
         "severity_counts": {"medium": 1},
+        "pressure_rank": 2,
     }
     assert generated["profile_bottleneck_candidates"][0]["name"] == "backward_phase"
     assert generated["profile_bottleneck_candidates"][0]["score"] == pytest.approx(30.0)
@@ -1631,6 +1639,9 @@ def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
     ]
     assert summary["best_reported"]["profile_bottleneck_top_category"] == materialized[
         "profile_bottleneck_top_category"
+    ]
+    assert summary["best_reported"]["profile_bottleneck_category_order"] == materialized[
+        "profile_bottleneck_category_order"
     ]
     assert summary["best_reported"]["profile_bottleneck_severity_counts"] == materialized[
         "profile_bottleneck_severity_counts"

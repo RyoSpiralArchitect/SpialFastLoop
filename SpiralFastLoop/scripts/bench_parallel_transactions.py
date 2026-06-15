@@ -1016,6 +1016,19 @@ def _profile_bottleneck_top_category(
     return {**entry, "category": category_name}
 
 
+def _add_profile_bottleneck_category_ranks(
+    category_summary: dict[str, dict[str, object]],
+) -> list[str]:
+    category_order = []
+    for rank, (category_name, entry) in enumerate(
+        _ranked_profile_bottleneck_category_items(category_summary),
+        start=1,
+    ):
+        entry["pressure_rank"] = rank
+        category_order.append(category_name)
+    return category_order
+
+
 def _profile_bottleneck_severity_counts(
     candidates: list[dict[str, object]],
 ) -> dict[str, int]:
@@ -1062,6 +1075,9 @@ def _add_profile_bottleneck_candidates(summary: dict) -> None:
         ranked_candidates
     )
     category_summary = _profile_bottleneck_category_summary(ranked_candidates)
+    category_order = _add_profile_bottleneck_category_ranks(category_summary)
+    if category_order:
+        summary["profile_bottleneck_category_order"] = category_order
     top_category = _profile_bottleneck_top_category(category_summary)
     if top_category is not None:
         summary["profile_bottleneck_top_category"] = top_category

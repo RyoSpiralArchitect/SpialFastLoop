@@ -964,6 +964,12 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
     assert len(candidates) == 8
     assert summary["profile_bottleneck_top_candidate"] == candidates[0]
     category_summary = summary["profile_bottleneck_category_summary"]
+    assert summary["profile_bottleneck_category_order"] == [
+        "phase_share",
+        "readiness_span",
+        "child_hotspot",
+        "coverage_gap",
+    ]
     assert summary["profile_bottleneck_top_category"] == {
         "category": "phase_share",
         "count": 3,
@@ -977,6 +983,7 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
         "top_rank": 1,
         "top_severity": "high",
         "severity_counts": {"high": 1, "medium": 2},
+        "pressure_rank": 1,
     }
     assert category_summary["phase_share"] == {
         "count": 3,
@@ -990,6 +997,7 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
         "top_rank": 1,
         "top_severity": "high",
         "severity_counts": {"high": 1, "medium": 2},
+        "pressure_rank": 1,
     }
     assert category_summary["child_hotspot"] == {
         "count": 3,
@@ -1003,6 +1011,7 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
         "top_rank": 4,
         "top_severity": "medium",
         "severity_counts": {"medium": 2, "low": 1},
+        "pressure_rank": 3,
     }
     assert category_summary["coverage_gap"] == {
         "count": 2,
@@ -1016,6 +1025,7 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
         "top_rank": 8,
         "top_severity": "low",
         "severity_counts": {"low": 2},
+        "pressure_rank": 4,
     }
     assert [candidate["name"] for candidate in candidates[:4]] == [
         "backward_phase",
@@ -1077,6 +1087,7 @@ def test_summarize_results_skips_invalid_profile_bottleneck_candidates() -> None
     ])
 
     assert "profile_bottleneck_candidate_count" not in summary
+    assert "profile_bottleneck_category_order" not in summary
     assert "profile_bottleneck_category_summary" not in summary
     assert "profile_bottleneck_severity_thresholds" not in summary
     assert "profile_bottleneck_severity_counts" not in summary
