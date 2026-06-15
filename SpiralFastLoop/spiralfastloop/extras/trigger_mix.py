@@ -120,6 +120,49 @@ def _split_batch(batch: Any, batch_size: int) -> list[Any]:
     return [batch for _ in range(batch_size)]
 
 
+def _stack_samples(samples: Sequence[Any]) -> Any:
+    if len(samples) == 0:
+        raise ValueError("sample sequence must not be empty when batching samples.")
+    first = samples[0]
+    if isinstance(first, torch.Tensor):
+        tensor_samples: list[torch.Tensor] = []
+        for sample in samples:
+            if not isinstance(sample, torch.Tensor):
+                raise ValueError("hard samples must share structure when batching samples.")
+            tensor_samples.append(sample)
+        return torch.stack(tensor_samples, dim=0)
+    if isinstance(first, Mapping):
+        first_keys = set(first.keys())
+        mapping_samples: list[Mapping[Any, Any]] = []
+        for sample in samples:
+            if not isinstance(sample, Mapping) or set(sample.keys()) != first_keys:
+                raise ValueError("hard samples must share structure when batching samples.")
+            mapping_samples.append(sample)
+        return {key: _stack_samples([sample[key] for sample in mapping_samples]) for key in first.keys()}
+    if isinstance(first, list):
+        list_samples: list[list[Any]] = []
+        for sample in samples:
+            if not isinstance(sample, list) or len(sample) != len(first):
+                raise ValueError("hard samples must share structure when batching samples.")
+            list_samples.append(sample)
+        return [_stack_samples([sample[index] for sample in list_samples]) for index in range(len(first))]
+    if isinstance(first, tuple):
+        first_namedtuple = hasattr(first, "_fields")
+        tuple_samples: list[tuple[Any, ...]] = []
+        for sample in samples:
+            if not isinstance(sample, tuple) or len(sample) != len(first):
+                raise ValueError("hard samples must share structure when batching samples.")
+            sample_namedtuple = hasattr(sample, "_fields")
+            if first_namedtuple != sample_namedtuple or (first_namedtuple and type(sample) is not type(first)):
+                raise ValueError("hard samples must share structure when batching samples.")
+            tuple_samples.append(sample)
+        values = [_stack_samples([sample[index] for sample in tuple_samples]) for index in range(len(first))]
+        if first_namedtuple:
+            return type(first)(*values)
+        return tuple(values)
+    return list(samples)
+
+
 def _trigger_context_setting(ctx: Any) -> Dict[str, Any]:
     if not isinstance(ctx, Mapping):
         raise ValueError("ctx must be a mapping")
@@ -202,9 +245,7 @@ class HardSampleBuffer:
         indices = torch.randint(0, len(self._inputs), (requested,))
         samples_in = [self._inputs[i] for i in indices.tolist()]
         samples_tgt = [self._targets[i] for i in indices.tolist()]
-        if isinstance(samples_in[0], torch.Tensor):
-            return torch.stack(samples_in, dim=0), torch.stack(samples_tgt, dim=0)
-        return samples_in, samples_tgt
+        return _stack_samples(samples_in), _stack_samples(samples_tgt)
 
 
 class HardSampleProvider:

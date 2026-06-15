@@ -128,6 +128,45 @@ def test_hard_sample_buffer_rejects_invalid_sample_request(num_samples: object) 
         buffer.sample(num_samples)  # type: ignore[arg-type]
 
 
+def test_hard_sample_buffer_samples_tensor_inputs_with_non_tensor_targets() -> None:
+    buffer = HardSampleBuffer(max_samples=8)
+    inputs = torch.arange(6, dtype=torch.float32).reshape(3, 2)
+    targets = ["easy", "medium", "hard"]
+    losses = torch.tensor([1.0, 3.0, 2.0])
+
+    buffer.add_batch(inputs, targets, losses)
+    sampled_inputs, sampled_targets = buffer.sample(5)
+
+    assert sampled_inputs.shape == (5, 2)
+    assert isinstance(sampled_targets, list)
+    assert len(sampled_targets) == 5
+    assert set(sampled_targets).issubset(set(targets))
+
+
+def test_hard_sample_buffer_samples_nested_batch_structures() -> None:
+    pair = namedtuple("Pair", ["primary", "aux"])
+    buffer = HardSampleBuffer(max_samples=8)
+    inputs = {
+        "dense": torch.arange(6, dtype=torch.float32).reshape(3, 2),
+        "pair": pair(torch.arange(3, dtype=torch.float32), torch.ones((3, 1))),
+    }
+    targets = {
+        "label": torch.arange(3),
+        "weight": [torch.ones(3), torch.arange(3, dtype=torch.float32)],
+    }
+    losses = torch.tensor([1.0, 3.0, 2.0])
+
+    buffer.add_batch(inputs, targets, losses)
+    sampled_inputs, sampled_targets = buffer.sample(5)
+
+    assert sampled_inputs["dense"].shape == (5, 2)
+    assert sampled_inputs["pair"].primary.shape == (5,)
+    assert sampled_inputs["pair"].aux.shape == (5, 1)
+    assert sampled_targets["label"].shape == (5,)
+    assert sampled_targets["weight"][0].shape == (5,)
+    assert sampled_targets["weight"][1].shape == (5,)
+
+
 @pytest.mark.parametrize("select_top_k", [0, -1, 1.5, "2", True])
 def test_hard_sample_provider_rejects_invalid_select_top_k(select_top_k: object) -> None:
     with pytest.raises(ValueError, match="select_top_k"):
