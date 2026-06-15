@@ -786,13 +786,18 @@ def _format_profile_open_timer_summary(profile: dict[str, Any]) -> str:
 
 def _format_profile_model_hook_summary(metrics: dict[str, Any]) -> str:
     requested = metrics.get("profile_model_requested")
+    status_present = "profile_model_status" in metrics
     status_raw = metrics.get("profile_model_status")
     status = status_raw.strip() if isinstance(status_raw, str) else ""
     if requested is not True and status != "hook_failures":
         return ""
+    status_valid = bool(status) and status in PROFILE_MODEL_STATUS_CHOICES
+    status_invalid = status_present and not status_valid
 
     parts = []
-    if status and status != "not_requested":
+    if status_invalid:
+        parts.append("status=invalid")
+    elif status and status != "not_requested":
         parts.append(f"status={status}")
     failure_count: Optional[int] = None
     for field, label in (

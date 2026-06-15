@@ -274,6 +274,27 @@ def test_format_summary_row_omits_malformed_profile_model_status_counts() -> Non
     assert "status(" not in formatted
 
 
+def test_format_run_row_marks_invalid_profile_model_status() -> None:
+    formatted = _format_run_row(
+        "generated",
+        "no-compile",
+        0,
+        0,
+        {
+            "reported_samples_per_sec": 200.0,
+            "end_to_end_wall_time_s": 1.25,
+            "profile_model_requested": True,
+            "profile_model_status": "missing",
+            "profile_model_modules_selected": 2,
+            "profile_model_hook_count": 4,
+            "profile_model_hook_failures": 0,
+        },
+    )
+
+    assert "profile_model(status=invalid modules=2 hooks=4 failures=0)" in formatted
+    assert "missing" not in formatted
+
+
 def test_format_summary_row_marks_unmeasured_base_fields() -> None:
     row = {
         "dataset_mode": "generated",

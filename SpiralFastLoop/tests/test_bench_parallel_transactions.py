@@ -1456,6 +1456,29 @@ def test_format_profile_model_hook_summary_hides_not_requested_and_bad_counts() 
     }) == "status=no_matching_modules"
 
 
+def test_format_profile_model_hook_summary_marks_invalid_status() -> None:
+    formatted = _format_profile_model_hook_summary({
+        "profile_model_requested": True,
+        "profile_model_status": "missing",
+        "profile_model_modules_selected": 2,
+        "profile_model_hook_count": 4,
+        "profile_model_hook_failures": 0,
+    })
+
+    assert formatted == "status=invalid modules=2 hooks=4 failures=0"
+    assert "missing" not in formatted
+
+
+def test_format_profile_model_hook_summary_marks_malformed_status() -> None:
+    formatted = _format_profile_model_hook_summary({
+        "profile_model_requested": True,
+        "profile_model_status": True,
+        "profile_model_modules_selected": 2,
+    })
+
+    assert formatted == "status=invalid modules=2"
+
+
 @pytest.mark.parametrize(
     ("row", "expected"),
     [
