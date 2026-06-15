@@ -679,6 +679,39 @@ def test_fast_trainer_accepts_duck_typed_logger_scheduler_and_trigger() -> None:
     assert trainer.device == "cpu"
 
 
+def test_fast_trainer_rejects_backward_compile_init_timer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class NoMoveLinear(nn.Linear):
+        def to(self, *args: object, **kwargs: object) -> "NoMoveLinear":
+            return self
+
+    class CompileResult:
+        def __init__(self, model: nn.Module) -> None:
+            self.model = model
+            self.compiled = True
+            self.fallback_reason = ""
+
+    timestamps = iter([2.0, 1.0])
+    monkeypatch.setattr(engine.time, "perf_counter", lambda: next(timestamps))
+    monkeypatch.setattr(
+        engine,
+        "safe_compile_with_diagnostics",
+        lambda model, *, mode="default": CompileResult(model),
+    )
+    model = NoMoveLinear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+    with pytest.raises(ValueError, match="compile_init_time_s"):
+        FastTrainer(
+            model,
+            optimizer,
+            device="mps",
+            use_amp=False,
+            use_compile=True,
+        )
+
+
 @pytest.mark.parametrize(
     ("train_kwargs", "match"),
     [

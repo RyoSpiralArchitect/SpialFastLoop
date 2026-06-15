@@ -704,7 +704,10 @@ class FastTrainer:
             self.model = compile_result.model
             self.compiled = compile_result.compiled
             self.compile_fallback_reason = compile_result.fallback_reason
-            self.compile_init_time_s = time.perf_counter() - compile_started_at
+            self.compile_init_time_s = _non_negative_finite_float_setting(
+                time.perf_counter() - compile_started_at,
+                "compile_init_time_s",
+            )
         elif self.compile_requested:
             self.compile_fallback_reason = "cpu_device"
         else:
