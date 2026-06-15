@@ -1777,6 +1777,8 @@ def _format_profile_bottleneck_category_pressure(
     omitted_count = _display_count_value(entry.get("omitted_count"))
     if omitted_count is not None and omitted_count > 0:
         text = f"{text};omitted={omitted_count}"
+    if entry.get("top_candidate_returned") is False:
+        text = f"{text};top_omitted"
     return text
 
 

@@ -367,6 +367,7 @@ def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
                 "omitted_count": 1,
                 "score_unit": "profile_pct",
                 "top_candidate": "forward_top_child",
+                "top_candidate_returned": False,
                 "top_rank": 2,
                 "top_severity": "high",
                 "pressure_rank": 2,
@@ -389,7 +390,7 @@ def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
     assert "hotspot=forward_phase:55.0%(phase_share,high)" in formatted
     assert (
         "pressure(#1 phase_share:forward_phase=55.0%[high];sum=75.0%,"
-        "#2 child_hotspot:forward_top_child=35.0%[high];sum=35.0%;omitted=1)"
+        "#2 child_hotspot:forward_top_child=35.0%[high];sum=35.0%;omitted=1;top_omitted)"
     ) in formatted
     assert "severity_counts(high=2,medium=1)" in formatted
 

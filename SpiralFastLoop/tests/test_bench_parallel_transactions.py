@@ -2854,13 +2854,14 @@ def test_format_profile_bottleneck_category_pressure_includes_omitted_count() ->
             "omitted_count": 2,
             "score_unit": "profile_pct",
             "top_candidate": "forward_untracked",
+            "top_candidate_returned": False,
             "top_severity": "medium",
             "pressure_rank": 4,
         },
         include_count=True,
     )
 
-    assert text == "#4 coverage_gap:forward_untracked=12.5%[medium]/3;sum=20.0%;omitted=2"
+    assert text == "#4 coverage_gap:forward_untracked=12.5%[medium]/3;sum=20.0%;omitted=2;top_omitted"
 
 
 def test_transaction_benchmark_records_run_seed() -> None:
