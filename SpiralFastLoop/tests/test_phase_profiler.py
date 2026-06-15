@@ -2190,6 +2190,8 @@ def test_train_one_epoch_collects_phase_and_model_profile() -> None:
     assert metrics["profile_forward_time_s"] == pytest.approx(phases["forward"]["total_s"])
     assert metrics["profile_forward_pct"] == pytest.approx(phases["forward"]["pct"])
     assert metrics["profile_forward_avg_ms"] == pytest.approx(phases["forward"]["avg_ms"])
+    assert metrics["profile_forward_p99_ms"] == pytest.approx(phases["forward"]["p99_ms"])
+    assert metrics["profile_forward_std_ms"] == pytest.approx(phases["forward"]["std_ms"])
     assert metrics["profile_backward_time_s"] == pytest.approx(phases["backward"]["total_s"])
     assert metrics["profile_backward_pct"] == pytest.approx(phases["backward"]["pct"])
     assert metrics["profile_optimizer_time_s"] == pytest.approx(phases["optimizer"]["total_s"])
@@ -2725,6 +2727,65 @@ def test_profile_flat_metrics_include_open_timer_counts() -> None:
     assert metrics["profile_open_detail_count"] == 2
     assert metrics["profile_flat_metric_invalid_count"] == 0
     assert "profile_flat_metric_invalid_fields" not in metrics
+
+
+def test_profile_flat_metrics_include_phase_distribution_values() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "profile_total_s": 1.0,
+        "phases": {
+            "forward": {
+                "total_s": 0.1,
+                "pct": 10.0,
+                "avg_ms": 10.0,
+                "p50_ms": 9.0,
+                "p95_ms": 12.0,
+                "p99_ms": 13.0,
+                "std_ms": 1.5,
+            },
+        },
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert metrics["profile_forward_p50_ms"] == pytest.approx(9.0)
+    assert metrics["profile_forward_p95_ms"] == pytest.approx(12.0)
+    assert metrics["profile_forward_p99_ms"] == pytest.approx(13.0)
+    assert metrics["profile_forward_std_ms"] == pytest.approx(1.5)
+    assert metrics["profile_flat_metric_invalid_count"] == 0
+    assert "profile_flat_metric_invalid_fields" not in metrics
+
+
+def test_profile_flat_metrics_reject_invalid_phase_distribution_values() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "profile_total_s": 1.0,
+        "phases": {
+            "forward": {
+                "total_s": 0.1,
+                "pct": 10.0,
+                "avg_ms": 10.0,
+                "p50_ms": -1.0,
+                "p95_ms": "slow",
+                "p99_ms": float("inf"),
+                "std_ms": True,
+            },
+        },
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert "profile_forward_p50_ms" not in metrics
+    assert "profile_forward_p95_ms" not in metrics
+    assert "profile_forward_p99_ms" not in metrics
+    assert "profile_forward_std_ms" not in metrics
+    assert metrics["profile_flat_metric_invalid_count"] == 4
+    assert metrics["profile_flat_metric_invalid_fields"] == [
+        "profile_forward_p50_ms",
+        "profile_forward_p95_ms",
+        "profile_forward_p99_ms",
+        "profile_forward_std_ms",
+    ]
 
 
 def test_profile_flat_metrics_include_forward_drilldown_position() -> None:

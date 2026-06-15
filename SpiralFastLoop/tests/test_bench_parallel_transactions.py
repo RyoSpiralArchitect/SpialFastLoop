@@ -514,6 +514,10 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "profile_forward_backward_pct": 40.0,
             "profile_forward_backward_time_s": 0.20,
             "profile_forward_pct": 15.0,
+            "profile_forward_p50_ms": 1.0,
+            "profile_forward_p95_ms": 2.0,
+            "profile_forward_p99_ms": 3.0,
+            "profile_forward_std_ms": 0.2,
             "profile_forward_child_count": 1,
             "profile_forward_tracked_time_s": 0.05,
             "profile_forward_untracked_time_s": 0.01,
@@ -533,6 +537,7 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "profile_backward_grad_ready_top_p95_ms": 4.5,
             "profile_backward_grad_ready_top_calls": 2,
             "profile_optimizer_pct": 10.0,
+            "profile_optimizer_p95_ms": 4.0,
             "profile_optimizer_child_count": 1,
             "profile_optimizer_tracked_time_s": 0.03,
             "profile_optimizer_untracked_time_s": 0.01,
@@ -618,6 +623,10 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "profile_forward_backward_pct": 60.0,
             "profile_forward_backward_time_s": 0.30,
             "profile_forward_pct": 20.0,
+            "profile_forward_p50_ms": 2.0,
+            "profile_forward_p95_ms": 4.0,
+            "profile_forward_p99_ms": 6.0,
+            "profile_forward_std_ms": 0.4,
             "profile_forward_child_count": 2,
             "profile_forward_tracked_time_s": 0.08,
             "profile_forward_untracked_time_s": 0.02,
@@ -637,6 +646,7 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "profile_backward_grad_ready_top_p95_ms": 6.5,
             "profile_backward_grad_ready_top_calls": 3,
             "profile_optimizer_pct": 15.0,
+            "profile_optimizer_p95_ms": 8.0,
             "profile_optimizer_child_count": 2,
             "profile_optimizer_tracked_time_s": 0.04,
             "profile_optimizer_untracked_time_s": 0.02,
@@ -704,6 +714,10 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["max_profile_model_hook_count"] == pytest.approx(4.0)
     assert summary["mean_profile_model_hook_failures"] == pytest.approx(0.5)
     assert summary["mean_profile_forward_backward_pct"] == pytest.approx(50.0)
+    assert summary["mean_profile_forward_p50_ms"] == pytest.approx(1.5)
+    assert summary["mean_profile_forward_p95_ms"] == pytest.approx(3.0)
+    assert summary["mean_profile_forward_p99_ms"] == pytest.approx(4.5)
+    assert summary["mean_profile_forward_std_ms"] == pytest.approx(0.3)
     assert summary["mean_profile_forward_child_count"] == pytest.approx(1.5)
     assert summary["mean_profile_forward_tracked_time_s"] == pytest.approx(0.065)
     assert summary["mean_profile_forward_untracked_time_s"] == pytest.approx(0.015)
@@ -727,6 +741,7 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["mean_profile_backward_grad_ready_top_p95_ms"] == pytest.approx(5.5)
     assert summary["mean_profile_backward_grad_ready_top_calls"] == pytest.approx(2.5)
     assert summary["mean_profile_optimizer_child_count"] == pytest.approx(1.5)
+    assert summary["mean_profile_optimizer_p95_ms"] == pytest.approx(6.0)
     assert summary["mean_profile_optimizer_tracked_time_s"] == pytest.approx(0.035)
     assert summary["mean_profile_optimizer_untracked_time_s"] == pytest.approx(0.015)
     assert summary["mean_profile_optimizer_overtracked_time_s"] == pytest.approx(0.005)
@@ -749,6 +764,10 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["best_reported"]["profile_model_hook_failures"] == 0
     assert "profile_model_hook_last_error" not in summary["best_reported"]
     assert summary["best_reported"]["profile_forward_backward_pct"] == pytest.approx(60.0)
+    assert summary["best_reported"]["profile_forward_p50_ms"] == pytest.approx(2.0)
+    assert summary["best_reported"]["profile_forward_p95_ms"] == pytest.approx(4.0)
+    assert summary["best_reported"]["profile_forward_p99_ms"] == pytest.approx(6.0)
+    assert summary["best_reported"]["profile_forward_std_ms"] == pytest.approx(0.4)
     assert summary["best_reported"]["profile_forward_child_count"] == 2
     assert summary["best_reported"]["profile_forward_tracked_time_s"] == pytest.approx(0.08)
     assert summary["best_reported"]["profile_forward_untracked_time_s"] == pytest.approx(0.02)
@@ -766,6 +785,7 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["best_reported"]["profile_backward_grad_ready_top_p95_ms"] == pytest.approx(6.5)
     assert summary["best_reported"]["profile_backward_grad_ready_top_calls"] == 3
     assert summary["best_reported"]["profile_optimizer_child_count"] == 2
+    assert summary["best_reported"]["profile_optimizer_p95_ms"] == pytest.approx(8.0)
     assert summary["best_reported"]["profile_optimizer_tracked_time_s"] == pytest.approx(0.04)
     assert summary["best_reported"]["profile_optimizer_untracked_time_s"] == pytest.approx(0.02)
     assert summary["best_reported"]["profile_optimizer_overtracked_time_s"] == pytest.approx(0.01)

@@ -165,6 +165,26 @@ PROFILE_PHASE_SUMMARY_FIELDS = (
     "profile_metrics_avg_ms",
 )
 
+PROFILE_PHASE_DISTRIBUTION_SUMMARY_FIELDS = tuple(
+    f"profile_{phase_name}_{field_name}"
+    for phase_name in (
+        "data_wait",
+        "transfer",
+        "forward",
+        "loss",
+        "loss_reduce",
+        "trigger",
+        "inject_transfer",
+        "backward",
+        "optimizer",
+        "user_metrics",
+        "postprocess",
+        "collect_output",
+        "metrics",
+    )
+    for field_name in ("p50_ms", "p95_ms", "p99_ms", "std_ms")
+)
+
 PROFILE_FORWARD_BREAKDOWN_SUMMARY_FIELDS = (
     "profile_forward_child_count",
     "profile_forward_tracked_time_s",
@@ -206,6 +226,7 @@ PROFILE_MODEL_SUMMARY_FIELDS = (
 
 PROFILE_SUMMARY_FIELDS = (
     PROFILE_PHASE_SUMMARY_FIELDS
+    + PROFILE_PHASE_DISTRIBUTION_SUMMARY_FIELDS
     + PROFILE_FORWARD_BREAKDOWN_SUMMARY_FIELDS
     + PROFILE_OPTIMIZER_BREAKDOWN_SUMMARY_FIELDS
     + PROFILE_EVENT_SUMMARY_FIELDS
@@ -366,6 +387,7 @@ BEST_RUN_FIELDS = (
     "profile_backward_grad_ready_top_pct",
     "profile_backward_grad_ready_top_p95_ms",
     "profile_backward_grad_ready_top_calls",
+    *PROFILE_PHASE_DISTRIBUTION_SUMMARY_FIELDS,
     "cuda_current_mem_bytes",
     "cuda_max_mem_bytes",
     "cuda_reserved_mem_bytes",

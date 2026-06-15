@@ -76,11 +76,13 @@ backward gradient-ready fields such as `profile_backward_grad_ready_top_avg_ms` 
 `profile_optimizer_top_pct_of_parent`, `profile_optimizer_top_p95_ms`, and
 related tracked/untracked fields.
 The top-level phases include `data_wait`, so loader stalls can be separated from
-compute time. Throughput summaries include `p99_s` and `std_batch_s`. Set
-`profile_sync=True` only when you need stricter
-accelerator timings; it synchronizes around profiled regions and slows the run
-down. Use `--no-profile-distribution` in benchmark scripts to keep totals while
-skipping percentile windows when profiler overhead matters.
+compute time, and their distribution windows are flattened as fields like
+`profile_forward_p95_ms`, `profile_forward_p99_ms`, and
+`profile_forward_std_ms` when distribution tracking is enabled. Throughput
+summaries include `p99_s` and `std_batch_s`. Set `profile_sync=True` only when
+you need stricter accelerator timings; it synchronizes around profiled regions
+and slows the run down. Use `--no-profile-distribution` in benchmark scripts to
+keep totals while skipping percentile windows when profiler overhead matters.
 
 For cold-start versus steady-state reads, pass `warmup_steps=N`. The first `N`
 completed training steps are still executed and measured, but they are reported

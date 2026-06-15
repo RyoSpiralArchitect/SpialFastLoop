@@ -410,6 +410,14 @@ def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, An
             row.get("avg_ms", _PROFILE_METRIC_MISSING),
             invalid_fields,
         )
+        for field_name in ("p50_ms", "p95_ms", "p99_ms", "std_ms"):
+            _set_profile_metric_if_present(
+                metrics,
+                f"profile_{phase_name}_{field_name}",
+                row,
+                field_name,
+                invalid_fields,
+            )
         if phase_name in {"forward", "backward"}:
             if time_s is not None:
                 forward_backward_time_s += time_s
