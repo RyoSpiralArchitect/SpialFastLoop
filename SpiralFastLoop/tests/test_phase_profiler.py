@@ -1210,6 +1210,51 @@ def test_evaluate_rejects_user_metrics_that_collide_with_internal_metrics() -> N
     assert metrics["profile_forward_pct"] != 999.0
 
 
+def test_evaluate_distributed_summary_sums_metrics_fn_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inputs = torch.randn(2, 4)
+    targets = torch.randint(0, 3, (2,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, use_compile=False, log_interval=999)
+    trainer.dist_ctx = utils_mod.DistributedContext(
+        is_initialized=True,
+        rank=0,
+        world_size=2,
+        local_rank=0,
+        backend="gloo",
+    )
+
+    def fake_distributed_sum(value: torch.Tensor) -> torch.Tensor:
+        return value * 2
+
+    def metrics_fn(
+        _outputs: torch.Tensor,
+        _batch_targets: torch.Tensor,
+        _inputs: torch.Tensor,
+    ) -> dict[str, float]:
+        return {"accuracy": 0.5}
+
+    monkeypatch.setattr(engine, "distributed_sum", fake_distributed_sum)
+
+    metrics = trainer.evaluate(
+        loader,
+        nn.CrossEntropyLoss(),
+        metrics_fn=metrics_fn,
+        steps=1,
+    )
+
+    assert metrics["samples"] == 4
+    assert metrics["measured_steps"] == 2
+    assert metrics["metrics_fn_calls"] == 2
+    assert metrics["metrics_fn_successes"] == 2
+    assert metrics["metrics_fn_failures"] == 0
+    assert metrics["user_metric_valid_count"] == 2
+    assert metrics["accuracy"] == pytest.approx(0.5)
+
+
 def test_evaluate_reports_non_mapping_user_metrics_as_invalid() -> None:
     inputs = torch.randn(4, 4)
     targets = torch.randint(0, 3, (4,))

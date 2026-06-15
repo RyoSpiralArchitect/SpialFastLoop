@@ -1963,6 +1963,12 @@ class FastTrainer:
                 batch_size_failure_counts[reason] = int(
                     distributed_sum(torch.tensor(batch_size_failure_counts[reason], device=total_loss.device)).item()
                 )
+            metrics_fn_calls = int(
+                distributed_sum(torch.tensor(metrics_fn_calls, device=total_loss.device)).item()
+            )
+            metrics_fn_failures = int(
+                distributed_sum(torch.tensor(metrics_fn_failures, device=total_loss.device)).item()
+            )
             user_metric_valid_count = int(
                 distributed_sum(torch.tensor(user_metric_valid_count, device=total_loss.device)).item()
             )
