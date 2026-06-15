@@ -314,6 +314,13 @@ def _format_summary_row(row: dict) -> str:
     profile_parts.extend(_format_phase_tail_parts(row, aggregate=True))
     backward_ready_pct = _measured_summary_value(row, "mean_profile_backward_grad_ready_top_pct")
     backward_ready_avg_ms = _measured_summary_value(row, "mean_profile_backward_grad_ready_top_avg_ms")
+    backward_ready_span_ms = _measured_summary_value(row, "mean_profile_backward_grad_ready_span_avg_ms")
+    backward_ready_span_pct = _measured_summary_value(row, "mean_profile_backward_grad_ready_span_pct")
+    if backward_ready_span_ms is not None:
+        span_text = f"bwd_span={backward_ready_span_ms:.2f}ms"
+        if backward_ready_span_pct is not None:
+            span_text = f"{span_text}@{backward_ready_span_pct:.1f}%"
+        profile_parts.append(span_text)
     if backward_ready_pct is not None:
         ready_text = f"bwd_ready={backward_ready_pct:.1f}%"
         if backward_ready_avg_ms is not None:

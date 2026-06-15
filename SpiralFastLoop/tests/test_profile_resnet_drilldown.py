@@ -345,6 +345,12 @@ def test_print_summary_shows_backward_parent_position(
         "profile": {
             "phase_events": {
                 "backward_grad_ready": {
+                    "earliest_avg_ms": 1.25,
+                    "latest_avg_ms": 2.25,
+                    "span_avg_ms": 1.0,
+                    "earliest_pct_of_parent": 25.0,
+                    "latest_pct_of_parent": 45.0,
+                    "span_pct_of_parent": 20.0,
                     "top_children": [
                         {
                             "name": "layer4",
@@ -366,6 +372,7 @@ def test_print_summary_shows_backward_parent_position(
     drilldown._print_summary(metrics, topk=4)
 
     output = capsys.readouterr().out
+    assert "backward grad-ready summary: span=1.00ms@20.0% range=1.25ms-2.25ms range_pct=25.0%-45.0%" in output
     assert "layer4: avg=2.25ms@45.0% p95=3.50ms p99=4.50ms std=0.40ms calls=2 samples=2 window=2" in output
 
 

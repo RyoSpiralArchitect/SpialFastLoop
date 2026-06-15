@@ -248,6 +248,12 @@ PROFILE_OPTIMIZER_BREAKDOWN_SUMMARY_FIELDS = (
 PROFILE_EVENT_SUMMARY_FIELDS = (
     "profile_backward_grad_ready_child_count",
     "profile_backward_grad_ready_parent_avg_ms",
+    "profile_backward_grad_ready_earliest_avg_ms",
+    "profile_backward_grad_ready_latest_avg_ms",
+    "profile_backward_grad_ready_span_avg_ms",
+    "profile_backward_grad_ready_earliest_pct",
+    "profile_backward_grad_ready_latest_pct",
+    "profile_backward_grad_ready_span_pct",
     "profile_backward_grad_ready_top_avg_ms",
     "profile_backward_grad_ready_top_pct",
     *_profile_top_summary_fields("profile_backward_grad_ready"),
@@ -450,6 +456,12 @@ BEST_RUN_FIELDS = (
     "profile_metrics_pct",
     "profile_backward_grad_ready_child_count",
     "profile_backward_grad_ready_parent_avg_ms",
+    "profile_backward_grad_ready_earliest_avg_ms",
+    "profile_backward_grad_ready_latest_avg_ms",
+    "profile_backward_grad_ready_span_avg_ms",
+    "profile_backward_grad_ready_earliest_pct",
+    "profile_backward_grad_ready_latest_pct",
+    "profile_backward_grad_ready_span_pct",
     "profile_backward_grad_ready_top_avg_ms",
     "profile_backward_grad_ready_top_pct",
     "profile_backward_grad_ready_top_p50_ms",
@@ -1332,6 +1344,52 @@ def _format_profile_event_timing(
     return " ".join(parts)
 
 
+def _format_profile_event_group_summary(profile: dict[str, Any], group: str) -> str:
+    events = _dict_value(profile.get("phase_events"))
+    event_group = _dict_value(events.get(group))
+    if not event_group:
+        return ""
+    parts = []
+    span_text = _format_non_negative_metric_value(
+        event_group.get("span_avg_ms"),
+        precision=2,
+        suffix="ms",
+    )
+    if span_text is not None:
+        span_pct_text = _format_non_negative_metric_value(
+            event_group.get("span_pct_of_parent"),
+            precision=1,
+            suffix="%",
+        )
+        suffix = f"@{span_pct_text}" if span_pct_text is not None else ""
+        parts.append(f"span={span_text}{suffix}")
+    earliest_text = _format_non_negative_metric_value(
+        event_group.get("earliest_avg_ms"),
+        precision=2,
+        suffix="ms",
+    )
+    latest_text = _format_non_negative_metric_value(
+        event_group.get("latest_avg_ms"),
+        precision=2,
+        suffix="ms",
+    )
+    if earliest_text is not None and latest_text is not None:
+        parts.append(f"range={earliest_text}-{latest_text}")
+    earliest_pct_text = _format_non_negative_metric_value(
+        event_group.get("earliest_pct_of_parent"),
+        precision=1,
+        suffix="%",
+    )
+    latest_pct_text = _format_non_negative_metric_value(
+        event_group.get("latest_pct_of_parent"),
+        precision=1,
+        suffix="%",
+    )
+    if earliest_pct_text is not None and latest_pct_text is not None:
+        parts.append(f"range_pct={earliest_pct_text}-{latest_pct_text}")
+    return " ".join(parts)
+
+
 def _profile_count_fields(row: dict[str, Any]) -> list[str]:
     parts = []
     for field, label in (
@@ -1775,6 +1833,9 @@ def main() -> None:
                 print(f"  forward: {top_forward}{suffix}")
             backward = _profile_child_rows(profile, "phase_events", "backward_grad_ready")
             if backward:
+                backward_summary = _format_profile_event_group_summary(profile, "backward_grad_ready")
+                if backward_summary:
+                    print(f"  backward_grad_ready_summary: {backward_summary}")
                 top_backward = ", ".join(
                     f"{_profile_row_name(row)}="
                     f"{_format_profile_event_timing(row, include_p95=True)}"

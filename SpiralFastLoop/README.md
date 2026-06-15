@@ -176,11 +176,12 @@ malformed values that are left out of `best_reported` or `best_end_to_end`.
 With `--profile-model`, backward grad-ready rows print `avg_ms@pct`, where
 `pct` is the average event position within the parent backward phase. Aggregate
 summaries also expose backward grad-ready top timing and position fields for
-matrix comparisons. Forward and optimizer drilldowns include `coverage_pct`,
-`untracked_pct`, and `overtracked_pct_of_parent` so module-level hooks can be
-judged against their parent phase. Human profile summaries include `calls`,
-timing `samples`, and bounded `window` counts when distribution samples are
-available. Include filters accept either module names such as `layer1` or
+matrix comparisons, plus earliest/latest/span readiness fields that show how
+wide the backward readiness window is. Forward and optimizer drilldowns include
+`coverage_pct`, `untracked_pct`, and `overtracked_pct_of_parent` so module-level
+hooks can be judged against their parent phase. Human profile summaries include
+`calls`, timing `samples`, and bounded `window` counts when distribution samples
+are available. Include filters accept either module names such as `layer1` or
 printed labels such as `model.layer1`.
 
 ```bash

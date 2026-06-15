@@ -369,6 +369,25 @@ def _add_profile_backward_event_metrics(
         "parent_avg_ms",
         invalid_fields,
     )
+    for source_name, metric_name in (
+        ("earliest_avg_ms", "profile_backward_grad_ready_earliest_avg_ms"),
+        ("latest_avg_ms", "profile_backward_grad_ready_latest_avg_ms"),
+        ("span_avg_ms", "profile_backward_grad_ready_span_avg_ms"),
+    ):
+        _set_profile_metric_if_present(metrics, metric_name, group, source_name, invalid_fields)
+    for source_name, metric_name in (
+        ("earliest_pct_of_parent", "profile_backward_grad_ready_earliest_pct"),
+        ("latest_pct_of_parent", "profile_backward_grad_ready_latest_pct"),
+        ("span_pct_of_parent", "profile_backward_grad_ready_span_pct"),
+    ):
+        _set_profile_metric_if_present(
+            metrics,
+            metric_name,
+            group,
+            source_name,
+            invalid_fields,
+            max_value=100.0,
+        )
 
     top_children = group.get("top_children", ())
     if not isinstance(top_children, Sequence) or isinstance(top_children, (str, bytes)):

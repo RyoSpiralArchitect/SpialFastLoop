@@ -320,10 +320,15 @@ def test_format_summary_row_includes_backward_ready_position() -> None:
         "sample_count_profile_backward_grad_ready_top_pct": 2.0,
         "mean_profile_backward_grad_ready_top_avg_ms": 3.25,
         "sample_count_profile_backward_grad_ready_top_avg_ms": 2.0,
+        "mean_profile_backward_grad_ready_span_avg_ms": 2.75,
+        "sample_count_profile_backward_grad_ready_span_avg_ms": 2.0,
+        "mean_profile_backward_grad_ready_span_pct": 27.5,
+        "sample_count_profile_backward_grad_ready_span_pct": 2.0,
     }
 
     formatted = _format_summary_row(row)
 
+    assert "bwd_span=2.75ms@27.5%" in formatted
     assert "bwd_ready=42.5%@3.25ms" in formatted
 
 
@@ -1350,6 +1355,56 @@ def test_summarize_rows_preserves_top_profile_distribution_metrics() -> None:
     assert group["mean_profile_optimizer_top_window_sample_count"] == pytest.approx(3.0)
     assert summary["best_reported"]["mean_profile_forward_top_p99_ms"] == pytest.approx(7.0)
     assert summary["best_reported"]["mean_profile_forward_top_sample_count"] == pytest.approx(4.0)
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_rows_preserves_backward_readiness_span_metrics() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 90.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "profile_backward_grad_ready_earliest_avg_ms": 2.0,
+            "profile_backward_grad_ready_latest_avg_ms": 8.0,
+            "profile_backward_grad_ready_span_avg_ms": 6.0,
+            "profile_backward_grad_ready_earliest_pct": 20.0,
+            "profile_backward_grad_ready_latest_pct": 80.0,
+            "profile_backward_grad_ready_span_pct": 60.0,
+        },
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 200.0,
+            "samples_per_sec": 180.0,
+            "end_to_end_wall_time_s": 0.5,
+            "setup_time_s": 0.15,
+            "wall_time_s": 0.35,
+            "profile_backward_grad_ready_earliest_avg_ms": 4.0,
+            "profile_backward_grad_ready_latest_avg_ms": 10.0,
+            "profile_backward_grad_ready_span_avg_ms": 6.0,
+            "profile_backward_grad_ready_earliest_pct": 40.0,
+            "profile_backward_grad_ready_latest_pct": 100.0,
+            "profile_backward_grad_ready_span_pct": 60.0,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert group["mean_profile_backward_grad_ready_earliest_avg_ms"] == pytest.approx(3.0)
+    assert group["mean_profile_backward_grad_ready_latest_avg_ms"] == pytest.approx(9.0)
+    assert group["mean_profile_backward_grad_ready_span_avg_ms"] == pytest.approx(6.0)
+    assert group["mean_profile_backward_grad_ready_earliest_pct"] == pytest.approx(30.0)
+    assert group["mean_profile_backward_grad_ready_latest_pct"] == pytest.approx(90.0)
+    assert group["mean_profile_backward_grad_ready_span_pct"] == pytest.approx(60.0)
+    assert summary["best_reported"]["mean_profile_backward_grad_ready_span_avg_ms"] == pytest.approx(6.0)
+    assert summary["best_reported"]["mean_profile_backward_grad_ready_latest_pct"] == pytest.approx(90.0)
     json.dumps(summary, allow_nan=False)
 
 

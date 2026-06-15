@@ -551,6 +551,28 @@ def test_phase_profiler_events_report_parent_relative_position(
     assert top_child["avg_pct_of_parent"] == pytest.approx(40.0)
 
 
+def test_phase_profiler_events_report_readiness_span(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamps = iter([1.0, 1.02, 1.08, 1.10])
+    monkeypatch.setattr(utils_mod.time, "perf_counter", lambda: next(timestamps))
+    profiler = PhaseProfiler(enabled=True)
+
+    profiler.start("backward")
+    profiler.record_event_since_start("backward", "backward_grad_ready", "early")
+    profiler.record_event_since_start("backward", "backward_grad_ready", "late")
+    profiler.stop("backward")
+
+    event_group = profiler.summary()["phase_events"]["backward_grad_ready"]
+
+    assert event_group["earliest_avg_ms"] == pytest.approx(20.0)
+    assert event_group["latest_avg_ms"] == pytest.approx(80.0)
+    assert event_group["span_avg_ms"] == pytest.approx(60.0)
+    assert event_group["earliest_pct_of_parent"] == pytest.approx(20.0)
+    assert event_group["latest_pct_of_parent"] == pytest.approx(80.0)
+    assert event_group["span_pct_of_parent"] == pytest.approx(60.0)
+
+
 @pytest.mark.parametrize("name", [None, True, "", "   ", object()])
 def test_phase_profiler_rejects_invalid_phase_names_without_mutating_state(name: object) -> None:
     profiler = PhaseProfiler(enabled=True)
@@ -3255,6 +3277,12 @@ def test_profile_flat_metrics_include_backward_event_position() -> None:
             "backward_grad_ready": {
                 "parent": "backward",
                 "parent_avg_ms": 20.0,
+                "earliest_avg_ms": 4.0,
+                "latest_avg_ms": 8.0,
+                "span_avg_ms": 4.0,
+                "earliest_pct_of_parent": 20.0,
+                "latest_pct_of_parent": 40.0,
+                "span_pct_of_parent": 20.0,
                 "children": {
                     "model.0": {"avg_ms": 8.0},
                     "model.2": {"avg_ms": 4.0},
@@ -3283,6 +3311,12 @@ def test_profile_flat_metrics_include_backward_event_position() -> None:
 
     assert metrics["profile_backward_grad_ready_child_count"] == 2
     assert metrics["profile_backward_grad_ready_parent_avg_ms"] == pytest.approx(20.0)
+    assert metrics["profile_backward_grad_ready_earliest_avg_ms"] == pytest.approx(4.0)
+    assert metrics["profile_backward_grad_ready_latest_avg_ms"] == pytest.approx(8.0)
+    assert metrics["profile_backward_grad_ready_span_avg_ms"] == pytest.approx(4.0)
+    assert metrics["profile_backward_grad_ready_earliest_pct"] == pytest.approx(20.0)
+    assert metrics["profile_backward_grad_ready_latest_pct"] == pytest.approx(40.0)
+    assert metrics["profile_backward_grad_ready_span_pct"] == pytest.approx(20.0)
     assert metrics["profile_backward_grad_ready_top_avg_ms"] == pytest.approx(8.0)
     assert metrics["profile_backward_grad_ready_top_pct"] == pytest.approx(40.0)
     assert metrics["profile_backward_grad_ready_top_p50_ms"] == pytest.approx(8.5)
@@ -3321,6 +3355,12 @@ def test_profile_flat_metrics_tolerate_partial_backward_event_rows() -> None:
     assert metrics["profile_backward_grad_ready_child_count"] == 1
     assert metrics["profile_backward_grad_ready_top_avg_ms"] == pytest.approx(8.0)
     assert "profile_backward_grad_ready_parent_avg_ms" not in metrics
+    assert "profile_backward_grad_ready_earliest_avg_ms" not in metrics
+    assert "profile_backward_grad_ready_latest_avg_ms" not in metrics
+    assert "profile_backward_grad_ready_span_avg_ms" not in metrics
+    assert "profile_backward_grad_ready_earliest_pct" not in metrics
+    assert "profile_backward_grad_ready_latest_pct" not in metrics
+    assert "profile_backward_grad_ready_span_pct" not in metrics
     assert "profile_backward_grad_ready_top_pct" not in metrics
     assert "profile_backward_grad_ready_top_p95_ms" not in metrics
     assert "profile_backward_grad_ready_top_calls" not in metrics
@@ -3336,6 +3376,12 @@ def test_profile_flat_metrics_reject_invalid_backward_event_values() -> None:
         "phase_events": {
             "backward_grad_ready": {
                 "parent_avg_ms": "slow",
+                "earliest_avg_ms": -1.0,
+                "latest_avg_ms": "late",
+                "span_avg_ms": True,
+                "earliest_pct_of_parent": -1.0,
+                "latest_pct_of_parent": 125.0,
+                "span_pct_of_parent": "wide",
                 "children": {"model.0": {}},
                 "top_children": [
                     {
@@ -3361,6 +3407,12 @@ def test_profile_flat_metrics_reject_invalid_backward_event_values() -> None:
 
     assert metrics["profile_backward_grad_ready_child_count"] == 1
     assert "profile_backward_grad_ready_parent_avg_ms" not in metrics
+    assert "profile_backward_grad_ready_earliest_avg_ms" not in metrics
+    assert "profile_backward_grad_ready_latest_avg_ms" not in metrics
+    assert "profile_backward_grad_ready_span_avg_ms" not in metrics
+    assert "profile_backward_grad_ready_earliest_pct" not in metrics
+    assert "profile_backward_grad_ready_latest_pct" not in metrics
+    assert "profile_backward_grad_ready_span_pct" not in metrics
     assert "profile_backward_grad_ready_top_avg_ms" not in metrics
     assert "profile_backward_grad_ready_top_pct" not in metrics
     assert "profile_backward_grad_ready_top_p50_ms" not in metrics
@@ -3372,9 +3424,15 @@ def test_profile_flat_metrics_reject_invalid_backward_event_values() -> None:
     assert "profile_backward_grad_ready_top_sample_count" not in metrics
     assert "profile_backward_grad_ready_top_window_sample_count" not in metrics
     assert "profile_backward_grad_ready_top_calls" not in metrics
-    assert metrics["profile_flat_metric_invalid_count"] == 12
+    assert metrics["profile_flat_metric_invalid_count"] == 18
     assert metrics["profile_flat_metric_invalid_fields"] == [
         "profile_backward_grad_ready_parent_avg_ms",
+        "profile_backward_grad_ready_earliest_avg_ms",
+        "profile_backward_grad_ready_latest_avg_ms",
+        "profile_backward_grad_ready_span_avg_ms",
+        "profile_backward_grad_ready_earliest_pct",
+        "profile_backward_grad_ready_latest_pct",
+        "profile_backward_grad_ready_span_pct",
         "profile_backward_grad_ready_top_avg_ms",
         "profile_backward_grad_ready_top_pct",
         "profile_backward_grad_ready_top_p50_ms",

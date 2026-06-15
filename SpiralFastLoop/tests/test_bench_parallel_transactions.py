@@ -23,6 +23,7 @@ from scripts.bench_parallel_transactions import (
     _format_metric_value,
     _format_profile_breakdown_child_timing,
     _format_profile_breakdown_summary,
+    _format_profile_event_group_summary,
     _format_profile_event_timing,
     _format_profile_model_hook_summary,
     _format_profile_open_timer_summary,
@@ -869,6 +870,49 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["best_reported"]["steady_steps"] == 2
     assert summary["best_reported"]["steady_p99_s"] == pytest.approx(0.04)
     assert summary["best_end_to_end"]["run"] == 1
+
+
+def test_summarize_results_preserves_backward_readiness_span_metrics() -> None:
+    rows = [
+        {
+            "run": 0,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 90.0,
+            "end_to_end_wall_time_s": 1.0,
+            "profile_backward_grad_ready_earliest_avg_ms": 2.0,
+            "profile_backward_grad_ready_latest_avg_ms": 8.0,
+            "profile_backward_grad_ready_span_avg_ms": 6.0,
+            "profile_backward_grad_ready_earliest_pct": 20.0,
+            "profile_backward_grad_ready_latest_pct": 80.0,
+            "profile_backward_grad_ready_span_pct": 60.0,
+        },
+        {
+            "run": 1,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 200.0,
+            "samples_per_sec": 180.0,
+            "end_to_end_wall_time_s": 0.5,
+            "profile_backward_grad_ready_earliest_avg_ms": 4.0,
+            "profile_backward_grad_ready_latest_avg_ms": 10.0,
+            "profile_backward_grad_ready_span_avg_ms": 6.0,
+            "profile_backward_grad_ready_earliest_pct": 40.0,
+            "profile_backward_grad_ready_latest_pct": 100.0,
+            "profile_backward_grad_ready_span_pct": 60.0,
+        },
+    ]
+
+    summary = summarize_results(rows)
+
+    assert summary["mean_profile_backward_grad_ready_earliest_avg_ms"] == pytest.approx(3.0)
+    assert summary["mean_profile_backward_grad_ready_latest_avg_ms"] == pytest.approx(9.0)
+    assert summary["mean_profile_backward_grad_ready_span_avg_ms"] == pytest.approx(6.0)
+    assert summary["mean_profile_backward_grad_ready_earliest_pct"] == pytest.approx(30.0)
+    assert summary["mean_profile_backward_grad_ready_latest_pct"] == pytest.approx(90.0)
+    assert summary["mean_profile_backward_grad_ready_span_pct"] == pytest.approx(60.0)
+    assert summary["best_reported"]["profile_backward_grad_ready_span_avg_ms"] == pytest.approx(6.0)
+    assert summary["best_reported"]["profile_backward_grad_ready_latest_pct"] == pytest.approx(100.0)
+    json.dumps(summary, allow_nan=False)
 
 
 def test_summarize_results_preserves_best_run_profile_model_failure_context() -> None:
@@ -1932,6 +1976,42 @@ def test_format_profile_event_timing_can_include_tail() -> None:
     }, include_p95=True) == "4.2ms p95=6.5ms p99=7.5ms std=0.5ms"
 
 
+def test_format_profile_event_group_summary_includes_readiness_span() -> None:
+    profile = {
+        "phase_events": {
+            "backward_grad_ready": {
+                "earliest_avg_ms": 1.25,
+                "latest_avg_ms": 4.75,
+                "span_avg_ms": 3.50,
+                "earliest_pct_of_parent": 12.5,
+                "latest_pct_of_parent": 47.5,
+                "span_pct_of_parent": 35.0,
+            },
+        },
+    }
+
+    assert _format_profile_event_group_summary(
+        profile,
+        "backward_grad_ready",
+    ) == "span=3.50ms@35.0% range=1.25ms-4.75ms range_pct=12.5%-47.5%"
+
+
+def test_format_profile_event_group_summary_omits_malformed_values() -> None:
+    profile = {
+        "phase_events": {
+            "backward_grad_ready": {
+                "earliest_avg_ms": "early",
+                "latest_avg_ms": 4.75,
+                "span_avg_ms": -1.0,
+                "span_pct_of_parent": True,
+            },
+        },
+    }
+
+    assert _format_profile_event_group_summary(profile, "backward_grad_ready") == ""
+    assert _format_profile_event_group_summary(profile, "forward") == ""
+
+
 def test_format_profile_phase_timing_includes_tail_latency() -> None:
     formatted = _format_profile_phase_timing({
         "pct": 42.5,
@@ -2354,6 +2434,12 @@ def test_main_prints_backward_event_parent_position(
                     },
                     "phase_events": {
                         "backward_grad_ready": {
+                            "earliest_avg_ms": 1.2,
+                            "latest_avg_ms": 3.5,
+                            "span_avg_ms": 2.3,
+                            "earliest_pct_of_parent": 12.0,
+                            "latest_pct_of_parent": 35.0,
+                            "span_pct_of_parent": 23.0,
                             "top_children": [
                                 {
                                     "name": "model.0",
@@ -2381,6 +2467,7 @@ def test_main_prints_backward_event_parent_position(
     output = capsys.readouterr().out
     assert "phases: forward=42.5% avg=1.25ms p95=2.50ms p99=3.50ms std=0.25ms calls=4 samples=4 window=3" in output
     assert "forward: model.0=70.0% avg=1.25ms p95=2.50ms calls=2 samples=2 window=2" in output
+    assert "backward_grad_ready_summary: span=2.30ms@23.0% range=1.20ms-3.50ms range_pct=12.0%-35.0%" in output
     assert "backward_grad_ready: model.0=3.5ms@35.0% p95=4.5ms calls=2 samples=2 window=2, model.2=1.2ms calls=1" in output
     assert "optimizer: optimizer.step=80.0% avg=3.25ms p95=4.50ms calls=1" in output
 

@@ -1225,6 +1225,19 @@ class PhaseProfiler:
                 reverse=True,
             )
             event_group: Dict[str, Any] = {"children": children, "top_children": top_children}
+            if children:
+                avg_positions_ms = [float(row["avg_ms"]) for row in children.values()]
+                earliest_avg_ms = min(avg_positions_ms)
+                latest_avg_ms = max(avg_positions_ms)
+                span_avg_ms = max(0.0, latest_avg_ms - earliest_avg_ms)
+                event_group["earliest_avg_ms"] = earliest_avg_ms
+                event_group["latest_avg_ms"] = latest_avg_ms
+                event_group["span_avg_ms"] = span_avg_ms
+                if event_parent_avg_s is not None and event_parent_avg_s > 0.0:
+                    parent_avg_ms = event_parent_avg_s * 1e3
+                    event_group["earliest_pct_of_parent"] = 100.0 * earliest_avg_ms / parent_avg_ms
+                    event_group["latest_pct_of_parent"] = 100.0 * latest_avg_ms / parent_avg_ms
+                    event_group["span_pct_of_parent"] = 100.0 * span_avg_ms / parent_avg_ms
             if parent:
                 event_group["parent"] = parent
             if event_parent_total is not None and event_parent_calls > 0 and event_parent_avg_s is not None:

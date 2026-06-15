@@ -29,6 +29,7 @@ from scripts.bench_parallel_transactions import (
     _format_profile_open_timer_summary,
     _format_profile_breakdown_child_timing,
     _format_profile_breakdown_summary,
+    _format_profile_event_group_summary,
     _format_profile_event_timing,
     _has_positive_display_value,
     _list_value,
@@ -176,6 +177,9 @@ def _print_summary(metrics: dict[str, Any], topk: int) -> None:
 
     backward = _top_rows(profile, "backward_grad_ready", "backward", topk)
     if backward:
+        summary = _format_profile_event_group_summary(profile, "backward_grad_ready")
+        if summary:
+            print(f"backward grad-ready summary: {summary}")
         print("backward grad-ready:")
         for row in backward:
             print(
