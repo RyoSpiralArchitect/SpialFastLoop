@@ -284,6 +284,27 @@ def test_print_summary_shows_breakdown_tracking_totals(
     assert "optimizer drilldown: tracked=40.00ms untracked=10.00ms" in output
 
 
+def test_print_summary_shows_open_profile_timers(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    metrics = {
+        "samples_per_sec": 1.0,
+        "profile": {
+            "profile_open_phase_count": 1,
+            "profile_open_detail_count": 2,
+            "profile_open_phases": ["forward"],
+            "profile_open_details": [
+                {"parent": "forward", "name": "layer1", "count": 2},
+            ],
+        },
+    }
+
+    drilldown._print_summary(metrics, topk=4)
+
+    output = capsys.readouterr().out
+    assert "open timers: phases=1:forward details=2:forward.layer1x2" in output
+
+
 def test_print_summary_ignores_malformed_profile_container(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

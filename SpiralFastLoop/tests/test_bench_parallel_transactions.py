@@ -22,6 +22,7 @@ from scripts.bench_parallel_transactions import (
     _format_count,
     _format_metric_value,
     _format_profile_breakdown_summary,
+    _format_profile_open_timer_summary,
     _has_positive_display_value,
     _profile_row_name,
     build_model,
@@ -1289,6 +1290,44 @@ def test_format_profile_breakdown_summary_omits_malformed_values() -> None:
     assert _format_profile_breakdown_summary(profile, "forward") == ""
     assert _format_profile_breakdown_summary(profile, "optimizer") == "untracked=10.00ms"
     assert _format_profile_breakdown_summary(profile, "loss") == ""
+
+
+def test_format_profile_open_timer_summary_reports_open_work() -> None:
+    profile = {
+        "profile_open_phase_count": 2,
+        "profile_open_detail_count": 3,
+        "profile_open_phases": ["forward", " backward ", ""],
+        "profile_open_details": [
+            {"parent": "forward", "name": "model.0", "count": 2},
+            {"parent": "optimizer", "name": "step", "count": 1},
+        ],
+    }
+
+    assert _format_profile_open_timer_summary(profile) == (
+        "phases=2:forward,backward details=3:forward.model.0x2,optimizer.step"
+    )
+
+
+def test_format_profile_open_timer_summary_omits_zero_and_malformed_values() -> None:
+    assert _format_profile_open_timer_summary({
+        "profile_open_phase_count": 0,
+        "profile_open_detail_count": 0,
+    }) == ""
+    assert _format_profile_open_timer_summary({
+        "profile_open_phase_count": "1",
+        "profile_open_detail_count": True,
+        "profile_open_phases": ["forward"],
+        "profile_open_details": [
+            {"parent": "forward", "name": "model.0", "count": 2},
+        ],
+    }) == ""
+    assert _format_profile_open_timer_summary({
+        "profile_open_detail_count": 1,
+        "profile_open_details": [
+            {"parent": "", "name": "model.0", "count": 2},
+            {"parent": "forward", "name": True, "count": 2},
+        ],
+    }) == "details=1"
 
 
 @pytest.mark.parametrize(

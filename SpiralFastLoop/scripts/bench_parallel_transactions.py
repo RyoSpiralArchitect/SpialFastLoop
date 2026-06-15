@@ -669,6 +669,47 @@ def _list_value(raw: object) -> list[object]:
     return raw if isinstance(raw, list) else []
 
 
+def _display_count_value(raw: object) -> Optional[int]:
+    if isinstance(raw, str):
+        return None
+    try:
+        return non_negative_int_arg(raw)
+    except argparse.ArgumentTypeError:
+        return None
+
+
+def _format_profile_open_timer_summary(profile: dict[str, Any]) -> str:
+    parts = []
+    phase_count = _display_count_value(profile.get("profile_open_phase_count"))
+    if phase_count is not None and phase_count > 0:
+        phase_names = [
+            name.strip()
+            for name in _list_value(profile.get("profile_open_phases"))
+            if isinstance(name, str) and name.strip()
+        ]
+        suffix = f":{','.join(phase_names[:4])}" if phase_names else ""
+        parts.append(f"phases={phase_count}{suffix}")
+
+    detail_count = _display_count_value(profile.get("profile_open_detail_count"))
+    if detail_count is not None and detail_count > 0:
+        detail_names = []
+        for row in _list_value(profile.get("profile_open_details")):
+            if not isinstance(row, dict):
+                continue
+            parent = row.get("parent")
+            name = row.get("name")
+            count = _display_count_value(row.get("count"))
+            if not isinstance(parent, str) or not parent.strip():
+                continue
+            if not isinstance(name, str) or not name.strip():
+                continue
+            count_suffix = f"x{count}" if count is not None and count > 1 else ""
+            detail_names.append(f"{parent.strip()}.{name.strip()}{count_suffix}")
+        suffix = f":{','.join(detail_names[:4])}" if detail_names else ""
+        parts.append(f"details={detail_count}{suffix}")
+    return " ".join(parts)
+
+
 def _profile_child_rows(profile: dict[str, Any], section: str, group: str) -> list[object]:
     sections = _dict_value(profile.get(section))
     group_profile = _dict_value(sections.get(group))
@@ -1022,6 +1063,9 @@ def main() -> None:
             )
         profile = _dict_value(metrics.get("profile"))
         if profile:
+            open_timer_summary = _format_profile_open_timer_summary(profile)
+            if open_timer_summary:
+                print(f"  open_timers: {open_timer_summary}")
             top_phases = ", ".join(
                 f"{_profile_row_name(row)}={_format_metric_value(row.get('pct'), precision=1, suffix='%')}"
                 for row in _list_value(profile.get("top_phases"))[:4]

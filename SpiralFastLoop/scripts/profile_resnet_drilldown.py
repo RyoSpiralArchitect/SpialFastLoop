@@ -25,6 +25,7 @@ from scripts.bench_parallel_transactions import (
     _dict_value,
     _format_count,
     _format_metric_value,
+    _format_profile_open_timer_summary,
     _format_profile_breakdown_summary,
     _has_positive_display_value,
     _list_value,
@@ -127,6 +128,10 @@ def _print_summary(metrics: dict[str, Any], topk: int) -> None:
         f"batch_latency_std_ms={_format_metric_value(metrics.get('std_batch_s'), precision=2, scale=1e3)}"
     )
     print(f"steps={_format_count(metrics.get('steps'))} samples={_format_count(metrics.get('samples'))}")
+
+    open_timer_summary = _format_profile_open_timer_summary(profile)
+    if open_timer_summary:
+        print(f"open timers: {open_timer_summary}")
 
     phases = _top_rows(profile, "", "phase", topk)
     if phases:
