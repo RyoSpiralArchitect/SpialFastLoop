@@ -82,7 +82,8 @@ compute time, and their distribution windows are flattened as fields like
 `profile_forward_std_ms` when distribution tracking is enabled. Benchmark
 output surfaces those tails in the `phases:` line, and matrix output also
 surfaces compact summaries such as `fwd_tail(p95=...)`, `bwd_tail(p99=...)`,
-and `opt_tail(std=...)`. Throughput
+and `opt_tail(std=...)`. The ResNet drilldown script prints the same top-phase
+tail fields. Throughput
 summaries include `p99_s` and `std_batch_s`. Set `profile_sync=True` only when
 you need stricter accelerator timings; it synchronizes around profiled regions
 and slows the run down. Use `--no-profile-distribution` in benchmark scripts to

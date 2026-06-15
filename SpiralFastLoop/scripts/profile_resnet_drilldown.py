@@ -25,6 +25,7 @@ from scripts.bench_parallel_transactions import (
     _dict_value,
     _format_count,
     _format_metric_value,
+    _format_non_negative_metric_value,
     _format_profile_open_timer_summary,
     _format_profile_breakdown_summary,
     _format_profile_event_timing,
@@ -103,6 +104,23 @@ def _top_rows(profile: dict[str, Any], group: str, key: str, limit: int) -> list
     return []
 
 
+def _format_phase_timing(row: dict[str, Any]) -> str:
+    pct_text = _format_non_negative_metric_value(row.get("pct"), precision=1, suffix="%")
+    parts = [pct_text if pct_text is not None else "n/a"]
+    avg_text = _format_non_negative_metric_value(row.get("avg_ms"), precision=2, suffix="ms")
+    parts.append(f"avg={avg_text if avg_text is not None else 'n/a'}")
+    for field, label in (
+        ("p95_ms", "p95"),
+        ("p99_ms", "p99"),
+        ("std_ms", "std"),
+    ):
+        if field not in row:
+            continue
+        value_text = _format_non_negative_metric_value(row.get(field), precision=2, suffix="ms")
+        parts.append(f"{label}={value_text if value_text is not None else 'n/a'}")
+    return " ".join(parts)
+
+
 def _print_summary(metrics: dict[str, Any], topk: int) -> None:
     topk = _positive_int_setting(topk, "topk")
     profile = _dict_value(metrics.get("profile"))
@@ -140,8 +158,7 @@ def _print_summary(metrics: dict[str, Any], topk: int) -> None:
         for row in phases:
             print(
                 f"  {_profile_row_name(row)}: "
-                f"{_format_metric_value(row.get('pct'), precision=1, suffix='%')} "
-                f"avg={_format_metric_value(row.get('avg_ms'), precision=2, suffix='ms')}"
+                f"{_format_phase_timing(row)}"
             )
 
     forward = _top_rows(profile, "forward", "forward", topk)

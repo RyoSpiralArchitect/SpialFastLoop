@@ -208,7 +208,12 @@ def test_print_summary_formats_malformed_metrics_as_na(
         "profile": {
             "top_phases": [
                 "skip-me",
-                {"name": "forward", "pct": float("nan"), "avg_ms": FailingFloat()},
+                {
+                    "name": "forward",
+                    "pct": float("nan"),
+                    "avg_ms": FailingFloat(),
+                    "p95_ms": True,
+                },
                 {"pct": 12.0, "avg_ms": 1.0},
             ],
             "phase_breakdowns": {
@@ -241,7 +246,7 @@ def test_print_summary_formats_malformed_metrics_as_na(
     assert "steady_steps=" not in output
     assert "batch_latency_p99_ms=n/a batch_latency_std_ms=n/a" in output
     assert "steps=n/a samples=n/a" in output
-    assert "forward: n/a avg=n/a" in output
+    assert "forward: n/a avg=n/a p95=n/a" in output
     assert "<unnamed>: 12.0% avg=1.00ms" in output
     assert "forward drilldown: tracked=" not in output
     assert "conv: n/a avg=n/a p95=1.00ms" in output
@@ -283,6 +288,31 @@ def test_print_summary_shows_breakdown_tracking_totals(
     assert "forward drilldown: tracked=70.00ms untracked=30.00ms overtracked=20.00ms" in output
     assert "optimizer drilldown: tracked=40.00ms untracked=10.00ms" in output
     assert "step: 80.0% avg=0.50ms p95=0.75ms" in output
+
+
+def test_print_summary_shows_top_phase_tail_latency(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    metrics = {
+        "samples_per_sec": 1.0,
+        "profile": {
+            "top_phases": [
+                {
+                    "name": "forward",
+                    "pct": 42.5,
+                    "avg_ms": 1.25,
+                    "p95_ms": 2.5,
+                    "p99_ms": 3.5,
+                    "std_ms": 0.25,
+                },
+            ],
+        },
+    }
+
+    drilldown._print_summary(metrics, topk=4)
+
+    output = capsys.readouterr().out
+    assert "forward: 42.5% avg=1.25ms p95=2.50ms p99=3.50ms std=0.25ms" in output
 
 
 def test_print_summary_shows_backward_parent_position(
