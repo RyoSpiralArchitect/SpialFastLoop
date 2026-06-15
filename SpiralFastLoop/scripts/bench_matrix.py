@@ -18,6 +18,7 @@ from bench_parallel_transactions import (
     _best_finite_row,
     _finite_summary_value,
     _format_metric_value,
+    _format_profile_bottleneck_category_pressure,
     _format_profile_bottleneck_severity_counts,
     _format_profile_model_hook_summary,
     _format_scheduler_summary,
@@ -298,18 +299,13 @@ def _format_bottleneck_pressure(row: dict) -> str:
         return ""
     parts = []
     for category_name, entry in _ranked_profile_bottleneck_category_items(category_summary):
-        top_candidate = entry.get("top_candidate")
-        score = _finite_summary_value(entry.get("max_score"))
-        if not isinstance(top_candidate, str) or not top_candidate or score is None or score < 0.0:
-            continue
-        suffix = "%" if entry.get("score_unit") == "profile_pct" else ""
-        top_severity = entry.get("top_severity")
-        severity_suffix = (
-            f"[{top_severity}]"
-            if isinstance(top_severity, str) and top_severity
-            else ""
+        part = _format_profile_bottleneck_category_pressure(
+            category_name,
+            entry,
+            include_count=False,
         )
-        parts.append(f"{category_name}:{top_candidate}={score:.1f}{suffix}{severity_suffix}")
+        if part:
+            parts.append(part)
     if not parts:
         return ""
     return f"pressure({','.join(parts)})"

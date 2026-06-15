@@ -363,6 +363,7 @@ def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
             "child_hotspot": {
                 "count": 1,
                 "max_score": 35.0,
+                "total_score": 35.0,
                 "score_unit": "profile_pct",
                 "top_candidate": "forward_top_child",
                 "top_rank": 2,
@@ -371,6 +372,7 @@ def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
             "phase_share": {
                 "count": 2,
                 "max_score": 55.0,
+                "total_score": 75.0,
                 "score_unit": "profile_pct",
                 "top_candidate": "forward_phase",
                 "top_rank": 1,
@@ -383,13 +385,13 @@ def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
 
     assert "hotspot=forward_phase:55.0%(phase_share,high)" in formatted
     assert (
-        "pressure(phase_share:forward_phase=55.0%[high],"
-        "child_hotspot:forward_top_child=35.0%[high])"
+        "pressure(phase_share:forward_phase=55.0%[high];sum=75.0%,"
+        "child_hotspot:forward_top_child=35.0%[high];sum=35.0%)"
     ) in formatted
     assert "severity_counts(high=2,medium=1)" in formatted
 
 
-def test_format_summary_row_orders_bottleneck_pressure_by_score_and_skips_malformed() -> None:
+def test_format_summary_row_orders_bottleneck_pressure_by_total_score_and_skips_malformed() -> None:
     row = {
         "dataset_mode": "generated",
         "compile_mode": "no-compile",
@@ -400,6 +402,7 @@ def test_format_summary_row_orders_bottleneck_pressure_by_score_and_skips_malfor
             "phase_share": {
                 "count": 2,
                 "max_score": 20.0,
+                "total_score": 40.0,
                 "score_unit": "profile_pct",
                 "top_candidate": "forward_phase",
                 "top_rank": 2,
@@ -407,6 +410,7 @@ def test_format_summary_row_orders_bottleneck_pressure_by_score_and_skips_malfor
             "child_hotspot": {
                 "count": 1,
                 "max_score": 30.0,
+                "total_score": 30.0,
                 "score_unit": "profile_pct",
                 "top_candidate": "forward_top_child",
                 "top_rank": "bad",
@@ -425,8 +429,8 @@ def test_format_summary_row_orders_bottleneck_pressure_by_score_and_skips_malfor
     formatted = _format_summary_row(row)
 
     assert (
-        "pressure(child_hotspot:forward_top_child=30.0%,"
-        "phase_share:forward_phase=20.0%)"
+        "pressure(phase_share:forward_phase=20.0%;sum=40.0%,"
+        "child_hotspot:forward_top_child=30.0%;sum=30.0%)"
     ) in formatted
     assert "bad_score" not in formatted
     assert "bad_candidate" not in formatted
@@ -1562,26 +1566,35 @@ def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
         "category": "phase_share",
         "count": 2,
         "max_score": pytest.approx(30.0),
+        "total_score": pytest.approx(50.0),
+        "mean_score": pytest.approx(25.0),
         "score_unit": "profile_pct",
         "top_candidate": "backward_phase",
         "top_rank": 1,
         "top_severity": "high",
+        "severity_counts": {"high": 1, "medium": 1},
     }
     assert generated["profile_bottleneck_category_summary"]["phase_share"] == {
         "count": 2,
         "max_score": pytest.approx(30.0),
+        "total_score": pytest.approx(50.0),
+        "mean_score": pytest.approx(25.0),
         "score_unit": "profile_pct",
         "top_candidate": "backward_phase",
         "top_rank": 1,
         "top_severity": "high",
+        "severity_counts": {"high": 1, "medium": 1},
     }
     assert generated["profile_bottleneck_category_summary"]["readiness_span"] == {
         "count": 1,
         "max_score": pytest.approx(15.0),
+        "total_score": pytest.approx(15.0),
+        "mean_score": pytest.approx(15.0),
         "score_unit": "profile_pct",
         "top_candidate": "backward_readiness_span",
         "top_rank": 3,
         "top_severity": "medium",
+        "severity_counts": {"medium": 1},
     }
     assert generated["profile_bottleneck_candidates"][0]["name"] == "backward_phase"
     assert generated["profile_bottleneck_candidates"][0]["score"] == pytest.approx(30.0)

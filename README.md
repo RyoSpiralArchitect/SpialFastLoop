@@ -92,10 +92,12 @@ capped. Summaries also expose `profile_bottleneck_top_candidate`,
 `profile_bottleneck_severity_counts`,
 `profile_bottleneck_severity_thresholds`, and
 `profile_bottleneck_category_summary` for dashboards that compare phase-share,
-coverage-gap, child-hotspot, and readiness-span pressure directly. Matrix
-summaries surface the same signal as compact `hotspot=...` and strongest-first
-`pressure(...)` fragments, including the top hotspot severity, category-level
-severity suffixes such as `[high]`, and `severity_counts(...)`. The
+coverage-gap, child-hotspot, and readiness-span pressure directly. Category
+summaries include max, total, mean, and severity-count pressure per category.
+Matrix summaries surface the same signal as compact `hotspot=...` and
+strongest-first `pressure(...)` fragments, including the top hotspot severity,
+category-level severity suffixes such as `[high]`, category `sum=...`, and
+`severity_counts(...)`. The
 transactional benchmark prints the same severity-aware `Bottleneck:` line before
 the aggregate JSON when candidates are available.
 The ResNet drilldown script prints the same top-phase tail fields. Throughput

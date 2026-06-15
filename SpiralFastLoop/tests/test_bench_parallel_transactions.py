@@ -968,34 +968,46 @@ def test_summarize_results_ranks_profile_bottleneck_candidates() -> None:
         "category": "phase_share",
         "count": 3,
         "max_score": pytest.approx(50.0),
+        "total_score": pytest.approx(80.0),
+        "mean_score": pytest.approx(80.0 / 3.0),
         "score_unit": "profile_pct",
         "top_candidate": "backward_phase",
         "top_rank": 1,
         "top_severity": "high",
+        "severity_counts": {"high": 1, "medium": 2},
     }
     assert category_summary["phase_share"] == {
         "count": 3,
         "max_score": pytest.approx(50.0),
+        "total_score": pytest.approx(80.0),
+        "mean_score": pytest.approx(80.0 / 3.0),
         "score_unit": "profile_pct",
         "top_candidate": "backward_phase",
         "top_rank": 1,
         "top_severity": "high",
+        "severity_counts": {"high": 1, "medium": 2},
     }
     assert category_summary["child_hotspot"] == {
         "count": 3,
         "max_score": pytest.approx(15.0),
+        "total_score": pytest.approx(34.0),
+        "mean_score": pytest.approx(34.0 / 3.0),
         "score_unit": "profile_pct",
         "top_candidate": "backward_ready_top_child",
         "top_rank": 4,
         "top_severity": "medium",
+        "severity_counts": {"medium": 2, "low": 1},
     }
     assert category_summary["coverage_gap"] == {
         "count": 2,
         "max_score": pytest.approx(5.0),
+        "total_score": pytest.approx(7.0),
+        "mean_score": pytest.approx(3.5),
         "score_unit": "profile_pct",
         "top_candidate": "forward_untracked",
         "top_rank": 8,
         "top_severity": "low",
+        "severity_counts": {"low": 2},
     }
     assert [candidate["name"] for candidate in candidates[:4]] == [
         "backward_phase",
@@ -2632,9 +2644,9 @@ def test_main_prints_backward_event_parent_position(
     ) in output
     assert (
         "severity_counts(high=3,medium=1,low=1) "
-        "categories=phase_share:forward_phase=42.5%[high]/3,"
-        "child_hotspot:forward_top_child=29.8%[high]/1,"
-        "readiness_span:backward_readiness_span=6.9%[low]/1"
+        "categories=phase_share:forward_phase=42.5%[high]/3;sum=85.0%,"
+        "child_hotspot:forward_top_child=29.8%[high]/1;sum=29.8%,"
+        "readiness_span:backward_readiness_span=6.9%[low]/1;sum=6.9%"
     ) in output
 
 
