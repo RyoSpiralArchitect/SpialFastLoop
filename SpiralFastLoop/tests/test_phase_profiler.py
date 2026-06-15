@@ -277,6 +277,36 @@ def test_phase_profiler_respects_exact_distribution_window() -> None:
     assert forward["p50_ms"] == pytest.approx(3.0)
 
 
+def test_phase_profiler_reports_non_negative_untracked_breakdown_time() -> None:
+    profiler = PhaseProfiler(enabled=True)
+
+    profiler._record("forward", 0.10)
+    profiler._record_detail("forward", "model.0", 0.03)
+    profiler._record_detail("forward", "model.2", 0.04)
+
+    breakdown = profiler.summary()["phase_breakdowns"]["forward"]
+
+    assert breakdown["parent_total_s"] == pytest.approx(0.10)
+    assert breakdown["tracked_s"] == pytest.approx(0.07)
+    assert breakdown["untracked_s"] == pytest.approx(0.03)
+    assert breakdown["overtracked_s"] == pytest.approx(0.0)
+
+
+def test_phase_profiler_reports_overtracked_breakdown_time() -> None:
+    profiler = PhaseProfiler(enabled=True)
+
+    profiler._record("forward", 0.10)
+    profiler._record_detail("forward", "model.0", 0.08)
+    profiler._record_detail("forward", "model.2", 0.05)
+
+    breakdown = profiler.summary()["phase_breakdowns"]["forward"]
+
+    assert breakdown["parent_total_s"] == pytest.approx(0.10)
+    assert breakdown["tracked_s"] == pytest.approx(0.13)
+    assert breakdown["untracked_s"] == pytest.approx(0.0)
+    assert breakdown["overtracked_s"] == pytest.approx(0.03)
+
+
 @pytest.mark.parametrize("seconds", [-0.1, float("nan"), float("inf"), True, object()])
 def test_phase_profiler_rejects_invalid_phase_durations(seconds: object) -> None:
     profiler = PhaseProfiler(enabled=True)
