@@ -1600,6 +1600,7 @@ class FastTrainer:
         else:
             metrics["steady_avg_loss"] = 0.0
         metrics["steps"] = step_idx
+        metrics["batches"] = float(step_idx)
         metrics["optimizer_steps"] = optimizer_steps
         metrics["grad_accum"] = self.grad_accum
         metrics["partial_optimizer_steps"] = partial_optimizer_steps
@@ -1615,6 +1616,8 @@ class FastTrainer:
             metrics[f"steady_{key}"] = value
         metrics["warmup_steps"] = warmup_recorded_steps
         metrics["steady_steps"] = steady_recorded_steps
+        metrics["warmup_batches"] = float(warmup_recorded_steps)
+        metrics["steady_batches"] = float(steady_recorded_steps)
         metrics["warmup_samples"] = warmup_items
         metrics["steady_samples"] = steady_items
         metrics["warmup_optimizer_steps"] = warmup_optimizer_steps
@@ -1764,6 +1767,7 @@ class FastTrainer:
                 metrics["avg_loss"] = 0.0
             metrics["steps"] = step_idx
             metrics["measured_steps"] = measured_steps
+            metrics["batches"] = float(measured_steps)
             metrics["unmeasured_steps"] = step_idx - measured_steps
             metrics["batch_size_inference_failures"] = batch_size_inference_failures
             _add_batch_size_failure_metrics(metrics, batch_size_failure_counts)
@@ -2066,6 +2070,7 @@ class FastTrainer:
             metrics.update(_collect_device_memory_metrics(self.device))
             metrics["steps"] = step_idx
             metrics["measured_steps"] = measured_steps
+            metrics["batches"] = float(measured_steps)
             metrics["unmeasured_steps"] = step_idx - measured_steps
             metrics["batch_size_inference_failures"] = batch_size_inference_failures
             _add_batch_size_failure_metrics(metrics, batch_size_failure_counts)

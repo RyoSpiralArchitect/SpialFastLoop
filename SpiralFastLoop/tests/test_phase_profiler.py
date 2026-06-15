@@ -1247,6 +1247,7 @@ def test_evaluate_distributed_summary_sums_metrics_fn_counts(
     )
 
     assert metrics["steps"] == 2
+    assert metrics["batches"] == pytest.approx(2.0)
     assert metrics["samples"] == 4
     assert metrics["measured_steps"] == 2
     assert metrics["unmeasured_steps"] == 0
@@ -1300,6 +1301,7 @@ def test_train_distributed_summary_sums_workload_counters(
     )
 
     assert metrics["steps"] == 4
+    assert metrics["batches"] == pytest.approx(4.0)
     assert metrics["samples"] == 8
     assert metrics["optimizer_steps"] == 2
     assert metrics["grad_accum"] == 2
@@ -1307,9 +1309,11 @@ def test_train_distributed_summary_sums_workload_counters(
     assert metrics["grad_accum_tail_steps"] == 0
     assert metrics["scheduler_step_failures"] == 2
     assert metrics["warmup_steps"] == 2
+    assert metrics["warmup_batches"] == pytest.approx(2.0)
     assert metrics["warmup_samples"] == 4
     assert metrics["warmup_optimizer_steps"] == 0
     assert metrics["steady_steps"] == 2
+    assert metrics["steady_batches"] == pytest.approx(2.0)
     assert metrics["steady_samples"] == 4
     assert metrics["steady_optimizer_steps"] == 2
     assert metrics["cold_start_steps"] == 2
@@ -1745,6 +1749,7 @@ def test_predict_distributed_summary_sums_counter_metrics(
 
     assert len(predictions) == 1
     assert metrics["steps"] == 2
+    assert metrics["batches"] == pytest.approx(2.0)
     assert metrics["samples"] == 4
     assert metrics["measured_steps"] == 2
     assert metrics["unmeasured_steps"] == 0
