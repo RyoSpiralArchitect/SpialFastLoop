@@ -2074,6 +2074,11 @@ def test_validate_benchmark_args_rejects_invalid_direct_values(
         ("profile_sync", 0, "profile_sync"),
         ("profile_distribution", "true", "profile_distribution"),
         ("profile_model", 1, "profile_model"),
+        ("profile_model_include", "", "profile_model_include"),
+        ("profile_model_include", "   ", "profile_model_include"),
+        ("profile_model_include", ",,", "profile_model_include"),
+        ("profile_model_include", [], "profile_model_include"),
+        ("profile_model_include", ["", "  "], "profile_model_include"),
         ("profile_model_include", 1, "profile_model_include"),
         ("profile_model_include", ["0", 2], "profile_model_include"),
         ("json_out", "", "json_out"),
@@ -2098,7 +2103,7 @@ def test_validate_benchmark_args_rejects_invalid_optional_direct_values(
         validate_benchmark_args(args)
 
 
-@pytest.mark.parametrize("profile_model_include", [None, "0,2", ["0", "2"]])
+@pytest.mark.parametrize("profile_model_include", [None, "0,2", "model.0,model.2", ["0", "2"], ["model.0", "model.2"]])
 def test_validate_benchmark_args_accepts_profile_model_include_forms(
     profile_model_include: object,
 ) -> None:

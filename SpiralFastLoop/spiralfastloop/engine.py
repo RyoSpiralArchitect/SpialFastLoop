@@ -533,16 +533,23 @@ def _profile_model_include_patterns(include: Optional[Union[str, Sequence[str]]]
     if include is None:
         return []
     if isinstance(include, str):
-        return [item.strip() for item in include.split(",") if item.strip()]
+        patterns = [item.strip() for item in include.split(",") if item.strip()]
+        if not patterns:
+            raise ValueError("profile_model_include must contain at least one non-empty pattern")
+        return patterns
     if not isinstance(include, Sequence):
         raise ValueError("profile_model_include must be a string, sequence of strings, or None")
     patterns = []
+    saw_entry = False
     for item in include:
         if not isinstance(item, str):
             raise ValueError("profile_model_include entries must be strings")
+        saw_entry = True
         pattern = item.strip()
         if pattern:
             patterns.append(pattern)
+    if not saw_entry or not patterns:
+        raise ValueError("profile_model_include must contain at least one non-empty pattern")
     return patterns
 
 
@@ -1170,10 +1177,14 @@ class FastTrainer:
         def matches_include(name: str) -> bool:
             if not include_patterns:
                 return True
+            display_name = f"model.{name}"
             return any(
                 name == pattern
                 or name.startswith(pattern + ".")
+                or display_name == pattern
+                or display_name.startswith(pattern + ".")
                 or fnmatch.fnmatchcase(name, pattern)
+                or fnmatch.fnmatchcase(display_name, pattern)
                 for pattern in include_patterns
             )
 

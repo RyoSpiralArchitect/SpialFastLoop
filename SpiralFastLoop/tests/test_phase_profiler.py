@@ -891,6 +891,11 @@ def test_train_one_epoch_rejects_invalid_boolean_settings(
         0,
         True,
         object(),
+        "",
+        "   ",
+        ",,",
+        [],
+        ["", "  "],
         ["0", 2],
         [True],
     ],
@@ -3896,11 +3901,53 @@ def test_model_profile_hooks_accept_sequence_include() -> None:
             handle.remove()
 
 
+def test_model_profile_hooks_accept_display_label_include() -> None:
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, log_interval=999)
+    profiler = PhaseProfiler(enabled=True)
+
+    result = trainer._install_profile_model_hooks(profiler, include="model.0,model.2")
+    handles = result.handles
+
+    try:
+        assert handles
+        assert result.modules_selected == 2
+        assert result.hook_failures == 0
+        assert model[0]._forward_pre_hooks
+        assert model[2]._forward_hooks
+    finally:
+        for handle in handles:
+            handle.remove()
+
+
+def test_model_profile_hooks_accept_display_label_wildcard_include() -> None:
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(model, optimizer, device="cpu", use_amp=False, log_interval=999)
+    profiler = PhaseProfiler(enabled=True)
+
+    result = trainer._install_profile_model_hooks(profiler, include="model.*", max_modules=8)
+    handles = result.handles
+
+    try:
+        assert handles
+        assert result.modules_selected == 3
+        assert result.hook_failures == 0
+    finally:
+        for handle in handles:
+            handle.remove()
+
+
 @pytest.mark.parametrize(
     ("kwargs", "match"),
     [
         ({"depth": 0}, "profile_model_depth"),
         ({"max_modules": 0}, "profile_model_max_modules"),
+        ({"include": ""}, "profile_model_include"),
+        ({"include": ",,"}, "profile_model_include"),
+        ({"include": []}, "profile_model_include"),
+        ({"include": ["", "  "]}, "profile_model_include"),
         ({"include": [1]}, "profile_model_include"),
     ],
 )

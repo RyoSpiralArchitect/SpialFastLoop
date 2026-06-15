@@ -128,6 +128,11 @@ def test_validate_resnet_profile_args_rejects_unknown_direct_dataset() -> None:
         ("json_out", "", "json_out"),
         ("json_out", "   ", "json_out"),
         ("json_out", True, "json_out"),
+        ("profile_model_include", "", "profile_model_include"),
+        ("profile_model_include", "   ", "profile_model_include"),
+        ("profile_model_include", ",,", "profile_model_include"),
+        ("profile_model_include", [], "profile_model_include"),
+        ("profile_model_include", ["", "  "], "profile_model_include"),
         ("profile_model_include", 1, "profile_model_include"),
         ("profile_model_include", ["layer1", 2], "profile_model_include"),
     ],
@@ -159,7 +164,7 @@ def test_validate_resnet_profile_args_accepts_pathlike_direct_values(tmp_path: P
         warmup_steps=0,
         data_root=tmp_path,
         json_out=tmp_path / "profile.json",
-        profile_model_include=["layer1", "layer4"],
+        profile_model_include=["model.layer1", "model.layer4"],
     )
 
     drilldown.validate_resnet_profile_args(args)

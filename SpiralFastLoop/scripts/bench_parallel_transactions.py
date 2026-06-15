@@ -1015,13 +1015,24 @@ def _positive_float_setting(raw: object, name: str) -> float:
 
 
 def _profile_model_include_setting(raw: object) -> object:
-    if raw is None or isinstance(raw, str):
+    if raw is None:
+        return raw
+    if isinstance(raw, str):
+        if not [item.strip() for item in raw.split(",") if item.strip()]:
+            raise ValueError("profile_model_include must contain at least one non-empty pattern")
         return raw
     if not isinstance(raw, Sequence):
         raise ValueError("profile_model_include must be a string, sequence of strings, or None")
+    saw_entry = False
+    has_pattern = False
     for item in raw:
         if not isinstance(item, str):
             raise ValueError("profile_model_include entries must be strings")
+        saw_entry = True
+        if item.strip():
+            has_pattern = True
+    if not saw_entry or not has_pattern:
+        raise ValueError("profile_model_include must contain at least one non-empty pattern")
     return raw
 
 
