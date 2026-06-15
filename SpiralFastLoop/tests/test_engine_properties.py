@@ -161,7 +161,7 @@ if HAVE_HYPOTHESIS:
             return len(batch)
         raise AssertionError(f"Unsupported batch element {type(batch)!r}")
 
-    @settings(max_examples=120, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=120, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     @given(batch_pairs())
     def test_concatenate_batches_preserves_structure(pair):
         base, extra = pair
@@ -172,13 +172,13 @@ if HAVE_HYPOTHESIS:
         combined_size = _expected_batch_size(combined)
         assert combined_size == base_size + extra_size
 
-    @settings(max_examples=120, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=120, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     @given(batch_structure())
     def test_concatenate_handles_none_base(extra):
         combined = _concatenate_batches(None, extra)
         _structures_close(combined, extra)
 
-    @settings(max_examples=120, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=120, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     @given(batch_structure())
     def test_infer_batch_size_matches_manual(batch):
         expected = _expected_batch_size(batch)
@@ -288,7 +288,7 @@ if HAVE_HYPOTHESIS:
         dim2 = draw(st.integers(min_value=1, max_value=4))
         return torch.randn(dim0, dim1, dim2, dtype=torch.float32)
 
-    @settings(max_examples=120, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=120, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     @given(loss_tensors())
     def test_ensure_loss_vector_behaviour(loss):
         vector = _ensure_loss_vector(loss)

@@ -665,6 +665,16 @@ def test_summarize_results_omits_not_requested_profile_model_status_counts() -> 
 
     assert "profile_model_status_counts" not in summary
     assert "profile_model_status_invalid_count" not in summary
+    assert "profiled_runs" not in summary
+    assert "mean_profile_model_modules_selected" not in summary
+    assert "mean_profile_model_hook_count" not in summary
+    assert "mean_profile_model_hook_failures" not in summary
+    assert "profile_model_requested" not in summary["best_reported"]
+    assert "profile_model_enabled" not in summary["best_reported"]
+    assert "profile_model_status" not in summary["best_reported"]
+    assert "profile_model_modules_selected" not in summary["best_reported"]
+    assert "profile_model_hook_count" not in summary["best_reported"]
+    assert "profile_model_hook_failures" not in summary["best_reported"]
     json.dumps(summary, allow_nan=False)
 
 

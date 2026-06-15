@@ -89,14 +89,11 @@ WORKLOAD_INTEGER_SUMMARY_FIELDS = frozenset({
     "steady_optimizer_steps",
 })
 
-PROFILE_SUMMARY_FIELDS = (
+PROFILE_PHASE_SUMMARY_FIELDS = (
     "profile_total_s",
     "profile_flat_metric_invalid_count",
     "profile_open_phase_count",
     "profile_open_detail_count",
-    "profile_model_modules_selected",
-    "profile_model_hook_count",
-    "profile_model_hook_failures",
     "profile_data_wait_time_s",
     "profile_data_wait_pct",
     "profile_data_wait_avg_ms",
@@ -139,6 +136,14 @@ PROFILE_SUMMARY_FIELDS = (
     "profile_metrics_pct",
     "profile_metrics_avg_ms",
 )
+
+PROFILE_MODEL_SUMMARY_FIELDS = (
+    "profile_model_modules_selected",
+    "profile_model_hook_count",
+    "profile_model_hook_failures",
+)
+
+PROFILE_SUMMARY_FIELDS = PROFILE_PHASE_SUMMARY_FIELDS + PROFILE_MODEL_SUMMARY_FIELDS
 
 DEVICE_MEMORY_SUMMARY_FIELDS = (
     "cuda_current_mem_bytes",
@@ -286,6 +291,15 @@ BEST_RUN_INTEGER_FIELDS = frozenset({
     "mps_recommended_max_mem_bytes",
 })
 BEST_RUN_POSITIVE_INTEGER_FIELDS = frozenset({"grad_accum"})
+PROFILE_MODEL_RESULT_FIELDS = frozenset({
+    "profile_model_requested",
+    "profile_model_enabled",
+    "profile_model_status",
+    "profile_model_modules_selected",
+    "profile_model_hook_count",
+    "profile_model_hook_failures",
+    "profile_model_hook_last_error",
+})
 
 
 @dataclass
@@ -303,6 +317,9 @@ class BenchmarkResult:
 
 def _summary_row(row: dict) -> dict:
     normalized = dict(row)
+    if not _profile_model_fields_visible(normalized):
+        for field in PROFILE_MODEL_RESULT_FIELDS:
+            normalized.pop(field, None)
     if "reported_samples_per_sec" not in normalized:
         if "steady_samples_per_sec" in normalized:
             normalized["reported_samples_per_sec"] = normalized["steady_samples_per_sec"]
@@ -311,6 +328,14 @@ def _summary_row(row: dict) -> dict:
     if "end_to_end_wall_time_s" not in normalized and "wall_time_s" in normalized:
         normalized["end_to_end_wall_time_s"] = normalized["wall_time_s"]
     return normalized
+
+
+def _profile_model_fields_visible(row: dict) -> bool:
+    if row.get("profile_model_requested") is True:
+        return True
+    status_raw = row.get("profile_model_status")
+    status = status_raw.strip() if isinstance(status_raw, str) else ""
+    return bool(status) and status != "not_requested"
 
 
 def _finite_summary_value(raw: object) -> Optional[float]:

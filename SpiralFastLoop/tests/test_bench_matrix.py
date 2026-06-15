@@ -764,6 +764,40 @@ def test_summarize_rows_skips_profile_fields_when_absent() -> None:
     assert "profiled_runs" not in group
 
 
+def test_summarize_rows_omits_not_requested_profile_model_fields() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+            "profile_model_requested": False,
+            "profile_model_enabled": False,
+            "profile_model_status": "not_requested",
+            "profile_model_modules_selected": 0,
+            "profile_model_hook_count": 0,
+            "profile_model_hook_failures": 0,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert "profiled_runs" not in group
+    assert "profile_model_status_counts" not in group
+    assert "mean_profile_model_modules_selected" not in group
+    assert "mean_profile_model_hook_count" not in group
+    assert "mean_profile_model_hook_failures" not in group
+    assert "profile_model_status_counts" not in summary["best_reported"]
+    assert "mean_profile_model_modules_selected" not in summary["best_reported"]
+
+
 def test_summarize_rows_ignores_missing_rows_for_profile_aggregates() -> None:
     rows = [
         {

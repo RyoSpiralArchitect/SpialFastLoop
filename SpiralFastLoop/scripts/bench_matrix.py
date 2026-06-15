@@ -24,6 +24,7 @@ from bench_parallel_transactions import (
     _profile_model_status_counts,
     _summary_metric_max_value,
     _summary_metric_min_value,
+    _summary_row,
     count_profiled_rows,
     device_arg,
     non_negative_int_arg,
@@ -120,7 +121,8 @@ def _group_key(row: dict) -> tuple[str, str, int]:
 def summarize_rows(rows: list[dict]) -> dict:
     groups: dict[tuple[str, str, int], list[dict]] = {}
     for row in rows:
-        groups.setdefault(_group_key(row), []).append(row)
+        normalized_row = _summary_row(row)
+        groups.setdefault(_group_key(normalized_row), []).append(normalized_row)
 
     summaries = []
     for (dataset_mode, compile_mode, workers), group_rows in sorted(groups.items()):
