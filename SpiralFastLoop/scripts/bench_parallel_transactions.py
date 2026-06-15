@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import sys
 import time
 from collections.abc import Sequence
@@ -442,15 +443,21 @@ def _profile_model_include_setting(raw: object) -> object:
     return raw
 
 
-def _path_setting(raw: object, name: str) -> object:
-    if isinstance(raw, (str, PathLike)):
-        return raw
-    raise ValueError(f"{name} must be a path string")
+def _path_setting(raw: object, name: str) -> str:
+    if not isinstance(raw, (str, PathLike)):
+        raise ValueError(f"{name} must be a non-empty path string")
+    try:
+        normalized = os.fsdecode(raw)
+    except Exception as exc:
+        raise ValueError(f"{name} must be a non-empty path string") from exc
+    if not isinstance(normalized, str) or not normalized.strip():
+        raise ValueError(f"{name} must be a non-empty path string")
+    return normalized
 
 
-def _optional_path_setting(raw: object, name: str) -> object:
+def _optional_path_setting(raw: object, name: str) -> Optional[str]:
     if raw is None:
-        return raw
+        return None
     return _path_setting(raw, name)
 
 

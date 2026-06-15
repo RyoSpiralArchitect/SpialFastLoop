@@ -151,6 +151,18 @@ def test_metrics_logger_rejects_invalid_constructor_settings(
         MetricsLogger(**kwargs)  # type: ignore[arg-type]
 
 
+def test_metrics_logger_rejects_malformed_pathlike_constructor_settings() -> None:
+    class FailingPath(os.PathLike[str]):
+        def __fspath__(self) -> str:
+            raise RuntimeError("path failed")
+
+    with pytest.raises(ValueError, match="jsonl_path"):
+        MetricsLogger(logger=None, jsonl_path=FailingPath())
+
+    with pytest.raises(ValueError, match="csv_path"):
+        MetricsLogger(logger=None, csv_path=FailingPath())
+
+
 def test_metrics_logger_normalizes_pathlike_sinks_and_allows_logger_none(tmp_path) -> None:
     jsonl_path = tmp_path / "nested" / "metrics.jsonl"
     csv_path = tmp_path / "nested" / "metrics.csv"

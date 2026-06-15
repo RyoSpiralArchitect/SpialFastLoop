@@ -161,8 +161,8 @@ def _optional_path_setting(path: Any, name: str) -> Optional[str]:
     if not isinstance(path, (str, os.PathLike)):
         raise ValueError(f"{name} must be a non-empty filesystem path or None")
     try:
-        normalized = os.fspath(path)
-    except TypeError as exc:
+        normalized = os.fsdecode(path)
+    except Exception as exc:
         raise ValueError(f"{name} must be a non-empty filesystem path or None") from exc
     if not isinstance(normalized, str) or not normalized.strip():
         raise ValueError(f"{name} must be a non-empty filesystem path or None")

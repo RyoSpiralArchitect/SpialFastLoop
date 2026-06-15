@@ -1,4 +1,5 @@
 import csv
+import os
 import sys
 from pathlib import Path
 
@@ -63,6 +64,20 @@ def test_collector_export_csv_rejects_invalid_paths(tmp_path, path: object):
 
     with pytest.raises(ValueError, match="path"):
         collector.export_csv(path)  # type: ignore[arg-type]
+
+    assert list(tmp_path.rglob("*.csv")) == []
+
+
+def test_collector_export_csv_rejects_malformed_pathlike(tmp_path):
+    class FailingPath(os.PathLike[str]):
+        def __fspath__(self) -> str:
+            raise RuntimeError("path failed")
+
+    collector = NormalizationMetricsCollector(history_limit=2)
+    collector.record(1.0, 0.0, context="buffer", timestamp=1.0)
+
+    with pytest.raises(ValueError, match="path"):
+        collector.export_csv(FailingPath())
 
     assert list(tmp_path.rglob("*.csv")) == []
 

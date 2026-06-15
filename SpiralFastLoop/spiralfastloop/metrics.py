@@ -17,7 +17,10 @@ PathSetting = Union[str, os.PathLike[str]]
 def _path_setting(path: Any, name: str) -> str:
     if not isinstance(path, (str, os.PathLike)):
         raise ValueError(f"{name} must be a path string")
-    normalized = os.fspath(path)
+    try:
+        normalized = os.fsdecode(path)
+    except Exception as exc:
+        raise ValueError(f"{name} must be a path string") from exc
     if not isinstance(normalized, str) or normalized.strip() == "":
         raise ValueError(f"{name} must be a non-empty path string")
     return normalized

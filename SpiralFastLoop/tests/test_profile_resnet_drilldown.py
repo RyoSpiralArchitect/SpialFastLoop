@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from argparse import Namespace
 from pathlib import Path
@@ -115,8 +116,12 @@ def test_validate_resnet_profile_args_rejects_unknown_direct_dataset() -> None:
         ("topk", True, "topk"),
         ("download", 1, "download"),
         ("download", "true", "download"),
+        ("data_root", "", "data_root"),
+        ("data_root", "   ", "data_root"),
         ("data_root", True, "data_root"),
         ("data_root", 1, "data_root"),
+        ("json_out", "", "json_out"),
+        ("json_out", "   ", "json_out"),
         ("json_out", True, "json_out"),
         ("profile_model_include", 1, "profile_model_include"),
         ("profile_model_include", ["layer1", 2], "profile_model_include"),
@@ -153,6 +158,24 @@ def test_validate_resnet_profile_args_accepts_pathlike_direct_values(tmp_path: P
     )
 
     drilldown.validate_resnet_profile_args(args)
+
+
+def test_validate_resnet_profile_args_rejects_malformed_pathlike_values() -> None:
+    class FailingPath(os.PathLike[str]):
+        def __fspath__(self) -> str:
+            raise RuntimeError("path failed")
+
+    args = Namespace(
+        dataset="fake",
+        dataset_size=8,
+        batch_size=4,
+        steps=1,
+        warmup_steps=0,
+        data_root=FailingPath(),
+    )
+
+    with pytest.raises(ValueError, match="data_root"):
+        drilldown.validate_resnet_profile_args(args)
 
 
 @pytest.mark.parametrize("topk", [0, 1.5, True, "2"])
