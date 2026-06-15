@@ -1257,6 +1257,64 @@ def test_evaluate_distributed_summary_sums_metrics_fn_counts(
     assert metrics["accuracy"] == pytest.approx(0.5)
 
 
+def test_train_distributed_summary_sums_workload_counters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingScheduler:
+        def step(self) -> None:
+            raise RuntimeError("scheduler boom")
+
+    inputs = torch.randn(4, 4)
+    targets = torch.randint(0, 3, (4,))
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=2, shuffle=False)
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 3))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    trainer = FastTrainer(
+        model,
+        optimizer,
+        scheduler=FailingScheduler(),
+        device="cpu",
+        use_amp=False,
+        use_compile=False,
+        grad_accum=2,
+        log_interval=999,
+    )
+    trainer.dist_ctx = utils_mod.DistributedContext(
+        is_initialized=True,
+        rank=0,
+        world_size=2,
+        local_rank=0,
+        backend="gloo",
+    )
+
+    def fake_distributed_sum(value: torch.Tensor) -> torch.Tensor:
+        return value * 2
+
+    monkeypatch.setattr(engine, "distributed_sum", fake_distributed_sum)
+
+    metrics = trainer.train_one_epoch(
+        loader,
+        nn.CrossEntropyLoss(),
+        steps=2,
+        warmup_steps=1,
+    )
+
+    assert metrics["steps"] == 4
+    assert metrics["samples"] == 8
+    assert metrics["optimizer_steps"] == 2
+    assert metrics["grad_accum"] == 2
+    assert metrics["partial_optimizer_steps"] == 0
+    assert metrics["grad_accum_tail_steps"] == 0
+    assert metrics["scheduler_step_failures"] == 2
+    assert metrics["warmup_steps"] == 2
+    assert metrics["warmup_samples"] == 4
+    assert metrics["warmup_optimizer_steps"] == 0
+    assert metrics["steady_steps"] == 2
+    assert metrics["steady_samples"] == 4
+    assert metrics["steady_optimizer_steps"] == 2
+    assert metrics["cold_start_steps"] == 2
+
+
 def test_evaluate_reports_non_mapping_user_metrics_as_invalid() -> None:
     inputs = torch.randn(4, 4)
     targets = torch.randint(0, 3, (4,))

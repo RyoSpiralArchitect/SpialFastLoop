@@ -448,6 +448,10 @@ def _add_batch_size_failure_metrics(metrics: Dict[str, Any], counts: Mapping[str
         metrics[f"batch_size_inference_{reason}_failures"] = counts.get(reason, 0)
 
 
+def _distributed_sum_int(value: int, device: torch.device) -> int:
+    return int(distributed_sum(torch.tensor(value, device=device)).item())
+
+
 def _try_infer_batch_size_with_reason(batch: Any) -> tuple[Optional[int], str]:
     if isinstance(batch, torch.Tensor):
         if batch.ndim == 0:
@@ -1567,9 +1571,19 @@ class FastTrainer:
             warmup_weight = distributed_sum(warmup_weight)
             steady_loss = distributed_sum(steady_loss)
             steady_weight = distributed_sum(steady_weight)
-            total_items = int(distributed_sum(torch.tensor(total_items, device=total_loss.device)).item())
-            warmup_items = int(distributed_sum(torch.tensor(warmup_items, device=total_loss.device)).item())
-            steady_items = int(distributed_sum(torch.tensor(steady_items, device=total_loss.device)).item())
+            counter_device = total_loss.device
+            total_items = _distributed_sum_int(total_items, counter_device)
+            warmup_items = _distributed_sum_int(warmup_items, counter_device)
+            steady_items = _distributed_sum_int(steady_items, counter_device)
+            step_idx = _distributed_sum_int(step_idx, counter_device)
+            optimizer_steps = _distributed_sum_int(optimizer_steps, counter_device)
+            partial_optimizer_steps = _distributed_sum_int(partial_optimizer_steps, counter_device)
+            grad_accum_tail_steps = _distributed_sum_int(grad_accum_tail_steps, counter_device)
+            scheduler_step_failures = _distributed_sum_int(scheduler_step_failures, counter_device)
+            warmup_recorded_steps = _distributed_sum_int(warmup_recorded_steps, counter_device)
+            steady_recorded_steps = _distributed_sum_int(steady_recorded_steps, counter_device)
+            warmup_optimizer_steps = _distributed_sum_int(warmup_optimizer_steps, counter_device)
+            steady_optimizer_steps = _distributed_sum_int(steady_optimizer_steps, counter_device)
         weight_value = total_weight.item()
         if weight_value > 0:
             metrics["avg_loss"] = (total_loss / total_weight).item()
