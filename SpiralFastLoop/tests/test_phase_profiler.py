@@ -265,6 +265,33 @@ def test_phase_profiler_normalizes_device_setting() -> None:
     assert profiler.device == "cpu"
 
 
+def test_phase_profiler_caches_repeated_profile_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[object, str]] = []
+    original = utils_mod._profile_name_setting
+
+    def counting_profile_name(value: Any, name: str) -> str:
+        calls.append((value, name))
+        return original(value, name)
+
+    monkeypatch.setattr(utils_mod, "_profile_name_setting", counting_profile_name)
+    profiler = PhaseProfiler(enabled=True)
+
+    for _ in range(3):
+        profiler._record("forward", 0.001)
+        profiler._record_detail("forward", "model.0", 0.0005)
+        profiler._record_event("backward_grad_ready", "model.0", 0.00025)
+
+    profile = profiler.summary()
+    assert profile["phases"]["forward"]["calls"] == 3
+    assert profile["phase_breakdowns"]["forward"]["children"]["model.0"]["calls"] == 3
+    assert profile["phase_events"]["backward_grad_ready"]["children"]["model.0"]["calls"] == 3
+    assert calls == [
+        ("forward", "name"),
+        ("model.0", "name"),
+        ("backward_grad_ready", "group"),
+    ]
+
+
 def test_phase_profiler_respects_exact_distribution_window() -> None:
     profiler = PhaseProfiler(enabled=True, window=1)
 

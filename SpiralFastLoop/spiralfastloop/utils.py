@@ -907,6 +907,7 @@ class PhaseProfiler:
         self.event_calls: Dict[str, Dict[str, int]] = {}
         self.event_samples: Dict[str, Dict[str, deque[float]]] = {}
         self.event_parents: Dict[str, str] = {}
+        self._name_cache: Dict[str, str] = {}
 
     @staticmethod
     def _percentile(values: list[float], percentile: float) -> float:
@@ -924,8 +925,18 @@ class PhaseProfiler:
         mean = math.fsum(values) / len(values)
         return math.sqrt(math.fsum((value - mean) ** 2 for value in values) / (len(values) - 1))
 
+    def _profile_name(self, value: Any, name: str) -> str:
+        if isinstance(value, str):
+            cached = self._name_cache.get(value)
+            if cached is not None:
+                return cached
+            normalized = _profile_name_setting(value, name)
+            self._name_cache[value] = normalized
+            return normalized
+        return _profile_name_setting(value, name)
+
     def _record(self, name: str, seconds: float) -> None:
-        name = _profile_name_setting(name, "name")
+        name = self._profile_name(name, "name")
         duration = _non_negative_finite_float_setting(seconds, "seconds")
         self.totals[name] = self.totals.get(name, 0.0) + duration
         self.calls[name] = self.calls.get(name, 0) + 1
@@ -937,8 +948,8 @@ class PhaseProfiler:
             bucket.append(duration)
 
     def _record_detail(self, parent: str, name: str, seconds: float) -> None:
-        parent = _profile_name_setting(parent, "parent")
-        name = _profile_name_setting(name, "name")
+        parent = self._profile_name(parent, "parent")
+        name = self._profile_name(name, "name")
         duration = _non_negative_finite_float_setting(seconds, "seconds")
         totals = self.detail_totals.setdefault(parent, {})
         calls = self.detail_calls.setdefault(parent, {})
@@ -953,8 +964,8 @@ class PhaseProfiler:
             bucket.append(duration)
 
     def _record_event(self, group: str, name: str, seconds: float) -> None:
-        group = _profile_name_setting(group, "group")
-        name = _profile_name_setting(name, "name")
+        group = self._profile_name(group, "group")
+        name = self._profile_name(name, "name")
         duration = _non_negative_finite_float_setting(seconds, "seconds")
         totals = self.event_totals.setdefault(group, {})
         calls = self.event_calls.setdefault(group, {})
@@ -1028,7 +1039,7 @@ class PhaseProfiler:
     def start(self, name: str) -> None:
         if not self.enabled:
             return
-        key = _profile_name_setting(name, "name")
+        key = self._profile_name(name, "name")
         if self.sync:
             synchronize_device(self.device)
         self._starts[key] = time.perf_counter()
@@ -1036,7 +1047,7 @@ class PhaseProfiler:
     def stop(self, name: str) -> None:
         if not self.enabled:
             return
-        key = _profile_name_setting(name, "name")
+        key = self._profile_name(name, "name")
         if self.sync:
             synchronize_device(self.device)
         start = self._starts.get(key)
@@ -1054,13 +1065,13 @@ class PhaseProfiler:
 
     def cancel(self, name: str) -> None:
         if self.enabled:
-            self._starts.pop(_profile_name_setting(name, "name"), None)
+            self._starts.pop(self._profile_name(name, "name"), None)
 
     def start_detail(self, parent: str, name: str) -> None:
         if not self.enabled:
             return
-        parent_key = _profile_name_setting(parent, "parent")
-        name_key = _profile_name_setting(name, "name")
+        parent_key = self._profile_name(parent, "parent")
+        name_key = self._profile_name(name, "name")
         if self.sync:
             synchronize_device(self.device)
         key = (parent_key, name_key)
@@ -1069,8 +1080,8 @@ class PhaseProfiler:
     def stop_detail(self, parent: str, name: str) -> None:
         if not self.enabled:
             return
-        parent_key = _profile_name_setting(parent, "parent")
-        name_key = _profile_name_setting(name, "name")
+        parent_key = self._profile_name(parent, "parent")
+        name_key = self._profile_name(name, "name")
         if self.sync:
             synchronize_device(self.device)
         key = (parent_key, name_key)
@@ -1095,9 +1106,9 @@ class PhaseProfiler:
     def record_event_since_start(self, parent: str, group: str, name: str) -> None:
         if not self.enabled:
             return
-        parent_key = _profile_name_setting(parent, "parent")
-        group_key = _profile_name_setting(group, "group")
-        name_key = _profile_name_setting(name, "name")
+        parent_key = self._profile_name(parent, "parent")
+        group_key = self._profile_name(group, "group")
+        name_key = self._profile_name(name, "name")
         if self.sync:
             synchronize_device(self.device)
         start = self._starts.get(parent_key)
