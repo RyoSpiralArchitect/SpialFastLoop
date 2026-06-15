@@ -97,6 +97,9 @@ def test_hard_sample_buffer_rejects_invalid_loss_vectors(
         ([], torch.arange(3)),
         (torch.arange(6, dtype=torch.float32).reshape(3, 2), []),
         (torch.arange(6, dtype=torch.float32).reshape(3, 2), torch.arange(2)),
+        ({}, torch.arange(3)),
+        ({"x": torch.arange(6, dtype=torch.float32).reshape(3, 2)}, {}),
+        ({"nested": {}}, torch.arange(3)),
     ],
 )
 def test_hard_sample_buffer_rejects_misaligned_batch_structures_without_mutating(

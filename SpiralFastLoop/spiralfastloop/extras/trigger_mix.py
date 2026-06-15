@@ -70,6 +70,8 @@ def _select_indices(batch: Any, indices: Sequence[int]) -> Any:
     if isinstance(batch, torch.Tensor):
         return batch.index_select(0, torch.tensor(indices, device=batch.device))
     if isinstance(batch, dict):
+        if not batch and len(indices) > 0:
+            raise ValueError("batch mapping must not be empty when selecting samples.")
         return {k: _select_indices(v, indices) for k, v in batch.items()}
     if isinstance(batch, (list, tuple)):
         if len(batch) == 0:
@@ -96,6 +98,8 @@ def _split_batch(batch: Any, batch_size: int) -> list[Any]:
     if isinstance(batch, torch.Tensor):
         return [batch[i] for i in range(batch_size)]
     if isinstance(batch, dict):
+        if not batch and batch_size > 0:
+            raise ValueError("batch mapping must not be empty when splitting samples.")
         per_key = {k: _split_batch(v, batch_size) for k, v in batch.items()}
         return [{k: per_key[k][i] for k in per_key} for i in range(batch_size)]
     if isinstance(batch, (list, tuple)):
