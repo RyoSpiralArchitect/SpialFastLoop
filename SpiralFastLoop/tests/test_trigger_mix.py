@@ -167,6 +167,34 @@ def test_hard_sample_buffer_samples_nested_batch_structures() -> None:
     assert sampled_targets["weight"][1].shape == (5,)
 
 
+def test_hard_sample_buffer_rejects_cross_batch_structure_changes_without_mutating() -> None:
+    buffer = HardSampleBuffer(max_samples=8)
+    inputs = torch.arange(6, dtype=torch.float32).reshape(3, 2)
+    losses = torch.tensor([1.0, 3.0, 2.0])
+    buffer.add_batch(inputs, ["easy", "medium", "hard"], losses)
+
+    with pytest.raises(ValueError, match="hard samples"):
+        buffer.add_batch(inputs, torch.arange(3), losses)
+
+    assert len(buffer) == 3
+    sampled_inputs, sampled_targets = buffer.sample(5)
+    assert sampled_inputs.shape == (5, 2)
+    assert isinstance(sampled_targets, list)
+    assert all(isinstance(target, str) for target in sampled_targets)
+
+
+def test_hard_sample_buffer_rejects_internal_sample_structure_mismatch() -> None:
+    buffer = HardSampleBuffer(max_samples=8)
+    inputs = torch.arange(6, dtype=torch.float32).reshape(3, 2)
+    targets = [{"a": 0}, {"b": 1}, {"a": 2}]
+    losses = torch.tensor([1.0, 3.0, 2.0])
+
+    with pytest.raises(ValueError, match="hard samples"):
+        buffer.add_batch(inputs, targets, losses)
+
+    assert len(buffer) == 0
+
+
 @pytest.mark.parametrize("select_top_k", [0, -1, 1.5, "2", True])
 def test_hard_sample_provider_rejects_invalid_select_top_k(select_top_k: object) -> None:
     with pytest.raises(ValueError, match="select_top_k"):

@@ -160,7 +160,33 @@ def _stack_samples(samples: Sequence[Any]) -> Any:
         if first_namedtuple:
             return type(first)(*values)
         return tuple(values)
+    for sample in samples:
+        if isinstance(sample, (torch.Tensor, Mapping, list, tuple)):
+            raise ValueError("hard samples must share structure when batching samples.")
     return list(samples)
+
+
+def _sample_structure(sample: Any) -> Any:
+    if isinstance(sample, torch.Tensor):
+        return ("tensor", tuple(sample.shape), sample.dtype)
+    if isinstance(sample, Mapping):
+        return ("mapping", tuple((key, _sample_structure(value)) for key, value in sample.items()))
+    if isinstance(sample, list):
+        return ("list", tuple(_sample_structure(value) for value in sample))
+    if isinstance(sample, tuple):
+        kind = ("namedtuple", type(sample)) if hasattr(sample, "_fields") else ("tuple",)
+        return kind + tuple(_sample_structure(value) for value in sample)
+    return ("leaf",)
+
+
+def _ensure_sample_structures_match(samples: Sequence[Any]) -> Any:
+    if len(samples) == 0:
+        raise ValueError("hard samples must not be empty when validating sample structure.")
+    expected = _sample_structure(samples[0])
+    for sample in samples[1:]:
+        if _sample_structure(sample) != expected:
+            raise ValueError("hard samples must share structure when batching samples.")
+    return expected
 
 
 def _trigger_context_setting(ctx: Any) -> Dict[str, Any]:
@@ -192,6 +218,8 @@ class HardSampleBuffer:
         self.max_samples = _non_negative_int_setting(max_samples, "max_samples")
         self._inputs: Deque[Any] = deque(maxlen=self.max_samples)
         self._targets: Deque[Any] = deque(maxlen=self.max_samples)
+        self._input_structure: Any = None
+        self._target_structure: Any = None
 
     def __len__(self) -> int:
         return len(self._inputs)
@@ -234,9 +262,17 @@ class HardSampleBuffer:
             raise ValueError("inputs and targets must match loss_vec batch dimension") from exc
         if len(input_samples) != k or len(target_samples) != k:
             raise ValueError("inputs and targets must match loss_vec batch dimension")
+        input_structure = _ensure_sample_structures_match(input_samples)
+        target_structure = _ensure_sample_structures_match(target_samples)
+        if len(self._inputs) > 0 and (
+            input_structure != self._input_structure or target_structure != self._target_structure
+        ):
+            raise ValueError("hard samples must share structure when batching samples.")
         for item_in, item_tgt in zip(input_samples, target_samples):
             self._inputs.append(item_in)
             self._targets.append(item_tgt)
+        self._input_structure = input_structure
+        self._target_structure = target_structure
 
     def sample(self, num_samples: int) -> Tuple[Any, Any]:
         if len(self._inputs) == 0:
