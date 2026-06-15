@@ -46,7 +46,15 @@ SETUP_SUMMARY_FIELDS = (
     "dataset_setup_time_s",
     "loader_setup_time_s",
     "model_setup_time_s",
+    "compile_init_time_s",
     "dataset_materialized_bytes",
+)
+
+CONFIG_SUMMARY_FIELDS = (
+    "transactions",
+    "batch_size",
+    "num_workers",
+    "world_size",
 )
 
 BATCH_SUMMARY_FIELDS = (
@@ -179,9 +187,13 @@ SUMMARY_INTEGER_FIELDS = (
     WORKLOAD_INTEGER_SUMMARY_FIELDS
     | frozenset({
         "batches",
+        "batch_size",
+        "num_workers",
         "dataset_materialized_bytes",
+        "transactions",
         "window_batches",
         "window_samples",
+        "world_size",
         "profile_flat_metric_invalid_count",
         "profile_open_phase_count",
         "profile_open_detail_count",
@@ -195,6 +207,7 @@ SUMMARY_INTEGER_FIELDS = (
 SUMMARY_FIELDS = (
     BASE_SUMMARY_FIELDS
     + SETUP_SUMMARY_FIELDS
+    + CONFIG_SUMMARY_FIELDS
     + BATCH_SUMMARY_FIELDS
     + WORKLOAD_SUMMARY_FIELDS
     + DIAGNOSTIC_SUMMARY_FIELDS
@@ -206,6 +219,17 @@ BEST_RUN_FIELDS = (
     "run",
     "seed",
     "dataset_mode",
+    "device",
+    "amp",
+    "compile_requested",
+    "compiled",
+    "compile_init_time_s",
+    "compile_fallback_reason",
+    "transactions",
+    "batch_size",
+    "num_workers",
+    "world_size",
+    "rank",
     "reported_samples_per_sec",
     "samples_per_sec",
     "steady_samples_per_sec",
@@ -294,21 +318,31 @@ PROFILE_MODEL_STATUS_ORDER = (
 )
 PROFILE_MODEL_STATUS_CHOICES = frozenset(PROFILE_MODEL_STATUS_ORDER)
 BEST_RUN_TEXT_FIELDS = frozenset({
+    "compile_fallback_reason",
     "dataset_mode",
+    "device",
     "profile_model_status",
     "profile_model_hook_last_error",
     "scheduler_last_error",
 })
 BEST_RUN_BOOL_FIELDS = frozenset({
+    "amp",
+    "compile_requested",
+    "compiled",
     "profile_model_requested",
     "profile_model_enabled",
 })
 BEST_RUN_INTEGER_FIELDS = frozenset({
     "run",
     "batches",
+    "batch_size",
     "dataset_materialized_bytes",
+    "num_workers",
+    "rank",
+    "transactions",
     "window_batches",
     "window_samples",
+    "world_size",
     "steps",
     "samples",
     "optimizer_steps",
@@ -338,7 +372,12 @@ BEST_RUN_INTEGER_FIELDS = frozenset({
     "mps_driver_mem_bytes",
     "mps_recommended_max_mem_bytes",
 })
-BEST_RUN_POSITIVE_INTEGER_FIELDS = frozenset({"grad_accum"})
+BEST_RUN_POSITIVE_INTEGER_FIELDS = frozenset({
+    "batch_size",
+    "grad_accum",
+    "transactions",
+    "world_size",
+})
 BEST_RUN_POSITIVE_ONLY_INTEGER_FIELDS = frozenset({"scheduler_step_failures"})
 PROFILE_MODEL_RESULT_FIELDS = frozenset({
     "profile_model_requested",
@@ -541,6 +580,7 @@ def summary_fields_for_rows(rows: list[dict]) -> tuple[str, ...]:
         present_fields.update(row.keys())
     batch_fields = tuple(field for field in BATCH_SUMMARY_FIELDS if field in present_fields)
     setup_fields = tuple(field for field in SETUP_SUMMARY_FIELDS if field in present_fields)
+    config_fields = tuple(field for field in CONFIG_SUMMARY_FIELDS if field in present_fields)
     workload_fields = tuple(field for field in WORKLOAD_SUMMARY_FIELDS if field in present_fields)
     diagnostic_fields = tuple(
         field
@@ -552,6 +592,7 @@ def summary_fields_for_rows(rows: list[dict]) -> tuple[str, ...]:
     return (
         BASE_SUMMARY_FIELDS
         + setup_fields
+        + config_fields
         + batch_fields
         + workload_fields
         + diagnostic_fields

@@ -591,6 +591,10 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "matrix_dataset_mode": "generated",
             "matrix_compile_mode": "no-compile",
             "matrix_workers": 0,
+            "transactions": 64,
+            "batch_size": 4,
+            "num_workers": 0,
+            "world_size": 1,
             "reported_samples_per_sec": 100.0,
             "samples_per_sec": 80.0,
             "steady_samples_per_sec": 100.0,
@@ -613,6 +617,7 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "dataset_setup_time_s": 0.20,
             "loader_setup_time_s": 0.30,
             "model_setup_time_s": 0.50,
+            "compile_init_time_s": 0.04,
             "wall_time_s": 2.0,
             "cold_start_time_s": 0.5,
             "steps": 3,
@@ -656,6 +661,10 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "matrix_dataset_mode": "generated",
             "matrix_compile_mode": "no-compile",
             "matrix_workers": 0,
+            "transactions": 64,
+            "batch_size": 4,
+            "num_workers": 0,
+            "world_size": 1,
             "reported_samples_per_sec": 300.0,
             "samples_per_sec": 240.0,
             "steady_samples_per_sec": 300.0,
@@ -678,6 +687,7 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "dataset_setup_time_s": 0.05,
             "loader_setup_time_s": 0.07,
             "model_setup_time_s": 0.13,
+            "compile_init_time_s": 0.02,
             "wall_time_s": 0.75,
             "cold_start_time_s": 0.1,
             "steps": 3,
@@ -788,6 +798,11 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["mean_dataset_setup_time_s"] == pytest.approx(0.125)
     assert generated["mean_loader_setup_time_s"] == pytest.approx(0.185)
     assert generated["mean_model_setup_time_s"] == pytest.approx(0.315)
+    assert generated["mean_compile_init_time_s"] == pytest.approx(0.03)
+    assert generated["mean_transactions"] == pytest.approx(64.0)
+    assert generated["mean_batch_size"] == pytest.approx(4.0)
+    assert generated["mean_num_workers"] == pytest.approx(0.0)
+    assert generated["mean_world_size"] == pytest.approx(1.0)
     assert generated["mean_dataset_materialized_bytes"] == pytest.approx(0.0)
     assert generated["mean_p99_s"] == pytest.approx(0.015)
     assert generated["mean_std_batch_s"] == pytest.approx(0.0015)

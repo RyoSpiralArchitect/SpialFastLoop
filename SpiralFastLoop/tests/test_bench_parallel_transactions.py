@@ -507,6 +507,17 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "run": 1,
             "seed": 11,
             "dataset_mode": "generated",
+            "device": "cpu",
+            "amp": False,
+            "compile_requested": True,
+            "compiled": False,
+            "compile_init_time_s": 0.02,
+            "compile_fallback_reason": "cpu_device",
+            "transactions": 64,
+            "batch_size": 4,
+            "num_workers": 0,
+            "world_size": 1,
+            "rank": 0,
             "reported_samples_per_sec": 200.0,
             "samples_per_sec": 160.0,
             "steady_samples_per_sec": 200.0,
@@ -594,6 +605,11 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["sample_count_dataset_setup_time_s"] == pytest.approx(1.0)
     assert summary["mean_loader_setup_time_s"] == pytest.approx(0.07)
     assert summary["mean_model_setup_time_s"] == pytest.approx(0.13)
+    assert summary["mean_compile_init_time_s"] == pytest.approx(0.02)
+    assert summary["mean_transactions"] == pytest.approx(64.0)
+    assert summary["mean_batch_size"] == pytest.approx(4.0)
+    assert summary["mean_num_workers"] == pytest.approx(0.0)
+    assert summary["mean_world_size"] == pytest.approx(1.0)
     assert summary["mean_dataset_materialized_bytes"] == pytest.approx(4096.0)
     assert summary["sample_count_dataset_materialized_bytes"] == pytest.approx(1.0)
     assert summary["mean_ema_samples_per_sec"] == pytest.approx(220.0)
@@ -644,6 +660,17 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["best_reported"]["profile_loss_pct"] == pytest.approx(7.0)
     assert summary["best_reported"]["profile_postprocess_pct"] == pytest.approx(10.0)
     assert summary["best_reported"]["profile_collect_output_pct"] == pytest.approx(5.0)
+    assert summary["best_reported"]["device"] == "cpu"
+    assert summary["best_reported"]["amp"] is False
+    assert summary["best_reported"]["compile_requested"] is True
+    assert summary["best_reported"]["compiled"] is False
+    assert summary["best_reported"]["compile_init_time_s"] == pytest.approx(0.02)
+    assert summary["best_reported"]["compile_fallback_reason"] == "cpu_device"
+    assert summary["best_reported"]["transactions"] == 64
+    assert summary["best_reported"]["batch_size"] == 4
+    assert summary["best_reported"]["num_workers"] == 0
+    assert summary["best_reported"]["world_size"] == 1
+    assert summary["best_reported"]["rank"] == 0
     assert summary["best_reported"]["avg_batch_s"] == pytest.approx(0.004)
     assert summary["best_reported"]["last_batch_s"] == pytest.approx(0.003)
     assert summary["best_reported"]["min_batch_s"] == pytest.approx(0.002)
