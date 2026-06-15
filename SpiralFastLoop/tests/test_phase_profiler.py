@@ -2765,6 +2765,35 @@ def test_profile_flat_metrics_include_backward_event_position() -> None:
     assert "profile_flat_metric_invalid_fields" not in metrics
 
 
+def test_profile_flat_metrics_tolerate_partial_backward_event_rows() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "profile_total_s": 1.0,
+        "phases": {},
+        "phase_events": {
+            "backward_grad_ready": {
+                "children": {"model.0": {}},
+                "top_children": [
+                    {
+                        "name": "model.0",
+                        "avg_ms": 8.0,
+                    },
+                ],
+            },
+        },
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert metrics["profile_backward_grad_ready_child_count"] == 1
+    assert metrics["profile_backward_grad_ready_top_avg_ms"] == pytest.approx(8.0)
+    assert "profile_backward_grad_ready_parent_avg_ms" not in metrics
+    assert "profile_backward_grad_ready_top_pct" not in metrics
+    assert "profile_backward_grad_ready_top_calls" not in metrics
+    assert metrics["profile_flat_metric_invalid_count"] == 0
+    assert "profile_flat_metric_invalid_fields" not in metrics
+
+
 def test_profile_flat_metrics_reject_invalid_backward_event_values() -> None:
     metrics: dict[str, object] = {}
     profile = {

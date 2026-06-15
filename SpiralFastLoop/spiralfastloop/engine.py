@@ -200,6 +200,38 @@ def _record_profile_flat_metric_invalids(metrics: Dict[str, Any], invalid_fields
         metrics["profile_flat_metric_invalid_fields"] = invalid_fields
 
 
+def _set_profile_metric_if_present(
+    metrics: Dict[str, Any],
+    name: str,
+    source: Mapping[str, Any],
+    source_name: str,
+    invalid_fields: list[str],
+    *,
+    max_value: Optional[float] = None,
+) -> None:
+    if source_name not in source:
+        return
+    _set_profile_metric(
+        metrics,
+        name,
+        source[source_name],
+        invalid_fields,
+        max_value=max_value,
+    )
+
+
+def _set_profile_count_metric_if_present(
+    metrics: Dict[str, Any],
+    name: str,
+    source: Mapping[str, Any],
+    source_name: str,
+    invalid_fields: list[str],
+) -> None:
+    if source_name not in source:
+        return
+    _set_profile_count_metric(metrics, name, source[source_name], invalid_fields)
+
+
 def _add_profile_backward_event_metrics(
     metrics: Dict[str, Any],
     profile: Mapping[str, Any],
@@ -215,10 +247,11 @@ def _add_profile_backward_event_metrics(
     children = group.get("children", {})
     if isinstance(children, Mapping):
         metrics["profile_backward_grad_ready_child_count"] = len(children)
-    _set_profile_metric(
+    _set_profile_metric_if_present(
         metrics,
         "profile_backward_grad_ready_parent_avg_ms",
-        group.get("parent_avg_ms", _PROFILE_METRIC_MISSING),
+        group,
+        "parent_avg_ms",
         invalid_fields,
     )
 
@@ -230,23 +263,26 @@ def _add_profile_backward_event_metrics(
     if top_child is None:
         return
 
-    _set_profile_metric(
+    _set_profile_metric_if_present(
         metrics,
         "profile_backward_grad_ready_top_avg_ms",
-        top_child.get("avg_ms", _PROFILE_METRIC_MISSING),
+        top_child,
+        "avg_ms",
         invalid_fields,
     )
-    _set_profile_metric(
+    _set_profile_metric_if_present(
         metrics,
         "profile_backward_grad_ready_top_pct",
-        top_child.get("avg_pct_of_parent", _PROFILE_METRIC_MISSING),
+        top_child,
+        "avg_pct_of_parent",
         invalid_fields,
         max_value=100.0,
     )
-    _set_profile_count_metric(
+    _set_profile_count_metric_if_present(
         metrics,
         "profile_backward_grad_ready_top_calls",
-        top_child.get("calls", _PROFILE_METRIC_MISSING),
+        top_child,
+        "calls",
         invalid_fields,
     )
 
