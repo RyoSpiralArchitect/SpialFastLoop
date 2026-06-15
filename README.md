@@ -98,7 +98,8 @@ summaries include max, total, mean, ranking `pressure_score`, `pressure_rank`, a
 severity-count pressure per category. Matrix summaries surface the same signal as
 compact `hotspot=...` and strongest-first `pressure(...)` fragments, including
 the top hotspot severity, category-level severity suffixes such as `[high]`,
-category `sum=...`, and `severity_counts(...)`. The
+category pressure ranks such as `#1`, category `sum=...`, and
+`severity_counts(...)`. The
 transactional benchmark prints the same severity-aware `Bottleneck:` line before
 the aggregate JSON when candidates are available.
 The ResNet drilldown script prints the same top-phase tail fields. Throughput

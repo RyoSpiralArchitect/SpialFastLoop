@@ -368,6 +368,7 @@ def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
                 "top_candidate": "forward_top_child",
                 "top_rank": 2,
                 "top_severity": "high",
+                "pressure_rank": 2,
             },
             "phase_share": {
                 "count": 2,
@@ -377,6 +378,7 @@ def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
                 "top_candidate": "forward_phase",
                 "top_rank": 1,
                 "top_severity": "high",
+                "pressure_rank": 1,
             },
         },
     }
@@ -385,8 +387,8 @@ def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
 
     assert "hotspot=forward_phase:55.0%(phase_share,high)" in formatted
     assert (
-        "pressure(phase_share:forward_phase=55.0%[high];sum=75.0%,"
-        "child_hotspot:forward_top_child=35.0%[high];sum=35.0%)"
+        "pressure(#1 phase_share:forward_phase=55.0%[high];sum=75.0%,"
+        "#2 child_hotspot:forward_top_child=35.0%[high];sum=35.0%)"
     ) in formatted
     assert "severity_counts(high=2,medium=1)" in formatted
 

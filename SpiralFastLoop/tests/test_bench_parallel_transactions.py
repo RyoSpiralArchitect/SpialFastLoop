@@ -2663,9 +2663,9 @@ def test_main_prints_backward_event_parent_position(
     ) in output
     assert (
         "severity_counts(high=3,medium=1,low=1) "
-        "categories=phase_share:forward_phase=42.5%[high]/3;sum=85.0%,"
-        "child_hotspot:forward_top_child=29.8%[high]/1;sum=29.8%,"
-        "readiness_span:backward_readiness_span=6.9%[low]/1;sum=6.9%"
+        "categories=#1 phase_share:forward_phase=42.5%[high]/3;sum=85.0%,"
+        "#2 child_hotspot:forward_top_child=29.8%[high]/1;sum=29.8%,"
+        "#3 readiness_span:backward_readiness_span=6.9%[low]/1;sum=6.9%"
     ) in output
 
 

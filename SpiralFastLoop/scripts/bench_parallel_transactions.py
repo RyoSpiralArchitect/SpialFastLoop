@@ -1660,7 +1660,9 @@ def _format_profile_bottleneck_category_pressure(
         if isinstance(top_severity, str) and top_severity
         else ""
     )
-    text = f"{category_name}:{top_name}={max_score:.1f}{entry_suffix}{severity_suffix}"
+    rank = _display_count_value(entry.get("pressure_rank"))
+    rank_prefix = f"#{rank} " if rank is not None and rank > 0 else ""
+    text = f"{rank_prefix}{category_name}:{top_name}={max_score:.1f}{entry_suffix}{severity_suffix}"
 
     if include_count:
         count = _display_count_value(entry.get("count"))
