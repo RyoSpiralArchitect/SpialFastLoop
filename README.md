@@ -78,7 +78,9 @@ related tracked/untracked fields.
 The top-level phases include `data_wait`, so loader stalls can be separated from
 compute time, and their distribution windows are flattened as fields like
 `profile_forward_p95_ms`, `profile_forward_p99_ms`, and
-`profile_forward_std_ms` when distribution tracking is enabled. Throughput
+`profile_forward_std_ms` when distribution tracking is enabled. Benchmark
+matrix output also surfaces compact tail summaries such as `fwd_tail(p95=...)`,
+`bwd_tail(p99=...)`, and `opt_tail(std=...)`. Throughput
 summaries include `p99_s` and `std_batch_s`. Set `profile_sync=True` only when
 you need stricter accelerator timings; it synchronizes around profiled regions
 and slows the run down. Use `--no-profile-distribution` in benchmark scripts to

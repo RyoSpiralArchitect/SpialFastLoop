@@ -247,7 +247,7 @@ def test_print_summary_formats_malformed_metrics_as_na(
     assert "conv: n/a avg=n/a p95=1.00ms" in output
     assert "layer4: avg=n/a p95=n/a" in output
     assert "optimizer drilldown: tracked=" not in output
-    assert "<unnamed>: n/a avg=0.50ms" in output
+    assert "<unnamed>: n/a avg=0.50ms p95=n/a" in output
 
 
 def test_print_summary_shows_breakdown_tracking_totals(
@@ -270,7 +270,7 @@ def test_print_summary_shows_breakdown_tracking_totals(
                     "untracked_s": 0.01,
                     "overtracked_s": 0.0,
                     "top_children": [
-                        {"name": "step", "pct_of_parent": 80.0, "avg_ms": 0.5},
+                        {"name": "step", "pct_of_parent": 80.0, "avg_ms": 0.5, "p95_ms": 0.75},
                     ],
                 },
             },
@@ -282,6 +282,7 @@ def test_print_summary_shows_breakdown_tracking_totals(
     output = capsys.readouterr().out
     assert "forward drilldown: tracked=70.00ms untracked=30.00ms overtracked=20.00ms" in output
     assert "optimizer drilldown: tracked=40.00ms untracked=10.00ms" in output
+    assert "step: 80.0% avg=0.50ms p95=0.75ms" in output
 
 
 def test_print_summary_shows_backward_parent_position(

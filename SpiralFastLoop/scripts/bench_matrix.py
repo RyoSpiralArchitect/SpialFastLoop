@@ -210,6 +210,36 @@ def _measured_summary_value(row: dict, mean_field: str) -> Optional[float]:
     return value
 
 
+def _direct_profile_metric_value(row: dict, field: str) -> Optional[float]:
+    if field not in row:
+        return None
+    value = _finite_summary_value(row[field])
+    if value is None or value < 0.0:
+        return None
+    return value
+
+
+def _format_phase_tail_parts(row: dict, *, aggregate: bool) -> list[str]:
+    value_fn = _measured_summary_value if aggregate else _direct_profile_metric_value
+    field_prefix = "mean_" if aggregate else ""
+    parts = []
+    for label, phase_name in (
+        ("fwd", "forward"),
+        ("bwd", "backward"),
+        ("opt", "optimizer"),
+    ):
+        tail_parts = []
+        for metric_name in ("p95_ms", "p99_ms", "std_ms"):
+            field = f"{field_prefix}profile_{phase_name}_{metric_name}"
+            value = value_fn(row, field)
+            if value is None:
+                continue
+            tail_parts.append(f"{metric_name[:-3]}={value:.2f}ms")
+        if tail_parts:
+            parts.append(f"{label}_tail({','.join(tail_parts)})")
+    return parts
+
+
 def _format_summary_row(row: dict) -> str:
     reported_samples_per_sec = _measured_summary_value(row, "mean_reported_samples_per_sec")
     reported_text = (
@@ -256,6 +286,7 @@ def _format_summary_row(row: dict) -> str:
         if optimizer_top_avg_ms is not None:
             optimizer_text = f"{optimizer_text}@{optimizer_top_avg_ms:.2f}ms"
         profile_parts.append(optimizer_text)
+    profile_parts.extend(_format_phase_tail_parts(row, aggregate=True))
     backward_ready_pct = _measured_summary_value(row, "mean_profile_backward_grad_ready_top_pct")
     backward_ready_avg_ms = _measured_summary_value(row, "mean_profile_backward_grad_ready_top_avg_ms")
     if backward_ready_pct is not None:
@@ -345,10 +376,14 @@ def _format_run_row(dataset_mode: str, compile_mode: str, workers: int, run_inde
     if setup_breakdown:
         setup_parts.append(setup_breakdown)
     setup_prefix = f"{' '.join(setup_parts)} " if setup_parts else ""
+    profile_parts = _format_phase_tail_parts(result, aggregate=False)
     profile_model_summary = _format_profile_model_hook_summary(result)
-    profile_suffix = f" profile_model({profile_model_summary})" if profile_model_summary else ""
+    if profile_model_summary:
+        profile_parts.append(f"profile_model({profile_model_summary})")
     scheduler_summary = _format_scheduler_summary(result)
-    scheduler_suffix = f" scheduler({scheduler_summary})" if scheduler_summary else ""
+    if scheduler_summary:
+        profile_parts.append(f"scheduler({scheduler_summary})")
+    profile_suffix = f" {' '.join(profile_parts)}" if profile_parts else ""
     return (
         f"{dataset_mode:>12} {compile_mode:>10} workers={workers:<2} "
         f"run={run_index:<2} "
@@ -356,7 +391,6 @@ def _format_run_row(dataset_mode: str, compile_mode: str, workers: int, run_inde
         f"{setup_prefix}"
         f"e2e={e2e_text}"
         f"{profile_suffix}"
-        f"{scheduler_suffix}"
     )
 
 

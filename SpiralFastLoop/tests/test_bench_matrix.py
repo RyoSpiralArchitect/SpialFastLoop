@@ -163,6 +163,30 @@ def test_format_summary_row_includes_optimizer_top_position() -> None:
     assert "opt_top=80.0%@2.25ms" in formatted
 
 
+def test_format_summary_row_includes_phase_tail_latency() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_forward_p95_ms": 6.25,
+        "sample_count_profile_forward_p95_ms": 2.0,
+        "mean_profile_forward_p99_ms": 7.5,
+        "sample_count_profile_forward_p99_ms": 2.0,
+        "mean_profile_backward_p95_ms": 8.0,
+        "sample_count_profile_backward_p95_ms": 2.0,
+        "mean_profile_optimizer_std_ms": 0.75,
+        "sample_count_profile_optimizer_std_ms": 2.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "fwd_tail(p95=6.25ms,p99=7.50ms)" in formatted
+    assert "bwd_tail(p95=8.00ms)" in formatted
+    assert "opt_tail(std=0.75ms)" in formatted
+
+
 def test_format_summary_row_includes_setup_breakdown_when_available() -> None:
     row = {
         "dataset_mode": "generated",
@@ -510,6 +534,24 @@ def test_format_summary_row_omits_unmeasured_profile_suffix() -> None:
     assert "opt=" not in formatted
 
 
+def test_format_summary_row_omits_unmeasured_phase_tail_latency() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_forward_p95_ms": 0.0,
+        "sample_count_profile_forward_p95_ms": 0.0,
+        "mean_profile_backward_p99_ms": -1.0,
+        "mean_profile_optimizer_std_ms": "slow",
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "tail(" not in formatted
+
+
 def test_format_summary_row_includes_only_measured_profile_parts() -> None:
     row = {
         "dataset_mode": "generated",
@@ -589,6 +631,27 @@ def test_format_run_row_includes_setup_breakdown_when_available() -> None:
     assert "setup=0.27s" in row
     assert "init(dataset=0.05s,loader=0.07s,model=0.13s,compile=0.02s)" in row
     assert "init(" in row.split("e2e=")[0]
+
+
+def test_format_run_row_includes_phase_tail_latency() -> None:
+    row = _format_run_row(
+        "generated",
+        "no-compile",
+        0,
+        0,
+        {
+            "reported_samples_per_sec": 123.45,
+            "end_to_end_wall_time_s": 1.234,
+            "profile_forward_p95_ms": 6.25,
+            "profile_forward_p99_ms": 7.5,
+            "profile_backward_p95_ms": 8.0,
+            "profile_optimizer_std_ms": 0.75,
+        },
+    )
+
+    assert "fwd_tail(p95=6.25ms,p99=7.50ms)" in row
+    assert "bwd_tail(p95=8.00ms)" in row
+    assert "opt_tail(std=0.75ms)" in row
 
 
 def test_format_run_row_falls_back_to_total_metrics() -> None:

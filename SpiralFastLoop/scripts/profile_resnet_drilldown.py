@@ -174,7 +174,8 @@ def _print_summary(metrics: dict[str, Any], topk: int) -> None:
             print(
                 f"  {_profile_row_name(row)}: "
                 f"{_format_metric_value(row.get('pct_of_parent'), precision=1, suffix='%')} "
-                f"avg={_format_metric_value(row.get('avg_ms'), precision=2, suffix='ms')}"
+                f"avg={_format_metric_value(row.get('avg_ms'), precision=2, suffix='ms')} "
+                f"p95={_format_metric_value(row.get('p95_ms'), precision=2, suffix='ms')}"
             )
 
 
