@@ -43,6 +43,12 @@ def test_bench_synth_example_emits_strict_json(
             "--device",
             "cpu",
             "--no-compile",
+            "--meter-fast-mode",
+            "--collect-profile",
+            "--profile-sync",
+            "--no-profile-distribution",
+            "--profile-window",
+            "8",
         ],
     )
 
@@ -51,8 +57,15 @@ def test_bench_synth_example_emits_strict_json(
     payload = json.loads(capsys.readouterr().out)
     assert payload["device"] == "cpu"
     assert payload["config"]["samples"] == 8
+    assert payload["config"]["meter_fast_mode"] is True
+    assert payload["config"]["collect_profile"] is True
+    assert payload["config"]["profile_sync"] is True
+    assert payload["config"]["profile_distribution"] is False
+    assert payload["config"]["profile_window"] == 8
     assert payload["metrics"]["device"] == "cpu"
     assert payload["metrics"]["steps"] == 1
+    assert payload["metrics"]["profile"]["profile_distribution"] is False
+    assert payload["metrics"]["profile"]["profile_window"] == 0
 
 
 def test_train_resnet_example_fake_dataset_emits_strict_json(
@@ -85,6 +98,12 @@ def test_train_resnet_example_fake_dataset_emits_strict_json(
             "--device",
             "cpu",
             "--no-compile",
+            "--meter-fast-mode",
+            "--collect-profile",
+            "--profile-sync",
+            "--no-profile-distribution",
+            "--profile-window",
+            "8",
         ],
     )
 
@@ -93,8 +112,15 @@ def test_train_resnet_example_fake_dataset_emits_strict_json(
     payload = json.loads(capsys.readouterr().out)
     assert payload["device"] == "cpu"
     assert payload["dataset"] == "fake"
+    assert payload["config"]["meter_fast_mode"] is True
+    assert payload["config"]["collect_profile"] is True
+    assert payload["config"]["profile_sync"] is True
+    assert payload["config"]["profile_distribution"] is False
+    assert payload["config"]["profile_window"] == 8
     assert payload["metrics"]["device"] == "cpu"
     assert payload["metrics"]["steps"] == 1
+    assert payload["metrics"]["profile"]["profile_distribution"] is False
+    assert payload["metrics"]["profile"]["profile_window"] == 0
 
 
 def test_readme_documents_tiny_strict_json_example_smokes() -> None:
@@ -106,6 +132,8 @@ def test_readme_documents_tiny_strict_json_example_smokes() -> None:
         "--hidden-dim 8",
         "PYTHONNOUSERSITE=1 python3 examples/train_resnet.py",
         "local Python startup hooks",
+        "--meter-fast-mode",
+        "--no-profile-distribution",
         "--dataset fake",
         "--dataset cifar10 --download",
     ]

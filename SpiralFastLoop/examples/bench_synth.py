@@ -55,7 +55,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning-rate", type=positive_float_arg, default=3e-4)
     parser.add_argument("--device", type=device_arg, default="auto")
     parser.add_argument("--no-compile", dest="compile", action="store_false")
+    parser.add_argument("--meter-fast-mode", action="store_true")
     parser.add_argument("--collect-profile", action="store_true")
+    parser.add_argument("--profile-sync", action="store_true")
+    parser.add_argument(
+        "--no-profile-distribution",
+        dest="profile_distribution",
+        action="store_false",
+    )
+    parser.add_argument("--profile-window", type=positive_int_arg, default=512)
     args = parser.parse_args()
     try:
         validate_benchmark_args(args)
@@ -97,12 +105,16 @@ def main() -> None:
         grad_accum=args.grad_accum,
         log_interval=args.log_interval,
         use_compile=args.compile,
+        meter_fast_mode=args.meter_fast_mode,
     )
     metrics = trainer.train_one_epoch(
         loader,
         criterion,
         steps=args.steps,
         collect_profile=args.collect_profile,
+        profile_sync=args.profile_sync,
+        profile_distribution=args.profile_distribution,
+        profile_window=args.profile_window,
         warmup_steps=args.warmup_steps,
     )
     print(dumps_json({
@@ -117,6 +129,11 @@ def main() -> None:
             "warmup_steps": args.warmup_steps,
             "grad_accum": args.grad_accum,
             "compile": args.compile,
+            "meter_fast_mode": args.meter_fast_mode,
+            "collect_profile": args.collect_profile,
+            "profile_sync": args.profile_sync,
+            "profile_distribution": args.profile_distribution,
+            "profile_window": args.profile_window,
         },
         "metrics": metrics,
     }))
