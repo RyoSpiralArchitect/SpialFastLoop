@@ -2727,6 +2727,127 @@ def test_profile_flat_metrics_include_open_timer_counts() -> None:
     assert "profile_flat_metric_invalid_fields" not in metrics
 
 
+def test_profile_flat_metrics_include_forward_drilldown_position() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "profile_total_s": 1.0,
+        "phases": {
+            "forward": {"total_s": 0.1, "pct": 10.0, "avg_ms": 10.0},
+        },
+        "phase_breakdowns": {
+            "forward": {
+                "tracked_s": 0.07,
+                "untracked_s": 0.03,
+                "overtracked_s": 0.02,
+                "children": {
+                    "model.0": {"total_s": 0.04},
+                    "model.2": {"total_s": 0.03},
+                },
+                "top_children": [
+                    {
+                        "name": "model.0",
+                        "total_s": 0.04,
+                        "pct_of_parent": 40.0,
+                        "avg_ms": 4.0,
+                        "calls": 2,
+                    },
+                ],
+            },
+        },
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert metrics["profile_forward_child_count"] == 2
+    assert metrics["profile_forward_tracked_time_s"] == pytest.approx(0.07)
+    assert metrics["profile_forward_untracked_time_s"] == pytest.approx(0.03)
+    assert metrics["profile_forward_overtracked_time_s"] == pytest.approx(0.02)
+    assert metrics["profile_forward_top_time_s"] == pytest.approx(0.04)
+    assert metrics["profile_forward_top_pct_of_parent"] == pytest.approx(40.0)
+    assert metrics["profile_forward_top_avg_ms"] == pytest.approx(4.0)
+    assert metrics["profile_forward_top_calls"] == 2
+    assert metrics["profile_flat_metric_invalid_count"] == 0
+    assert "profile_flat_metric_invalid_fields" not in metrics
+
+
+def test_profile_flat_metrics_tolerate_partial_forward_drilldown_rows() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "profile_total_s": 1.0,
+        "phases": {},
+        "phase_breakdowns": {
+            "forward": {
+                "children": {"model.0": {}},
+                "top_children": [
+                    {
+                        "name": "model.0",
+                        "avg_ms": 4.0,
+                    },
+                ],
+            },
+        },
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert metrics["profile_forward_child_count"] == 1
+    assert metrics["profile_forward_top_avg_ms"] == pytest.approx(4.0)
+    assert "profile_forward_tracked_time_s" not in metrics
+    assert "profile_forward_untracked_time_s" not in metrics
+    assert "profile_forward_overtracked_time_s" not in metrics
+    assert "profile_forward_top_time_s" not in metrics
+    assert "profile_forward_top_pct_of_parent" not in metrics
+    assert "profile_forward_top_calls" not in metrics
+    assert metrics["profile_flat_metric_invalid_count"] == 0
+    assert "profile_flat_metric_invalid_fields" not in metrics
+
+
+def test_profile_flat_metrics_reject_invalid_forward_drilldown_values() -> None:
+    metrics: dict[str, object] = {}
+    profile = {
+        "profile_total_s": 1.0,
+        "phases": {},
+        "phase_breakdowns": {
+            "forward": {
+                "tracked_s": -0.07,
+                "untracked_s": "missing",
+                "overtracked_s": True,
+                "children": {"model.0": {}},
+                "top_children": [
+                    {
+                        "name": "model.0",
+                        "total_s": float("nan"),
+                        "pct_of_parent": "bad",
+                        "avg_ms": -4.0,
+                        "calls": 1.5,
+                    },
+                ],
+            },
+        },
+    }
+
+    _add_profile_phase_metrics(metrics, profile)
+
+    assert metrics["profile_forward_child_count"] == 1
+    assert "profile_forward_tracked_time_s" not in metrics
+    assert "profile_forward_untracked_time_s" not in metrics
+    assert "profile_forward_overtracked_time_s" not in metrics
+    assert "profile_forward_top_time_s" not in metrics
+    assert "profile_forward_top_pct_of_parent" not in metrics
+    assert "profile_forward_top_avg_ms" not in metrics
+    assert "profile_forward_top_calls" not in metrics
+    assert metrics["profile_flat_metric_invalid_count"] == 7
+    assert metrics["profile_flat_metric_invalid_fields"] == [
+        "profile_forward_tracked_time_s",
+        "profile_forward_untracked_time_s",
+        "profile_forward_overtracked_time_s",
+        "profile_forward_top_time_s",
+        "profile_forward_top_pct_of_parent",
+        "profile_forward_top_avg_ms",
+        "profile_forward_top_calls",
+    ]
+
+
 def test_profile_flat_metrics_include_backward_event_position() -> None:
     metrics: dict[str, object] = {}
     profile = {

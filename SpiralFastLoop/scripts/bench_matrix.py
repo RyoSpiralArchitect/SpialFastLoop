@@ -236,6 +236,13 @@ def _format_summary_row(row: dict) -> str:
     forward_backward_pct = _measured_summary_value(row, "mean_profile_forward_backward_pct")
     if forward_backward_pct is not None:
         profile_parts.append(f"fwd+bwd={forward_backward_pct:.1f}%")
+    forward_top_pct = _measured_summary_value(row, "mean_profile_forward_top_pct_of_parent")
+    forward_top_avg_ms = _measured_summary_value(row, "mean_profile_forward_top_avg_ms")
+    if forward_top_pct is not None:
+        forward_text = f"fwd_top={forward_top_pct:.1f}%"
+        if forward_top_avg_ms is not None:
+            forward_text = f"{forward_text}@{forward_top_avg_ms:.2f}ms"
+        profile_parts.append(forward_text)
     loss_pct = _measured_summary_value(row, "mean_profile_loss_pct")
     if loss_pct is not None:
         profile_parts.append(f"loss={loss_pct:.1f}%")

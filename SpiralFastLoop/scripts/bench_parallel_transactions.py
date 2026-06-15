@@ -165,6 +165,17 @@ PROFILE_PHASE_SUMMARY_FIELDS = (
     "profile_metrics_avg_ms",
 )
 
+PROFILE_FORWARD_BREAKDOWN_SUMMARY_FIELDS = (
+    "profile_forward_child_count",
+    "profile_forward_tracked_time_s",
+    "profile_forward_untracked_time_s",
+    "profile_forward_overtracked_time_s",
+    "profile_forward_top_time_s",
+    "profile_forward_top_pct_of_parent",
+    "profile_forward_top_avg_ms",
+    "profile_forward_top_calls",
+)
+
 PROFILE_EVENT_SUMMARY_FIELDS = (
     "profile_backward_grad_ready_child_count",
     "profile_backward_grad_ready_parent_avg_ms",
@@ -181,6 +192,7 @@ PROFILE_MODEL_SUMMARY_FIELDS = (
 
 PROFILE_SUMMARY_FIELDS = (
     PROFILE_PHASE_SUMMARY_FIELDS
+    + PROFILE_FORWARD_BREAKDOWN_SUMMARY_FIELDS
     + PROFILE_EVENT_SUMMARY_FIELDS
     + PROFILE_MODEL_SUMMARY_FIELDS
 )
@@ -209,6 +221,8 @@ SUMMARY_INTEGER_FIELDS = (
         "profile_flat_metric_invalid_count",
         "profile_open_phase_count",
         "profile_open_detail_count",
+        "profile_forward_child_count",
+        "profile_forward_top_calls",
         "profile_backward_grad_ready_child_count",
         "profile_backward_grad_ready_top_calls",
         "profile_model_modules_selected",
@@ -303,6 +317,14 @@ BEST_RUN_FIELDS = (
     "profile_forward_backward_pct",
     "profile_forward_backward_time_s",
     "profile_forward_pct",
+    "profile_forward_child_count",
+    "profile_forward_tracked_time_s",
+    "profile_forward_untracked_time_s",
+    "profile_forward_overtracked_time_s",
+    "profile_forward_top_time_s",
+    "profile_forward_top_pct_of_parent",
+    "profile_forward_top_avg_ms",
+    "profile_forward_top_calls",
     "profile_loss_pct",
     "profile_loss_reduce_pct",
     "profile_backward_pct",
@@ -379,6 +401,8 @@ BEST_RUN_INTEGER_FIELDS = frozenset({
     "profile_flat_metric_invalid_count",
     "profile_open_phase_count",
     "profile_open_detail_count",
+    "profile_forward_child_count",
+    "profile_forward_top_calls",
     "profile_backward_grad_ready_child_count",
     "profile_backward_grad_ready_top_calls",
     "profile_model_modules_selected",

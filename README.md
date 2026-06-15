@@ -67,9 +67,13 @@ print(metrics["profile"]["phase_events"]["backward_grad_ready"]["top_children"][
 `phase_breakdowns.forward` and backward gradient-ready timings under
 `phase_events.backward_grad_ready`. Use `profile_model_include="layer1,layer4"`
 with `profile_model_depth=2` to drill into selected blocks without hooking the
-entire model. The top-level phases include `data_wait`, so loader stalls can be
-separated from compute time. Throughput summaries include `p99_s` and
-`std_batch_s`, and optimizer internals are exposed under
+entire model. Benchmark summaries also flatten the forward drilldown into
+fields such as `profile_forward_child_count`, `profile_forward_top_avg_ms`,
+and `profile_forward_top_pct_of_parent`, plus backward gradient-ready fields
+such as `profile_backward_grad_ready_top_avg_ms` and
+`profile_backward_grad_ready_top_pct`. The top-level phases include `data_wait`,
+so loader stalls can be separated from compute time. Throughput summaries include
+`p99_s` and `std_batch_s`, and optimizer internals are exposed under
 `phase_breakdowns.optimizer`. Set `profile_sync=True` only when you need stricter
 accelerator timings; it synchronizes around profiled regions and slows the run
 down. Use `--no-profile-distribution` in benchmark scripts to keep totals while

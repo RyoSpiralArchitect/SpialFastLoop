@@ -127,6 +127,24 @@ def test_format_summary_row_includes_profile_suffix_when_available() -> None:
     assert "opt=12.0%" in formatted
 
 
+def test_format_summary_row_includes_forward_top_position() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_forward_top_pct_of_parent": 125.0,
+        "sample_count_profile_forward_top_pct_of_parent": 2.0,
+        "mean_profile_forward_top_avg_ms": 6.25,
+        "sample_count_profile_forward_top_avg_ms": 2.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "fwd_top=125.0%@6.25ms" in formatted
+
+
 def test_format_summary_row_includes_setup_breakdown_when_available() -> None:
     row = {
         "dataset_mode": "generated",
@@ -690,6 +708,14 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_model_hook_failures": 1,
             "profile_forward_backward_pct": 40.0,
             "profile_forward_pct": 15.0,
+            "profile_forward_child_count": 1,
+            "profile_forward_tracked_time_s": 0.05,
+            "profile_forward_untracked_time_s": 0.01,
+            "profile_forward_overtracked_time_s": 0.0,
+            "profile_forward_top_time_s": 0.03,
+            "profile_forward_top_pct_of_parent": 30.0,
+            "profile_forward_top_avg_ms": 3.0,
+            "profile_forward_top_calls": 1,
             "profile_loss_pct": 4.0,
             "profile_loss_reduce_pct": 1.0,
             "profile_backward_pct": 25.0,
@@ -765,6 +791,14 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_model_hook_failures": 0,
             "profile_forward_backward_pct": 60.0,
             "profile_forward_pct": 20.0,
+            "profile_forward_child_count": 3,
+            "profile_forward_tracked_time_s": 0.09,
+            "profile_forward_untracked_time_s": 0.02,
+            "profile_forward_overtracked_time_s": 0.01,
+            "profile_forward_top_time_s": 0.07,
+            "profile_forward_top_pct_of_parent": 70.0,
+            "profile_forward_top_avg_ms": 7.0,
+            "profile_forward_top_calls": 3,
             "profile_loss_pct": 8.0,
             "profile_loss_reduce_pct": 3.0,
             "profile_backward_pct": 40.0,
@@ -824,6 +858,14 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "profile_model_hook_failures": 0,
             "profile_forward_backward_pct": 55.0,
             "profile_forward_pct": 25.0,
+            "profile_forward_child_count": 2,
+            "profile_forward_tracked_time_s": 0.06,
+            "profile_forward_untracked_time_s": 0.02,
+            "profile_forward_overtracked_time_s": 0.0,
+            "profile_forward_top_time_s": 0.055,
+            "profile_forward_top_pct_of_parent": 55.0,
+            "profile_forward_top_avg_ms": 5.5,
+            "profile_forward_top_calls": 2,
             "profile_loss_pct": 6.0,
             "profile_loss_reduce_pct": 2.0,
             "profile_backward_pct": 30.0,
@@ -894,6 +936,14 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["mean_profile_model_hook_failures"] == pytest.approx(0.5)
     assert generated["profile_model_status_counts"] == {"hook_failures": 1, "ok": 1}
     assert generated["mean_profile_forward_backward_pct"] == pytest.approx(50.0)
+    assert generated["mean_profile_forward_child_count"] == pytest.approx(2.0)
+    assert generated["mean_profile_forward_tracked_time_s"] == pytest.approx(0.07)
+    assert generated["mean_profile_forward_untracked_time_s"] == pytest.approx(0.015)
+    assert generated["mean_profile_forward_overtracked_time_s"] == pytest.approx(0.005)
+    assert generated["mean_profile_forward_top_time_s"] == pytest.approx(0.05)
+    assert generated["mean_profile_forward_top_pct_of_parent"] == pytest.approx(50.0)
+    assert generated["mean_profile_forward_top_avg_ms"] == pytest.approx(5.0)
+    assert generated["mean_profile_forward_top_calls"] == pytest.approx(2.0)
     assert generated["mean_profile_loss_pct"] == pytest.approx(6.0)
     assert generated["mean_profile_loss_reduce_pct"] == pytest.approx(2.0)
     assert generated["mean_profile_user_metrics_pct"] == pytest.approx(4.0)
@@ -918,6 +968,9 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert summary["best_reported"]["mean_profile_model_hook_failures"] == pytest.approx(0.0)
     assert summary["best_reported"]["profile_model_status_counts"] == {"ok": 1}
     assert summary["best_reported"]["mean_profile_forward_backward_pct"] == pytest.approx(55.0)
+    assert summary["best_reported"]["mean_profile_forward_top_pct_of_parent"] == pytest.approx(55.0)
+    assert summary["best_reported"]["mean_profile_forward_top_avg_ms"] == pytest.approx(5.5)
+    assert summary["best_reported"]["mean_profile_forward_top_calls"] == pytest.approx(2.0)
     assert summary["best_reported"]["mean_profile_loss_pct"] == pytest.approx(6.0)
     assert summary["best_reported"]["mean_profile_backward_grad_ready_top_pct"] == pytest.approx(45.0)
     assert summary["best_reported"]["mean_profile_backward_grad_ready_top_avg_ms"] == pytest.approx(4.0)

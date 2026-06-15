@@ -207,15 +207,17 @@ def _set_profile_metric_if_present(
     source_name: str,
     invalid_fields: list[str],
     *,
+    min_value: Optional[float] = 0.0,
     max_value: Optional[float] = None,
-) -> None:
+) -> Optional[float]:
     if source_name not in source:
-        return
-    _set_profile_metric(
+        return None
+    return _set_profile_metric(
         metrics,
         name,
         source[source_name],
         invalid_fields,
+        min_value=min_value,
         max_value=max_value,
     )
 
@@ -226,10 +228,70 @@ def _set_profile_count_metric_if_present(
     source: Mapping[str, Any],
     source_name: str,
     invalid_fields: list[str],
-) -> None:
+) -> Optional[int]:
     if source_name not in source:
+        return None
+    return _set_profile_count_metric(metrics, name, source[source_name], invalid_fields)
+
+
+def _add_profile_forward_breakdown_metrics(
+    metrics: Dict[str, Any],
+    profile: Mapping[str, Any],
+    invalid_fields: list[str],
+) -> None:
+    breakdowns = profile.get("phase_breakdowns", {})
+    if not isinstance(breakdowns, Mapping):
         return
-    _set_profile_count_metric(metrics, name, source[source_name], invalid_fields)
+    group = breakdowns.get("forward")
+    if not isinstance(group, Mapping):
+        return
+
+    children = group.get("children", {})
+    if isinstance(children, Mapping):
+        metrics["profile_forward_child_count"] = len(children)
+    for source_name, metric_name in (
+        ("tracked_s", "profile_forward_tracked_time_s"),
+        ("untracked_s", "profile_forward_untracked_time_s"),
+        ("overtracked_s", "profile_forward_overtracked_time_s"),
+    ):
+        _set_profile_metric_if_present(metrics, metric_name, group, source_name, invalid_fields)
+
+    top_children = group.get("top_children", ())
+    if not isinstance(top_children, Sequence) or isinstance(top_children, (str, bytes)):
+        invalid_fields.append("profile_forward_top_child")
+        return
+    top_child = next((row for row in top_children if isinstance(row, Mapping)), None)
+    if top_child is None:
+        return
+
+    _set_profile_metric_if_present(
+        metrics,
+        "profile_forward_top_time_s",
+        top_child,
+        "total_s",
+        invalid_fields,
+    )
+    _set_profile_metric_if_present(
+        metrics,
+        "profile_forward_top_pct_of_parent",
+        top_child,
+        "pct_of_parent",
+        invalid_fields,
+    )
+    _set_profile_metric_if_present(
+        metrics,
+        "profile_forward_top_avg_ms",
+        top_child,
+        "avg_ms",
+        invalid_fields,
+    )
+    _set_profile_count_metric_if_present(
+        metrics,
+        "profile_forward_top_calls",
+        top_child,
+        "calls",
+        invalid_fields,
+    )
 
 
 def _add_profile_backward_event_metrics(
@@ -345,6 +407,7 @@ def _add_profile_phase_metrics(metrics: Dict[str, Any], profile: Mapping[str, An
             metrics["profile_forward_backward_pct"] = forward_backward_pct
         else:
             invalid_fields.append("profile_forward_backward_pct")
+    _add_profile_forward_breakdown_metrics(metrics, profile, invalid_fields)
     _add_profile_backward_event_metrics(metrics, profile, invalid_fields)
     _record_profile_flat_metric_invalids(metrics, invalid_fields)
 

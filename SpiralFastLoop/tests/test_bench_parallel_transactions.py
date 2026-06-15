@@ -514,6 +514,14 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "profile_forward_backward_pct": 40.0,
             "profile_forward_backward_time_s": 0.20,
             "profile_forward_pct": 15.0,
+            "profile_forward_child_count": 1,
+            "profile_forward_tracked_time_s": 0.05,
+            "profile_forward_untracked_time_s": 0.01,
+            "profile_forward_overtracked_time_s": 0.0,
+            "profile_forward_top_time_s": 0.04,
+            "profile_forward_top_pct_of_parent": 40.0,
+            "profile_forward_top_avg_ms": 4.0,
+            "profile_forward_top_calls": 2,
             "profile_loss_pct": 5.0,
             "profile_loss_reduce_pct": 2.0,
             "profile_backward_pct": 25.0,
@@ -599,6 +607,14 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "profile_forward_backward_pct": 60.0,
             "profile_forward_backward_time_s": 0.30,
             "profile_forward_pct": 20.0,
+            "profile_forward_child_count": 2,
+            "profile_forward_tracked_time_s": 0.08,
+            "profile_forward_untracked_time_s": 0.02,
+            "profile_forward_overtracked_time_s": 0.01,
+            "profile_forward_top_time_s": 0.06,
+            "profile_forward_top_pct_of_parent": 60.0,
+            "profile_forward_top_avg_ms": 6.0,
+            "profile_forward_top_calls": 3,
             "profile_loss_pct": 7.0,
             "profile_loss_reduce_pct": 3.0,
             "profile_backward_pct": 40.0,
@@ -666,6 +682,14 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["max_profile_model_hook_count"] == pytest.approx(4.0)
     assert summary["mean_profile_model_hook_failures"] == pytest.approx(0.5)
     assert summary["mean_profile_forward_backward_pct"] == pytest.approx(50.0)
+    assert summary["mean_profile_forward_child_count"] == pytest.approx(1.5)
+    assert summary["mean_profile_forward_tracked_time_s"] == pytest.approx(0.065)
+    assert summary["mean_profile_forward_untracked_time_s"] == pytest.approx(0.015)
+    assert summary["mean_profile_forward_overtracked_time_s"] == pytest.approx(0.005)
+    assert summary["mean_profile_forward_top_time_s"] == pytest.approx(0.05)
+    assert summary["mean_profile_forward_top_pct_of_parent"] == pytest.approx(50.0)
+    assert summary["mean_profile_forward_top_avg_ms"] == pytest.approx(5.0)
+    assert summary["mean_profile_forward_top_calls"] == pytest.approx(2.5)
     assert summary["mean_profile_loss_pct"] == pytest.approx(6.0)
     assert summary["mean_profile_loss_reduce_pct"] == pytest.approx(2.5)
     assert summary["mean_profile_user_metrics_pct"] == pytest.approx(6.0)
@@ -692,6 +716,14 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["best_reported"]["profile_model_hook_failures"] == 0
     assert "profile_model_hook_last_error" not in summary["best_reported"]
     assert summary["best_reported"]["profile_forward_backward_pct"] == pytest.approx(60.0)
+    assert summary["best_reported"]["profile_forward_child_count"] == 2
+    assert summary["best_reported"]["profile_forward_tracked_time_s"] == pytest.approx(0.08)
+    assert summary["best_reported"]["profile_forward_untracked_time_s"] == pytest.approx(0.02)
+    assert summary["best_reported"]["profile_forward_overtracked_time_s"] == pytest.approx(0.01)
+    assert summary["best_reported"]["profile_forward_top_time_s"] == pytest.approx(0.06)
+    assert summary["best_reported"]["profile_forward_top_pct_of_parent"] == pytest.approx(60.0)
+    assert summary["best_reported"]["profile_forward_top_avg_ms"] == pytest.approx(6.0)
+    assert summary["best_reported"]["profile_forward_top_calls"] == 3
     assert summary["best_reported"]["profile_loss_pct"] == pytest.approx(7.0)
     assert summary["best_reported"]["profile_backward_grad_ready_child_count"] == 2
     assert summary["best_reported"]["profile_backward_grad_ready_parent_avg_ms"] == pytest.approx(14.0)
