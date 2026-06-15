@@ -406,7 +406,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--runs", type=positive_int_arg, default=1)
     parser.add_argument("--learning-rate", type=positive_float_arg, default=3e-4)
     parser.add_argument("--seed", type=_int_arg, default=1234)
-    parser.add_argument("--meter-fast-mode", action="store_true")
+    parser.add_argument("--meter-fast-mode", action="store_true", help="Use lighter throughput meters without tail/window stats.")
     parser.add_argument("--device", type=device_arg, default="auto")
     parser.add_argument("--prefetch-factor", type=positive_int_arg, default=4)
     parser.add_argument("--log-interval", type=non_negative_int_arg, default=0)

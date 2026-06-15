@@ -233,6 +233,7 @@ def parse_args() -> argparse.Namespace:
         help="Disable torch.compile for lower cold-start cost.",
     )
     parser.add_argument("--learning-rate", type=positive_float_arg, default=3e-4)
+    parser.add_argument("--meter-fast-mode", action="store_true", help="Use lighter throughput meters without tail/window stats.")
     parser.add_argument("--profile-sync", action="store_true")
     parser.add_argument("--profile-window", type=positive_int_arg, default=256)
     parser.add_argument("--profile-model-depth", type=positive_int_arg, default=2)
@@ -272,6 +273,7 @@ def main() -> None:
         use_compile=args.compile,
         grad_accum=args.grad_accum,
         log_interval=max(args.steps + 1, 1),
+        meter_fast_mode=args.meter_fast_mode,
     )
 
     metrics = trainer.train_one_epoch(
@@ -296,6 +298,7 @@ def main() -> None:
         "steps": args.steps,
         "warmup_steps": args.warmup_steps,
         "compile": args.compile,
+        "meter_fast_mode": args.meter_fast_mode,
         "profile_model_include": args.profile_model_include,
         "profile_model_depth": args.profile_model_depth,
         "metrics": metrics,

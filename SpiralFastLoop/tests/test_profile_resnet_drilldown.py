@@ -412,6 +412,7 @@ def test_resnet_drilldown_parse_args_accepts_valid_fake_run(
             "1",
             "--learning-rate",
             "0.001",
+            "--meter-fast-mode",
             "--profile-window",
             "8",
             "--profile-model-depth",
@@ -430,6 +431,7 @@ def test_resnet_drilldown_parse_args_accepts_valid_fake_run(
     assert args.batch_size == 4
     assert args.steps == 1
     assert args.warmup_steps == 1
+    assert args.meter_fast_mode is True
     assert args.topk == 2
 
 

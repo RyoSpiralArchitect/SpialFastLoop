@@ -180,6 +180,24 @@ def test_plain_loop_rejects_invalid_direct_warmup_steps(warmup_steps: object) ->
         )
 
 
+@pytest.mark.parametrize("meter_fast_mode", [1, "true"])
+def test_plain_loop_rejects_invalid_direct_meter_fast_mode(meter_fast_mode: object) -> None:
+    dataset = TensorDataset(torch.randn(2, 2), torch.tensor([0, 1]))
+    loader = DataLoader(dataset, batch_size=1)
+    model = nn.Linear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+    with pytest.raises(ValueError, match="meter_fast_mode"):
+        bench.plain_loop(
+            loader,
+            model,
+            optimizer,
+            nn.CrossEntropyLoss(),
+            torch.device("cpu"),
+            meter_fast_mode=meter_fast_mode,  # type: ignore[arg-type]
+        )
+
+
 def test_plain_loop_rejects_direct_warmup_larger_than_steps() -> None:
     dataset = TensorDataset(torch.randn(4, 2), torch.tensor([0, 1, 0, 1]))
     loader = DataLoader(dataset, batch_size=1)
@@ -292,6 +310,28 @@ def test_plain_loop_splits_warmup_and_reported_throughput() -> None:
     assert metrics["reported_samples_per_sec"] == metrics["steady_samples_per_sec"]
 
 
+def test_plain_loop_fast_meter_mode_disables_tail_tracking() -> None:
+    dataset = TensorDataset(torch.randn(4, 2), torch.tensor([0, 1, 0, 1]))
+    loader = DataLoader(dataset, batch_size=1, shuffle=False)
+    model = nn.Linear(2, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+    metrics = bench.plain_loop(
+        loader,
+        model,
+        optimizer,
+        nn.CrossEntropyLoss(),
+        torch.device("cpu"),
+        steps=2,
+        meter_fast_mode=True,
+    )
+
+    assert metrics["distribution_tracked"] is False
+    assert metrics["window_tracked"] is False
+    assert metrics["steady_distribution_tracked"] is False
+    assert metrics["steady_window_tracked"] is False
+
+
 def test_plain_loop_rejects_backward_batch_timer(monkeypatch: pytest.MonkeyPatch) -> None:
     timestamps = iter([0.0, 0.0, 0.0, 0.0, 2.0, 1.0, 3.0])
     monkeypatch.setattr(bench.time, "perf_counter", lambda: next(timestamps))
@@ -356,6 +396,7 @@ def test_bench_parse_args_accepts_valid_minimal_run(monkeypatch: pytest.MonkeyPa
             "0.001",
             "--log-interval",
             "0",
+            "--meter-fast-mode",
         ],
     )
 
@@ -367,6 +408,7 @@ def test_bench_parse_args_accepts_valid_minimal_run(monkeypatch: pytest.MonkeyPa
     assert args.grad_accum == 1
     assert args.workers == 0
     assert args.learning_rate == pytest.approx(0.001)
+    assert args.meter_fast_mode is True
 
 
 @pytest.mark.parametrize(

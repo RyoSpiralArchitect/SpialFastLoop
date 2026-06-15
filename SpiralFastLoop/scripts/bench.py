@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from spiralfastloop import FastTrainer, recommended_dataloader
 from spiralfastloop.utils import (
     ThroughputMeter,
+    _bool_setting,
     _finite_float_setting,
     _non_negative_int_setting,
     _non_negative_finite_float_setting,
@@ -114,19 +115,21 @@ def plain_loop(
     steps: Optional[int] = None,
     grad_accum: int = 1,
     warmup_steps: int = 0,
+    meter_fast_mode: bool = False,
 ) -> dict[str, float]:
     epochs = _positive_int_setting(epochs, "epochs")
     step_limit = _optional_positive_int_setting(steps, "steps")
     grad_accum = _positive_int_setting(grad_accum, "grad_accum")
     warmup_step_limit = _non_negative_int_setting(warmup_steps, "warmup_steps")
+    meter_fast_mode_value = _bool_setting(meter_fast_mode, "meter_fast_mode")
     if step_limit is not None and warmup_step_limit > step_limit:
         raise ValueError("warmup_steps must be less than or equal to steps")
     model.to(device).train()
     optimizer.zero_grad(set_to_none=True)
     start = time.perf_counter()
-    meter = ThroughputMeter()
-    warmup_meter = ThroughputMeter()
-    steady_meter = ThroughputMeter()
+    meter = ThroughputMeter(fast_mode=meter_fast_mode_value)
+    warmup_meter = ThroughputMeter(fast_mode=meter_fast_mode_value)
+    steady_meter = ThroughputMeter(fast_mode=meter_fast_mode_value)
     step_count = 0
     samples = 0
     loss_acc = 0.0
@@ -266,6 +269,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", type=device_arg, default="auto")
     parser.add_argument("--log-interval", type=non_negative_int_arg, default=0)
     parser.add_argument("--no-compile", dest="compile", action="store_false")
+    parser.add_argument("--meter-fast-mode", action="store_true", help="Use lighter throughput meters without tail/window stats.")
     parser.add_argument("--collect-profile", action="store_true")
     args = parser.parse_args()
     try:
@@ -299,6 +303,7 @@ def main() -> None:
         steps=args.steps,
         grad_accum=args.grad_accum,
         warmup_steps=args.warmup_steps,
+        meter_fast_mode=args.meter_fast_mode,
     )
 
     loader = recommended_dataloader(
@@ -318,6 +323,7 @@ def main() -> None:
         grad_accum=args.grad_accum,
         channels_last=False,
         log_interval=args.log_interval,
+        meter_fast_mode=args.meter_fast_mode,
     )
     fast = trainer.train_one_epoch(
         loader,
