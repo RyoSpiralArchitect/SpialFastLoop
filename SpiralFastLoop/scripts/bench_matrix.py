@@ -18,6 +18,7 @@ from bench_parallel_transactions import (
     _finite_summary_value,
     _format_metric_value,
     _int_arg,
+    _positive_sample_count_value,
     _summary_metric_max_value,
     _summary_metric_min_value,
     count_profiled_rows,
@@ -191,10 +192,8 @@ def _measured_summary_value(row: dict, mean_field: str) -> Optional[float]:
         return None
     sample_count_field = f"sample_count_{metric_name}"
     if sample_count_field in row:
-        sample_count = _finite_summary_value(row[sample_count_field])
+        sample_count = _positive_sample_count_value(row[sample_count_field])
         if sample_count is None:
-            return None
-        if sample_count <= 0.0:
             return None
     return value
 

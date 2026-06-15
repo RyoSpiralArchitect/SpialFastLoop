@@ -196,6 +196,16 @@ def test_measured_summary_value_rejects_negative_values() -> None:
     ) is None
 
 
+def test_measured_summary_value_rejects_fractional_sample_count() -> None:
+    assert _measured_summary_value(
+        {
+            "mean_reported_samples_per_sec": 100.0,
+            "sample_count_reported_samples_per_sec": 0.5,
+        },
+        "mean_reported_samples_per_sec",
+    ) is None
+
+
 def test_measured_summary_value_rejects_out_of_range_percentages() -> None:
     assert _measured_summary_value(
         {"mean_profile_forward_backward_pct": 125.0},

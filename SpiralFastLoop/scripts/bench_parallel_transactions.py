@@ -336,6 +336,15 @@ def _finite_metric_value(row: dict, field: str, *, min_value: Optional[float] = 
     return value
 
 
+def _positive_sample_count_value(raw: object) -> Optional[float]:
+    value = _finite_summary_value(raw)
+    if value is None or value <= 0.0:
+        return None
+    if not value.is_integer():
+        return None
+    return value
+
+
 def _summary_metric_max_value(field: str) -> Optional[float]:
     return 100.0 if field.endswith("_pct") else None
 
@@ -355,8 +364,8 @@ def _best_finite_row(
     candidates = []
     for row in rows:
         if sample_count_field is not None and sample_count_field in row:
-            sample_count = _finite_metric_value(row, sample_count_field, min_value=0.0)
-            if sample_count is None or sample_count <= 0.0:
+            sample_count = _positive_sample_count_value(row[sample_count_field])
+            if sample_count is None:
                 continue
         value = _finite_metric_value(row, field, min_value=min_value)
         if value is None:

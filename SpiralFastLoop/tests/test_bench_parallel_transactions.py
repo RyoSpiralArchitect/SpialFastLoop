@@ -1075,6 +1075,22 @@ def test_best_finite_row_requires_positive_sample_count() -> None:
     assert best == rows[3]
 
 
+def test_best_finite_row_rejects_fractional_sample_count() -> None:
+    rows = [
+        {"run": 0, "mean_score": 300.0, "sample_count_score": 0.5},
+        {"run": 1, "mean_score": 250.0, "sample_count_score": 1.0},
+    ]
+
+    best = _best_finite_row(
+        rows,
+        "mean_score",
+        prefer_high=True,
+        sample_count_field="sample_count_score",
+    )
+
+    assert best == rows[1]
+
+
 def test_best_finite_row_rejects_bool_rank_values() -> None:
     rows = [
         {"run": 0, "mean_score": True},
