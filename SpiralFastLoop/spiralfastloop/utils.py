@@ -594,13 +594,13 @@ class ThroughputMeter:
             tb: Any,
         ) -> Literal[False]:
             end = self._meter._now()
-            self._meter.last = end
             if self._start is None:
                 return False
-            duration = max(0.0, end - self._start)
+            duration = _non_negative_finite_float_setting(end - self._start, "duration_s")
             should_record = exc_type is None or self._record_on_exception
             if should_record:
                 self._meter.record(duration, self._batch_size)
+            self._meter.last = end
             return False
 
     def __init__(
@@ -672,7 +672,7 @@ class ThroughputMeter:
     def tick(self, batch_size: int) -> None:
         batch_size_int = _positive_int_setting(batch_size, "batch_size")
         now = self._now()
-        elapsed = max(0.0, now - self.last)
+        elapsed = _non_negative_finite_float_setting(now - self.last, "duration_s")
         self.last = now
         self.record(elapsed, batch_size_int)
 

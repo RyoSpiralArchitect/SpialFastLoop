@@ -115,7 +115,15 @@ class NormalizationMetricsCollector:
     # Accessors
     # ------------------------------------------------------------------
     def events(self) -> List[NormalizationEvent]:
-        return list(self._history)
+        return [
+            NormalizationEvent(
+                timestamp=event.timestamp,
+                before=event.before,
+                after=event.after,
+                context=event.context,
+            )
+            for event in self._history
+        ]
 
     def summary(self) -> Dict[str, float]:
         avg_before = self._sum_abs_before / self.total_events if self.total_events else 0.0

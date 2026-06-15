@@ -56,6 +56,21 @@ def test_collector_tracks_events_and_summary(tmp_path):
     assert rows[0]["context"] == "buffer"
 
 
+def test_collector_events_returns_snapshots_not_live_history():
+    collector = NormalizationMetricsCollector(history_limit=2)
+    collector.record(1.0, 0.0, context="buffer", timestamp=1.0)
+
+    event = collector.events()[0]
+    event.before = 99.0
+    event.after = 88.0
+    event.context = "mutated"
+
+    timeseries = collector.to_timeseries()
+    assert timeseries[0]["before"] == 1.0
+    assert timeseries[0]["after"] == 0.0
+    assert timeseries[0]["context"] == "buffer"
+
+
 def test_collector_export_csv_creates_parent_dirs_and_accepts_pathlike(tmp_path):
     collector = NormalizationMetricsCollector(history_limit=2)
     collector.record(1.0, 0.0, context="正規化", timestamp=1.0)

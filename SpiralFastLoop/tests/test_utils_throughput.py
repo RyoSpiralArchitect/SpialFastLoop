@@ -201,6 +201,19 @@ def test_throughput_meter_tick_rejects_invalid_time_values_without_mutating_stat
     assert meter.summary() == summary_before
 
 
+def test_throughput_meter_tick_rejects_backward_time_without_mutating_state():
+    values = iter([1.0, 0.5])
+    meter = ThroughputMeter(time_fn=lambda: next(values))
+    summary_before = meter.summary()
+    last_before = meter.last
+
+    with pytest.raises(ValueError, match="duration_s"):
+        meter.tick(batch_size=4)
+
+    assert meter.last == last_before
+    assert meter.summary() == summary_before
+
+
 @pytest.mark.parametrize("batch_size", [0, -5, 1.5, "2", True, _FailingIndex()])
 def test_throughput_meter_tick_rejects_invalid_batch_sizes_without_mutating_state(batch_size: object):
     calls: list[float] = []
@@ -412,6 +425,20 @@ def test_throughput_meter_time_batch_rejects_invalid_exit_time_without_mutating_
     last_before = meter.last
 
     with pytest.raises(ValueError, match="time_fn"):
+        with meter.time_batch(4):
+            pass
+
+    assert meter.last == last_before
+    assert meter.summary() == summary_before
+
+
+def test_throughput_meter_time_batch_rejects_backward_exit_time_without_mutating_state():
+    values = iter([1.0, 2.0, 1.5])
+    meter = ThroughputMeter(time_fn=lambda: next(values))
+    summary_before = meter.summary()
+    last_before = meter.last
+
+    with pytest.raises(ValueError, match="duration_s"):
         with meter.time_batch(4):
             pass
 
