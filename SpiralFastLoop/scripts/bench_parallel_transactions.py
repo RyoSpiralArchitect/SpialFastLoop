@@ -722,6 +722,33 @@ def _format_profile_open_timer_summary(profile: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+def _format_profile_model_hook_summary(metrics: dict[str, Any]) -> str:
+    requested = metrics.get("profile_model_requested")
+    status_raw = metrics.get("profile_model_status")
+    status = status_raw.strip() if isinstance(status_raw, str) else ""
+    if requested is not True and status != "hook_failures":
+        return ""
+
+    parts = []
+    if status and status != "not_requested":
+        parts.append(f"status={status}")
+    failure_count: Optional[int] = None
+    for field, label in (
+        ("profile_model_modules_selected", "modules"),
+        ("profile_model_hook_count", "hooks"),
+        ("profile_model_hook_failures", "failures"),
+    ):
+        count = _display_count_value(metrics.get(field))
+        if count is not None:
+            if label == "failures":
+                failure_count = count
+            parts.append(f"{label}={count}")
+    last_error = metrics.get("profile_model_hook_last_error")
+    if isinstance(last_error, str) and last_error.strip() and failure_count != 0:
+        parts.append(f"error={last_error.strip()}")
+    return " ".join(parts)
+
+
 def _profile_child_rows(profile: dict[str, Any], section: str, group: str) -> list[object]:
     sections = _dict_value(profile.get(section))
     group_profile = _dict_value(sections.get(group))
@@ -1073,6 +1100,9 @@ def main() -> None:
                 f"thr={_format_metric_value(metrics.get('steady_samples_per_sec'), precision=1, suffix='/s')} "
                 f"p99_batch={_format_metric_value(metrics.get('steady_p99_s'), precision=2, scale=1e3, suffix='ms')}"
             )
+        profile_model_summary = _format_profile_model_hook_summary(metrics)
+        if profile_model_summary:
+            print(f"  profile_model: {profile_model_summary}")
         profile = _dict_value(metrics.get("profile"))
         if profile:
             open_timer_summary = _format_profile_open_timer_summary(profile)

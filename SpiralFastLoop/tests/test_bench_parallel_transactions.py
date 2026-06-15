@@ -22,6 +22,7 @@ from scripts.bench_parallel_transactions import (
     _format_count,
     _format_metric_value,
     _format_profile_breakdown_summary,
+    _format_profile_model_hook_summary,
     _format_profile_open_timer_summary,
     _has_positive_display_value,
     _profile_row_name,
@@ -1346,6 +1347,42 @@ def test_format_profile_open_timer_summary_omits_zero_and_malformed_values() -> 
             {"parent": "forward", "name": True, "count": 2},
         ],
     }) == "details=1"
+
+
+def test_format_profile_model_hook_summary_reports_requested_counts() -> None:
+    assert _format_profile_model_hook_summary({
+        "profile_model_requested": True,
+        "profile_model_status": "ok",
+        "profile_model_modules_selected": 2,
+        "profile_model_hook_count": 7,
+        "profile_model_hook_failures": 0,
+    }) == "status=ok modules=2 hooks=7 failures=0"
+
+
+def test_format_profile_model_hook_summary_reports_failures_with_error() -> None:
+    assert _format_profile_model_hook_summary({
+        "profile_model_requested": True,
+        "profile_model_status": "hook_failures",
+        "profile_model_modules_selected": 2,
+        "profile_model_hook_count": 4,
+        "profile_model_hook_failures": 1,
+        "profile_model_hook_last_error": "RuntimeError: hook boom",
+    }) == "status=hook_failures modules=2 hooks=4 failures=1 error=RuntimeError: hook boom"
+
+
+def test_format_profile_model_hook_summary_hides_not_requested_and_bad_counts() -> None:
+    assert _format_profile_model_hook_summary({
+        "profile_model_requested": False,
+        "profile_model_status": "not_requested",
+        "profile_model_modules_selected": 2,
+    }) == ""
+    assert _format_profile_model_hook_summary({
+        "profile_model_requested": True,
+        "profile_model_status": "no_matching_modules",
+        "profile_model_modules_selected": -1,
+        "profile_model_hook_count": 0.5,
+        "profile_model_hook_failures": True,
+    }) == "status=no_matching_modules"
 
 
 @pytest.mark.parametrize(
