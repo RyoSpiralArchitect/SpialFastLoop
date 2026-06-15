@@ -30,7 +30,7 @@ def json_safe(value: Any, path: str = "$") -> Any:
         return [json_safe(item, f"{path}[]") for item in sorted(value, key=repr)]
     try:
         return json_safe(float(value), path)
-    except (TypeError, ValueError):
+    except (OverflowError, TypeError, ValueError):
         return str(value)
 
 

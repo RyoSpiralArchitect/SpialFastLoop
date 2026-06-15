@@ -253,6 +253,25 @@ def test_dumps_json_normalizes_artifact_payload_values() -> None:
     assert normalized["['tuple', 'key']"] == "value"
 
 
+def test_dumps_json_falls_back_for_overflowing_float_like_values() -> None:
+    class OverflowingFloat:
+        def __float__(self) -> float:
+            raise OverflowError("too large")
+
+        def __str__(self) -> str:
+            return "overflowing"
+
+    payload = {
+        "value": OverflowingFloat(),
+        OverflowingFloat(): "key",
+    }
+
+    normalized = json.loads(dumps_json(payload))
+
+    assert normalized["value"] == "overflowing"
+    assert normalized["overflowing"] == "key"
+
+
 @pytest.mark.parametrize(
     ("payload", "match"),
     [
