@@ -48,8 +48,17 @@ BATCH_SUMMARY_FIELDS = (
     "p99_s",
     "std_batch_s",
     "avg_batch_s",
+    "last_batch_s",
+    "min_batch_s",
+    "max_batch_s",
+    "batches",
     "best_samples_per_sec",
     "headroom_ratio",
+    "ema_samples_per_sec",
+    "window_samples_per_sec",
+    "window_time_s",
+    "window_batches",
+    "window_samples",
 )
 
 WORKLOAD_SUMMARY_FIELDS = (
@@ -162,6 +171,9 @@ DEVICE_MEMORY_SUMMARY_FIELDS = (
 SUMMARY_INTEGER_FIELDS = (
     WORKLOAD_INTEGER_SUMMARY_FIELDS
     | frozenset({
+        "batches",
+        "window_batches",
+        "window_samples",
         "profile_flat_metric_invalid_count",
         "profile_open_phase_count",
         "profile_open_detail_count",
@@ -190,8 +202,18 @@ BEST_RUN_FIELDS = (
     "steady_samples_per_sec",
     "p99_s",
     "std_batch_s",
+    "avg_batch_s",
+    "last_batch_s",
+    "min_batch_s",
+    "max_batch_s",
+    "batches",
     "best_samples_per_sec",
     "headroom_ratio",
+    "ema_samples_per_sec",
+    "window_samples_per_sec",
+    "window_time_s",
+    "window_batches",
+    "window_samples",
     "end_to_end_wall_time_s",
     "setup_time_s",
     "wall_time_s",
@@ -270,6 +292,9 @@ BEST_RUN_BOOL_FIELDS = frozenset({
 })
 BEST_RUN_INTEGER_FIELDS = frozenset({
     "run",
+    "batches",
+    "window_batches",
+    "window_samples",
     "steps",
     "samples",
     "optimizer_steps",

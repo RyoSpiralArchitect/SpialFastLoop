@@ -512,8 +512,18 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "steady_samples_per_sec": 200.0,
             "p99_s": 0.010,
             "std_batch_s": 0.001,
+            "avg_batch_s": 0.004,
+            "last_batch_s": 0.003,
+            "min_batch_s": 0.002,
+            "max_batch_s": 0.007,
+            "batches": 3,
             "best_samples_per_sec": 250.0,
             "headroom_ratio": 1.25,
+            "ema_samples_per_sec": 220.0,
+            "window_samples_per_sec": 210.0,
+            "window_time_s": 0.040,
+            "window_batches": 2,
+            "window_samples": 8,
             "wall_time_s": 1.0,
             "setup_time_s": 0.25,
             "end_to_end_wall_time_s": 1.25,
@@ -569,8 +579,18 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["stddev_wall_time_s"] == pytest.approx(0.5)
     assert summary["mean_p99_s"] == pytest.approx(0.010)
     assert summary["mean_std_batch_s"] == pytest.approx(0.001)
+    assert summary["mean_avg_batch_s"] == pytest.approx(0.004)
+    assert summary["mean_last_batch_s"] == pytest.approx(0.003)
+    assert summary["mean_min_batch_s"] == pytest.approx(0.002)
+    assert summary["mean_max_batch_s"] == pytest.approx(0.007)
+    assert summary["mean_batches"] == pytest.approx(3.0)
     assert summary["mean_best_samples_per_sec"] == pytest.approx(250.0)
     assert summary["mean_headroom_ratio"] == pytest.approx(1.25)
+    assert summary["mean_ema_samples_per_sec"] == pytest.approx(220.0)
+    assert summary["mean_window_samples_per_sec"] == pytest.approx(210.0)
+    assert summary["mean_window_time_s"] == pytest.approx(0.040)
+    assert summary["mean_window_batches"] == pytest.approx(2.0)
+    assert summary["mean_window_samples"] == pytest.approx(8.0)
     assert summary["mean_steps"] == pytest.approx(3.0)
     assert summary["mean_samples"] == pytest.approx(12.0)
     assert summary["mean_optimizer_steps"] == pytest.approx(2.0)
@@ -614,6 +634,16 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["best_reported"]["profile_loss_pct"] == pytest.approx(7.0)
     assert summary["best_reported"]["profile_postprocess_pct"] == pytest.approx(10.0)
     assert summary["best_reported"]["profile_collect_output_pct"] == pytest.approx(5.0)
+    assert summary["best_reported"]["avg_batch_s"] == pytest.approx(0.004)
+    assert summary["best_reported"]["last_batch_s"] == pytest.approx(0.003)
+    assert summary["best_reported"]["min_batch_s"] == pytest.approx(0.002)
+    assert summary["best_reported"]["max_batch_s"] == pytest.approx(0.007)
+    assert summary["best_reported"]["batches"] == 3
+    assert summary["best_reported"]["ema_samples_per_sec"] == pytest.approx(220.0)
+    assert summary["best_reported"]["window_samples_per_sec"] == pytest.approx(210.0)
+    assert summary["best_reported"]["window_time_s"] == pytest.approx(0.040)
+    assert summary["best_reported"]["window_batches"] == 2
+    assert summary["best_reported"]["window_samples"] == 8
     assert summary["best_reported"]["steps"] == 3
     assert summary["best_reported"]["warmup_steps"] == 1
     assert summary["best_reported"]["steady_steps"] == 2

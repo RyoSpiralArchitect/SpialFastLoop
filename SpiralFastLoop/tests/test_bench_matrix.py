@@ -577,8 +577,18 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "steady_samples_per_sec": 100.0,
             "p99_s": 0.020,
             "std_batch_s": 0.002,
+            "avg_batch_s": 0.006,
+            "last_batch_s": 0.007,
+            "min_batch_s": 0.004,
+            "max_batch_s": 0.009,
+            "batches": 3,
             "best_samples_per_sec": 140.0,
             "headroom_ratio": 1.4,
+            "ema_samples_per_sec": 110.0,
+            "window_samples_per_sec": 105.0,
+            "window_time_s": 0.080,
+            "window_batches": 2,
+            "window_samples": 8,
             "end_to_end_wall_time_s": 3.0,
             "setup_time_s": 1.0,
             "wall_time_s": 2.0,
@@ -629,8 +639,18 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "steady_samples_per_sec": 300.0,
             "p99_s": 0.010,
             "std_batch_s": 0.001,
+            "avg_batch_s": 0.004,
+            "last_batch_s": 0.003,
+            "min_batch_s": 0.002,
+            "max_batch_s": 0.006,
+            "batches": 3,
             "best_samples_per_sec": 360.0,
             "headroom_ratio": 1.2,
+            "ema_samples_per_sec": 320.0,
+            "window_samples_per_sec": 310.0,
+            "window_time_s": 0.040,
+            "window_batches": 2,
+            "window_samples": 8,
             "end_to_end_wall_time_s": 1.0,
             "setup_time_s": 0.25,
             "wall_time_s": 0.75,
@@ -742,8 +762,18 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["stddev_end_to_end_wall_time_s"] == pytest.approx(1.0)
     assert generated["mean_p99_s"] == pytest.approx(0.015)
     assert generated["mean_std_batch_s"] == pytest.approx(0.0015)
+    assert generated["mean_avg_batch_s"] == pytest.approx(0.005)
+    assert generated["mean_last_batch_s"] == pytest.approx(0.005)
+    assert generated["mean_min_batch_s"] == pytest.approx(0.003)
+    assert generated["mean_max_batch_s"] == pytest.approx(0.0075)
+    assert generated["mean_batches"] == pytest.approx(3.0)
     assert generated["mean_best_samples_per_sec"] == pytest.approx(250.0)
     assert generated["mean_headroom_ratio"] == pytest.approx(1.3)
+    assert generated["mean_ema_samples_per_sec"] == pytest.approx(215.0)
+    assert generated["mean_window_samples_per_sec"] == pytest.approx(207.5)
+    assert generated["mean_window_time_s"] == pytest.approx(0.06)
+    assert generated["mean_window_batches"] == pytest.approx(2.0)
+    assert generated["mean_window_samples"] == pytest.approx(8.0)
     assert generated["mean_steps"] == pytest.approx(3.0)
     assert generated["mean_samples"] == pytest.approx(12.0)
     assert generated["mean_optimizer_steps"] == pytest.approx(2.0)
