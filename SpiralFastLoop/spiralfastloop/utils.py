@@ -6,6 +6,7 @@ from __future__ import annotations
 import math
 import operator
 import os
+import sys
 import time
 from collections import deque
 from collections.abc import Mapping, MutableMapping
@@ -596,10 +597,14 @@ class ThroughputMeter:
             end = self._meter._now()
             if self._start is None:
                 return False
-            duration = _non_negative_finite_float_setting(end - self._start, "duration_s")
             should_record = exc_type is None or self._record_on_exception
-            if should_record:
-                self._meter.record(duration, self._batch_size)
+            elapsed = end - self._start
+            if not should_record:
+                if elapsed >= 0.0:
+                    self._meter.last = end
+                return False
+            duration = _non_negative_finite_float_setting(elapsed, "duration_s")
+            self._meter.record(duration, self._batch_size)
             self._meter.last = end
             return False
 
@@ -1012,7 +1017,13 @@ class PhaseProfiler:
         start = self._starts.get(key)
         if start is None:
             return
-        self._record(key, time.perf_counter() - start)
+        exception_active = sys.exc_info()[0] is not None
+        try:
+            self._record(key, time.perf_counter() - start)
+        except ValueError:
+            if not exception_active:
+                raise
+            return
         self._starts.pop(key, None)
 
     def cancel(self, name: str) -> None:
@@ -1041,7 +1052,13 @@ class PhaseProfiler:
         if not starts:
             return
         start = starts[-1]
-        self._record_detail(parent_key, name_key, time.perf_counter() - start)
+        exception_active = sys.exc_info()[0] is not None
+        try:
+            self._record_detail(parent_key, name_key, time.perf_counter() - start)
+        except ValueError:
+            if not exception_active:
+                raise
+            return
         starts.pop()
         if not starts:
             self._detail_starts.pop(key, None)
@@ -1057,7 +1074,12 @@ class PhaseProfiler:
         start = self._starts.get(parent_key)
         if start is None:
             return
-        self._record_event(group_key, name_key, time.perf_counter() - start)
+        exception_active = sys.exc_info()[0] is not None
+        try:
+            self._record_event(group_key, name_key, time.perf_counter() - start)
+        except ValueError:
+            if not exception_active:
+                raise
 
     def summary(self) -> Dict[str, Any]:
         if not self.enabled:

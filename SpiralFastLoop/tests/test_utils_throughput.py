@@ -446,6 +446,20 @@ def test_throughput_meter_time_batch_rejects_backward_exit_time_without_mutating
     assert meter.summary() == summary_before
 
 
+def test_throughput_meter_time_batch_preserves_body_exception_on_backward_exit_time():
+    values = iter([1.0, 2.0, 1.5])
+    meter = ThroughputMeter(time_fn=lambda: next(values))
+    summary_before = meter.summary()
+    last_before = meter.last
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with meter.time_batch(4):
+            raise RuntimeError("boom")
+
+    assert meter.last == last_before
+    assert meter.summary() == summary_before
+
+
 def test_p_square_quantile_reports_inconsistent_state() -> None:
     quantile = _PSquareQuantile(0.5)
     quantile._q = [0.1, 0.2, 0.3, 0.4, 0.5]

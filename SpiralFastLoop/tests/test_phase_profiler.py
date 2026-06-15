@@ -349,6 +349,66 @@ def test_phase_profiler_event_rejects_invalid_elapsed_without_mutating_state(
     assert profiler.summary() == profile_before
 
 
+def test_phase_profiler_stop_preserves_body_exception_on_invalid_elapsed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamps = iter([2.0, 1.0])
+    monkeypatch.setattr(utils_mod.time, "perf_counter", lambda: next(timestamps))
+    profiler = PhaseProfiler(enabled=True)
+
+    profiler.start("forward")
+    profile_before = profiler.summary()
+
+    with pytest.raises(RuntimeError, match="boom"):
+        try:
+            raise RuntimeError("boom")
+        finally:
+            profiler.stop("forward")
+
+    assert profiler._starts == {"forward": 2.0}
+    assert profiler.summary() == profile_before
+
+
+def test_phase_profiler_stop_detail_preserves_body_exception_on_invalid_elapsed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamps = iter([2.0, 1.0])
+    monkeypatch.setattr(utils_mod.time, "perf_counter", lambda: next(timestamps))
+    profiler = PhaseProfiler(enabled=True)
+
+    profiler.start_detail("forward", "model.0")
+    profile_before = profiler.summary()
+
+    with pytest.raises(RuntimeError, match="boom"):
+        try:
+            raise RuntimeError("boom")
+        finally:
+            profiler.stop_detail("forward", "model.0")
+
+    assert profiler._detail_starts == {("forward", "model.0"): [2.0]}
+    assert profiler.summary() == profile_before
+
+
+def test_phase_profiler_event_preserves_body_exception_on_invalid_elapsed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamps = iter([2.0, 1.0])
+    monkeypatch.setattr(utils_mod.time, "perf_counter", lambda: next(timestamps))
+    profiler = PhaseProfiler(enabled=True)
+
+    profiler.start("backward")
+    profile_before = profiler.summary()
+
+    with pytest.raises(RuntimeError, match="boom"):
+        try:
+            raise RuntimeError("boom")
+        finally:
+            profiler.record_event_since_start("backward", "backward_grad_ready", "model.0")
+
+    assert profiler._starts == {"backward": 2.0}
+    assert profiler.summary() == profile_before
+
+
 @pytest.mark.parametrize("name", [None, True, "", "   ", object()])
 def test_phase_profiler_rejects_invalid_phase_names_without_mutating_state(name: object) -> None:
     profiler = PhaseProfiler(enabled=True)
