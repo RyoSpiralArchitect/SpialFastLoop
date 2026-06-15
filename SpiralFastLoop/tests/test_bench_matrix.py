@@ -88,6 +88,26 @@ def test_parse_args_rejects_invalid_device(monkeypatch: pytest.MonkeyPatch) -> N
     assert exc_info.value.code == 2
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["bench_matrix.py", "--dataset-modes", "generated,cached"],
+        ["bench_matrix.py", "--compile-modes", "compile,maybe"],
+        ["bench_matrix.py", "--worker-counts", "0,-1"],
+    ],
+)
+def test_parse_args_rejects_invalid_matrix_dimensions(
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+) -> None:
+    monkeypatch.setattr(sys, "argv", argv)
+
+    with pytest.raises(SystemExit) as exc_info:
+        parse_args()
+
+    assert exc_info.value.code == 2
+
+
 def test_format_summary_row_includes_profile_suffix_when_available() -> None:
     row = {
         "dataset_mode": "generated",
@@ -745,6 +765,36 @@ def test_summarize_rows_rejects_invalid_group_metadata(
         "dataset_materialized_bytes": 0,
     }
     row[field] = value
+
+    with pytest.raises(ValueError, match=match):
+        summarize_rows([row])
+
+
+@pytest.mark.parametrize(
+    ("missing_field", "match"),
+    [
+        ("matrix_dataset_mode", "matrix_dataset_mode"),
+        ("matrix_compile_mode", "matrix_compile_mode"),
+        ("matrix_workers", "matrix_workers"),
+    ],
+)
+def test_summarize_rows_rejects_missing_group_metadata(
+    missing_field: str,
+    match: str,
+) -> None:
+    row = {
+        "matrix_dataset_mode": "generated",
+        "matrix_compile_mode": "no-compile",
+        "matrix_workers": 0,
+        "reported_samples_per_sec": 100.0,
+        "samples_per_sec": 80.0,
+        "steady_samples_per_sec": 100.0,
+        "end_to_end_wall_time_s": 1.0,
+        "setup_time_s": 0.25,
+        "wall_time_s": 0.75,
+        "dataset_materialized_bytes": 0,
+    }
+    del row[missing_field]
 
     with pytest.raises(ValueError, match=match):
         summarize_rows([row])

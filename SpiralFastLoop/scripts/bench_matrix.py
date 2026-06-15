@@ -88,19 +88,25 @@ def _summary_choice(raw: object, allowed: set[str], name: str) -> str:
     return value
 
 
+def _required_row_value(row: dict, field: str) -> object:
+    if field not in row:
+        raise ValueError(f"{field} is required")
+    return row[field]
+
+
 def _group_key(row: dict) -> tuple[str, str, int]:
     return (
         _summary_choice(
-            row["matrix_dataset_mode"],
+            _required_row_value(row, "matrix_dataset_mode"),
             {"generated", "materialized"},
             "matrix_dataset_mode",
         ),
         _summary_choice(
-            row["matrix_compile_mode"],
+            _required_row_value(row, "matrix_compile_mode"),
             {"compile", "no-compile"},
             "matrix_compile_mode",
         ),
-        _non_negative_summary_int(row["matrix_workers"], "matrix_workers"),
+        _non_negative_summary_int(_required_row_value(row, "matrix_workers"), "matrix_workers"),
     )
 
 
@@ -262,6 +268,17 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     try:
         validate_benchmark_args(args)
+        _parse_csv_choices(
+            args.dataset_modes,
+            {"generated", "materialized"},
+            name="dataset modes",
+        )
+        _parse_csv_choices(
+            args.compile_modes,
+            {"compile", "no-compile"},
+            name="compile modes",
+        )
+        _parse_worker_counts(args.worker_counts)
     except ValueError as exc:
         parser.error(str(exc))
     return args
