@@ -1160,6 +1160,90 @@ def test_summarize_results_marks_omitted_profile_bottleneck_category_top(
     json.dumps(summary, allow_nan=False)
 
 
+def test_summarize_results_preserves_best_run_profile_bottleneck_context() -> None:
+    category_summary = {
+        "phase_share": {
+            "count": 1,
+            "max_score": 42.0,
+            "total_score": 42.0,
+            "mean_score": 42.0,
+            "pressure_score": 42.0,
+            "pressure_score_unit": "profile_pct",
+            "returned_count": 1,
+            "omitted_count": 0,
+            "score_unit": "profile_pct",
+            "top_candidate": "forward_phase",
+            "top_rank": 1,
+            "top_candidate_returned": True,
+            "top_score": 42.0,
+            "top_score_unit": "profile_pct",
+            "top_metric": "profile_forward_pct",
+            "top_value": 42.0,
+            "top_unit": "profile_pct",
+            "top_score_basis": "direct_metric",
+            "top_score_formula": "score=value",
+            "top_label": "forward phase",
+            "top_reason": "forward owns a large share of profiled loop time",
+            "top_next_step": "inspect forward top-child and tail metrics",
+            "top_severity": "high",
+            "severity_counts": {"high": 1},
+            "pressure_rank": 1,
+        },
+    }
+    top_candidate = {
+        "name": "forward_phase",
+        "metric": "profile_forward_pct",
+        "value": 42.0,
+        "unit": "profile_pct",
+        "score": 42.0,
+        "score_unit": "profile_pct",
+        "rank": 1,
+        "severity": "high",
+    }
+
+    summary = summarize_results([
+        {
+            "run": 0,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 300.0,
+            "samples_per_sec": 280.0,
+            "end_to_end_wall_time_s": 1.0,
+            "profile_bottleneck_candidate_count": 2,
+            "profile_bottleneck_candidate_returned_count": 1,
+            "profile_bottleneck_candidate_limit": 1,
+            "profile_bottleneck_candidate_omitted_count": 1,
+            "profile_bottleneck_candidates": [top_candidate],
+            "profile_bottleneck_top_candidate": top_candidate,
+            "profile_bottleneck_top_category": {
+                **category_summary["phase_share"],
+                "category": "phase_share",
+            },
+            "profile_bottleneck_category_order": ["phase_share"],
+            "profile_bottleneck_severity_counts": {"high": 1},
+            "profile_bottleneck_severity_thresholds": {
+                "score_unit": "profile_pct",
+                "levels": [{"severity": "high", "min_score": 25.0}],
+            },
+            "profile_bottleneck_category_summary": category_summary,
+        },
+    ])
+
+    best_reported = summary["best_reported"]
+
+    assert best_reported["profile_bottleneck_candidate_count"] == 2
+    assert best_reported["profile_bottleneck_candidate_returned_count"] == 1
+    assert best_reported["profile_bottleneck_candidate_limit"] == 1
+    assert best_reported["profile_bottleneck_candidate_omitted_count"] == 1
+    assert best_reported["profile_bottleneck_candidates"] == [top_candidate]
+    assert best_reported["profile_bottleneck_top_candidate"] == top_candidate
+    assert best_reported["profile_bottleneck_top_category"]["category"] == "phase_share"
+    assert best_reported["profile_bottleneck_category_order"] == ["phase_share"]
+    assert best_reported["profile_bottleneck_severity_counts"] == {"high": 1}
+    assert best_reported["profile_bottleneck_severity_thresholds"]["score_unit"] == "profile_pct"
+    assert best_reported["profile_bottleneck_category_summary"] == category_summary
+    json.dumps(summary, allow_nan=False)
+
+
 def test_summarize_results_skips_invalid_profile_bottleneck_candidates() -> None:
     summary = summarize_results([
         {

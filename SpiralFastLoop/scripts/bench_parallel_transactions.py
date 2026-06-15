@@ -30,7 +30,7 @@ from spiralfastloop.utils import (
     _positive_int_setting,
     dataloader_from_dataset,
 )
-from scripts.json_utils import dump_json, dumps_json
+from scripts.json_utils import dump_json, dumps_json, json_safe
 
 BASE_SUMMARY_FIELDS = (
     "reported_samples_per_sec",
@@ -334,6 +334,22 @@ SUMMARY_FIELDS = (
     + DEVICE_MEMORY_SUMMARY_FIELDS
 )
 
+PROFILE_BOTTLENECK_COUNT_FIELDS = (
+    "profile_bottleneck_candidate_count",
+    "profile_bottleneck_candidate_returned_count",
+    "profile_bottleneck_candidate_limit",
+    "profile_bottleneck_candidate_omitted_count",
+)
+PROFILE_BOTTLENECK_OBJECT_FIELDS = (
+    "profile_bottleneck_candidates",
+    "profile_bottleneck_top_candidate",
+    "profile_bottleneck_top_category",
+    "profile_bottleneck_category_order",
+    "profile_bottleneck_severity_counts",
+    "profile_bottleneck_severity_thresholds",
+    "profile_bottleneck_category_summary",
+)
+
 BEST_RUN_FIELDS = (
     "run",
     "seed",
@@ -482,6 +498,8 @@ BEST_RUN_FIELDS = (
     "mps_max_mem_bytes",
     "mps_driver_mem_bytes",
     "mps_recommended_max_mem_bytes",
+    *PROFILE_BOTTLENECK_COUNT_FIELDS,
+    *PROFILE_BOTTLENECK_OBJECT_FIELDS,
 )
 
 DEVICE_CHOICES = ("auto", "cpu", "cuda", "mps")
@@ -509,6 +527,7 @@ BEST_RUN_BOOL_FIELDS = frozenset({
     "profile_model_requested",
     "profile_model_enabled",
 })
+BEST_RUN_OBJECT_FIELDS = frozenset(PROFILE_BOTTLENECK_OBJECT_FIELDS)
 BEST_RUN_INTEGER_FIELDS = frozenset({
     "run",
     "batches",
@@ -553,6 +572,7 @@ BEST_RUN_INTEGER_FIELDS = frozenset({
     "profile_model_modules_selected",
     "profile_model_hook_count",
     "profile_model_hook_failures",
+    *PROFILE_BOTTLENECK_COUNT_FIELDS,
     "cuda_current_mem_bytes",
     "cuda_max_mem_bytes",
     "cuda_reserved_mem_bytes",
@@ -1213,6 +1233,15 @@ def _compact_run_with_omissions(row: dict) -> tuple[dict, list[dict[str, str]]]:
         elif field in BEST_RUN_BOOL_FIELDS:
             if not isinstance(value, bool):
                 omit(field, "invalid_boolean")
+                continue
+        elif field in BEST_RUN_OBJECT_FIELDS:
+            if not isinstance(value, (dict, list)):
+                omit(field, "invalid_object")
+                continue
+            try:
+                value = json_safe(value, f"$.{field}")
+            except ValueError:
+                omit(field, "invalid_object")
                 continue
         elif field == "seed":
             try:
