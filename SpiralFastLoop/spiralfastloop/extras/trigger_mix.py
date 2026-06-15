@@ -170,7 +170,7 @@ def _sample_structure(sample: Any) -> Any:
     if isinstance(sample, torch.Tensor):
         return ("tensor", tuple(sample.shape), sample.dtype)
     if isinstance(sample, Mapping):
-        return ("mapping", tuple((key, _sample_structure(value)) for key, value in sample.items()))
+        return ("mapping", frozenset((key, _sample_structure(value)) for key, value in sample.items()))
     if isinstance(sample, list):
         return ("list", tuple(_sample_structure(value) for value in sample))
     if isinstance(sample, tuple):
