@@ -584,6 +584,26 @@ def _has_positive_display_value(raw: object) -> bool:
     return value is not None and value > 0.0
 
 
+def _non_negative_display_value(raw: object) -> Optional[float]:
+    value = _finite_display_value(raw)
+    if value is None or value < 0.0:
+        return None
+    return value
+
+
+def _format_non_negative_metric_value(
+    raw: object,
+    *,
+    precision: int,
+    scale: float = 1.0,
+    suffix: str = "",
+) -> Optional[str]:
+    value = _non_negative_display_value(raw)
+    if value is None:
+        return None
+    return f"{value * scale:.{precision}f}{suffix}"
+
+
 def _profile_row_name(row: dict[str, Any]) -> str:
     name = row.get("name")
     if isinstance(name, str) and name.strip():
@@ -614,15 +634,32 @@ def _format_profile_breakdown_summary(profile: dict[str, Any], group: str) -> st
     breakdown = _profile_breakdown(profile, group)
     if not breakdown:
         return ""
-    parts = [
-        f"tracked={_format_metric_value(breakdown.get('tracked_s'), precision=2, scale=1e3, suffix='ms')}",
-        f"untracked={_format_metric_value(breakdown.get('untracked_s'), precision=2, scale=1e3, suffix='ms')}",
-    ]
+    parts = []
+    tracked_text = _format_non_negative_metric_value(
+        breakdown.get("tracked_s"),
+        precision=2,
+        scale=1e3,
+        suffix="ms",
+    )
+    if tracked_text is not None:
+        parts.append(f"tracked={tracked_text}")
+    untracked_text = _format_non_negative_metric_value(
+        breakdown.get("untracked_s"),
+        precision=2,
+        scale=1e3,
+        suffix="ms",
+    )
+    if untracked_text is not None:
+        parts.append(f"untracked={untracked_text}")
     if _has_positive_display_value(breakdown.get("overtracked_s")):
-        parts.append(
-            f"overtracked="
-            f"{_format_metric_value(breakdown.get('overtracked_s'), precision=2, scale=1e3, suffix='ms')}"
+        overtracked_text = _format_non_negative_metric_value(
+            breakdown.get("overtracked_s"),
+            precision=2,
+            scale=1e3,
+            suffix="ms",
         )
+        if overtracked_text is not None:
+            parts.append(f"overtracked={overtracked_text}")
     return " ".join(parts)
 
 

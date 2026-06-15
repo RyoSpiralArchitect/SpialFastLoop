@@ -1165,6 +1165,28 @@ def test_format_profile_breakdown_summary_includes_overtracked_when_positive() -
     assert _format_profile_breakdown_summary(profile, "loss") == ""
 
 
+def test_format_profile_breakdown_summary_omits_malformed_values() -> None:
+    profile = {
+        "phase_breakdowns": {
+            "forward": {
+                "tracked_s": -0.07,
+                "untracked_s": "0.03",
+                "overtracked_s": True,
+            },
+            "optimizer": {
+                "untracked_s": 0.01,
+            },
+            "loss": {
+                "top_children": [{"name": "loss"}],
+            },
+        },
+    }
+
+    assert _format_profile_breakdown_summary(profile, "forward") == ""
+    assert _format_profile_breakdown_summary(profile, "optimizer") == "untracked=10.00ms"
+    assert _format_profile_breakdown_summary(profile, "loss") == ""
+
+
 @pytest.mark.parametrize(
     ("row", "expected"),
     [
