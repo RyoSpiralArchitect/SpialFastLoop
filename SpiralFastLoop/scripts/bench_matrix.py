@@ -13,11 +13,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from bench_parallel_transactions import (
     BASE_SUMMARY_FIELDS,
+    SUMMARY_INTEGER_FIELDS,
     _best_finite_row,
     _finite_summary_value,
     _format_metric_value,
     _int_arg,
     _summary_metric_max_value,
+    _summary_metric_min_value,
     count_profiled_rows,
     device_arg,
     non_negative_int_arg,
@@ -140,7 +142,9 @@ def summarize_rows(rows: list[dict]) -> dict:
                 group_rows,
                 field,
                 missing_as_zero=missing_as_zero,
+                min_value=_summary_metric_min_value(field),
                 max_value=_summary_metric_max_value(field),
+                integer=field in SUMMARY_INTEGER_FIELDS,
             ).items():
                 summary[f"{stat_name}_{field}"] = value
         summaries.append(summary)

@@ -243,6 +243,20 @@ def test_summarize_metric_skips_values_above_maximum() -> None:
     assert stats["invalid_count"] == pytest.approx(1.0)
 
 
+def test_summarize_metric_skips_fractional_integer_values() -> None:
+    rows = [
+        {"steps": 4},
+        {"steps": 2.0},
+        {"steps": 1.5},
+    ]
+
+    stats = summarize_metric(rows, "steps", integer=True)
+
+    assert stats["mean"] == pytest.approx(3.0)
+    assert stats["sample_count"] == pytest.approx(2.0)
+    assert stats["invalid_count"] == pytest.approx(1.0)
+
+
 def test_summarize_metric_skips_bool_values() -> None:
     rows = [
         {"samples_per_sec": 100.0},
@@ -464,7 +478,7 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "steady_samples_per_sec": 110.0,
             "wall_time_s": 2.0,
             "setup_time_s": 1.0,
-            "profile_flat_metric_invalid_count": 2.0,
+            "profile_flat_metric_invalid_count": 2,
             "profile_forward_backward_pct": 40.0,
             "profile_forward_backward_time_s": 0.20,
             "profile_forward_pct": 15.0,
@@ -510,7 +524,7 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "steady_optimizer_steps": 2,
             "steady_total_time_s": 0.08,
             "steady_p99_s": 0.04,
-            "profile_flat_metric_invalid_count": 0.0,
+            "profile_flat_metric_invalid_count": 0,
             "profile_forward_backward_pct": 60.0,
             "profile_forward_backward_time_s": 0.30,
             "profile_forward_pct": 20.0,
@@ -932,6 +946,68 @@ def test_summarize_results_omits_invalid_best_run_identity_and_counts() -> None:
     assert "profile_flat_metric_invalid_count" not in best_reported
     assert "profile_forward_backward_pct" not in best_reported
     assert "cuda_max_mem_bytes" not in best_reported
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_results_omits_fractional_profile_invalid_count_from_best_run() -> None:
+    rows = [
+        {
+            "run": 0,
+            "seed": 10,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 300.0,
+            "samples_per_sec": 280.0,
+            "steady_samples_per_sec": 300.0,
+            "wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "end_to_end_wall_time_s": 1.25,
+            "profile_flat_metric_invalid_count": 0.5,
+        },
+    ]
+
+    summary = summarize_results(rows)
+
+    assert summary["mean_profile_flat_metric_invalid_count"] == pytest.approx(0.0)
+    assert summary["sample_count_profile_flat_metric_invalid_count"] == pytest.approx(0.0)
+    assert summary["invalid_count_profile_flat_metric_invalid_count"] == pytest.approx(1.0)
+    assert "profile_flat_metric_invalid_count" not in summary["best_reported"]
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_results_skips_zero_grad_accum_in_aggregates() -> None:
+    rows = [
+        {
+            "run": 0,
+            "seed": 10,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 300.0,
+            "samples_per_sec": 280.0,
+            "steady_samples_per_sec": 300.0,
+            "wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "end_to_end_wall_time_s": 1.25,
+            "grad_accum": 0,
+        },
+        {
+            "run": 1,
+            "seed": 11,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 200.0,
+            "samples_per_sec": 180.0,
+            "steady_samples_per_sec": 200.0,
+            "wall_time_s": 0.9,
+            "setup_time_s": 0.20,
+            "end_to_end_wall_time_s": 1.10,
+            "grad_accum": 2,
+        },
+    ]
+
+    summary = summarize_results(rows)
+
+    assert summary["mean_grad_accum"] == pytest.approx(2.0)
+    assert summary["sample_count_grad_accum"] == pytest.approx(1.0)
+    assert summary["invalid_count_grad_accum"] == pytest.approx(1.0)
+    assert "grad_accum" not in summary["best_reported"]
     json.dumps(summary, allow_nan=False)
 
 

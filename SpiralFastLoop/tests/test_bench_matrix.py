@@ -632,6 +632,32 @@ def test_summarize_rows_skips_non_finite_profile_values() -> None:
     json.dumps(summary, allow_nan=False)
 
 
+def test_summarize_rows_skips_fractional_profile_invalid_count() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+            "profile_flat_metric_invalid_count": 0.5,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert group["mean_profile_flat_metric_invalid_count"] == pytest.approx(0.0)
+    assert group["sample_count_profile_flat_metric_invalid_count"] == pytest.approx(0.0)
+    assert group["invalid_count_profile_flat_metric_invalid_count"] == pytest.approx(1.0)
+    json.dumps(summary, allow_nan=False)
+
+
 def test_summarize_rows_skips_groups_with_no_finite_best_rank_values() -> None:
     rows = [
         {

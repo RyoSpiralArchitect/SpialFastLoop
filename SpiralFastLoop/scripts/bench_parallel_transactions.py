@@ -73,6 +73,21 @@ WORKLOAD_SUMMARY_FIELDS = (
     "steady_total_time_s",
     "steady_p99_s",
 )
+WORKLOAD_INTEGER_SUMMARY_FIELDS = frozenset({
+    "steps",
+    "samples",
+    "optimizer_steps",
+    "grad_accum",
+    "partial_optimizer_steps",
+    "grad_accum_tail_steps",
+    "warmup_steps",
+    "warmup_samples",
+    "warmup_optimizer_steps",
+    "cold_start_steps",
+    "steady_steps",
+    "steady_samples",
+    "steady_optimizer_steps",
+})
 
 PROFILE_SUMMARY_FIELDS = (
     "profile_total_s",
@@ -129,6 +144,11 @@ DEVICE_MEMORY_SUMMARY_FIELDS = (
     "mps_max_mem_bytes",
     "mps_driver_mem_bytes",
     "mps_recommended_max_mem_bytes",
+)
+SUMMARY_INTEGER_FIELDS = (
+    WORKLOAD_INTEGER_SUMMARY_FIELDS
+    | frozenset({"profile_flat_metric_invalid_count"})
+    | frozenset(DEVICE_MEMORY_SUMMARY_FIELDS)
 )
 
 SUMMARY_FIELDS = (
@@ -213,6 +233,7 @@ BEST_RUN_INTEGER_FIELDS = frozenset({
     "steady_steps",
     "steady_samples",
     "steady_optimizer_steps",
+    "profile_flat_metric_invalid_count",
     "cuda_current_mem_bytes",
     "cuda_max_mem_bytes",
     "cuda_reserved_mem_bytes",
@@ -319,6 +340,10 @@ def _summary_metric_max_value(field: str) -> Optional[float]:
     return 100.0 if field.endswith("_pct") else None
 
 
+def _summary_metric_min_value(field: str) -> float:
+    return 1.0 if field == "grad_accum" else 0.0
+
+
 def _best_finite_row(
     rows: list[dict],
     field: str,
@@ -369,6 +394,7 @@ def summarize_metric(
     missing_as_zero: bool = True,
     min_value: Optional[float] = 0.0,
     max_value: Optional[float] = None,
+    integer: bool = False,
 ) -> dict[str, float]:
     values = []
     sample_count = 0
@@ -380,6 +406,9 @@ def summarize_metric(
             value = _finite_summary_value(row[field])
             if value is None:
                 non_finite_count += 1
+                continue
+            if integer and not value.is_integer():
+                invalid_count += 1
                 continue
             if min_value is not None and value < min_value:
                 invalid_count += 1
@@ -439,7 +468,9 @@ def summarize_results(rows: list[dict]) -> dict:
             summary_rows,
             field,
             missing_as_zero=missing_as_zero,
+            min_value=_summary_metric_min_value(field),
             max_value=_summary_metric_max_value(field),
+            integer=field in SUMMARY_INTEGER_FIELDS,
         ).items():
             summary[f"{stat_name}_{field}"] = value
 
