@@ -187,6 +187,10 @@ def test_print_summary_rejects_invalid_direct_topk(topk: object) -> None:
 def test_print_summary_formats_malformed_metrics_as_na(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    class FailingFloat:
+        def __float__(self) -> float:
+            raise RuntimeError("float failed")
+
     metrics = {
         "reported_samples_per_sec": "fast",
         "samples_per_sec": float("inf"),
@@ -197,14 +201,14 @@ def test_print_summary_formats_malformed_metrics_as_na(
         "steady_steps": "2",
         "steady_samples_per_sec": None,
         "steady_p99_s": "slow",
-        "p99_s": None,
+        "p99_s": FailingFloat(),
         "std_batch_s": float("-inf"),
         "steps": True,
         "samples": "many",
         "profile": {
             "top_phases": [
                 "skip-me",
-                {"name": "forward", "pct": float("nan"), "avg_ms": "slow"},
+                {"name": "forward", "pct": float("nan"), "avg_ms": FailingFloat()},
                 {"pct": 12.0, "avg_ms": 1.0},
             ],
             "phase_breakdowns": {

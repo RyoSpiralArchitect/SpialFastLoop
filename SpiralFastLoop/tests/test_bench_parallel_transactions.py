@@ -211,6 +211,23 @@ def test_summarize_metric_skips_numeric_strings() -> None:
     assert stats["non_finite_count"] == pytest.approx(1.0)
 
 
+def test_summarize_metric_skips_failed_float_like_values() -> None:
+    class FailingFloat:
+        def __float__(self) -> float:
+            raise RuntimeError("float failed")
+
+    rows = [
+        {"samples_per_sec": 100.0},
+        {"samples_per_sec": FailingFloat()},
+    ]
+
+    stats = summarize_metric(rows, "samples_per_sec")
+
+    assert stats["mean"] == pytest.approx(100.0)
+    assert stats["sample_count"] == pytest.approx(1.0)
+    assert stats["non_finite_count"] == pytest.approx(1.0)
+
+
 def test_dump_json_converts_non_finite_values_to_null() -> None:
     buffer = io.StringIO()
 
@@ -889,10 +906,14 @@ def test_device_arg_rejects_unsupported_values(raw: object) -> None:
 
 
 def test_display_formatters_hide_malformed_values() -> None:
+    class FailingFloat:
+        def __float__(self) -> float:
+            raise RuntimeError("float failed")
+
     assert _format_metric_value(1.234, precision=1, suffix="/s") == "1.2/s"
     assert _format_metric_value(0.00125, precision=2, scale=1e3, suffix="ms") == "1.25ms"
 
-    for raw in (None, "fast", "1.0", True, float("nan"), float("inf")):
+    for raw in (None, "fast", "1.0", True, float("nan"), float("inf"), FailingFloat()):
         assert _format_metric_value(raw, precision=1, suffix="/s") == "n/a"
 
     assert _format_count(0) == "0"
@@ -900,7 +921,7 @@ def test_display_formatters_hide_malformed_values() -> None:
         assert _format_count(raw) == "n/a"
 
     assert _has_positive_display_value(2)
-    for raw in (0, None, True, "2", float("nan"), float("inf")):
+    for raw in (0, None, True, "2", float("nan"), float("inf"), FailingFloat()):
         assert not _has_positive_display_value(raw)
 
 

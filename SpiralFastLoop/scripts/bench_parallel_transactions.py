@@ -228,7 +228,7 @@ def _finite_summary_value(raw: object) -> Optional[float]:
         return None
     try:
         value = float(raw)
-    except (TypeError, ValueError):
+    except Exception:
         return None
     if not math.isfinite(value):
         return None
@@ -474,7 +474,7 @@ def _finite_display_value(raw: object) -> Optional[float]:
         return None
     try:
         value = float(raw)
-    except (TypeError, ValueError):
+    except Exception:
         return None
     if not math.isfinite(value):
         return None
