@@ -526,6 +526,10 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
             "window_samples": 8,
             "wall_time_s": 1.0,
             "setup_time_s": 0.25,
+            "dataset_setup_time_s": 0.05,
+            "loader_setup_time_s": 0.07,
+            "model_setup_time_s": 0.13,
+            "dataset_materialized_bytes": 4096,
             "end_to_end_wall_time_s": 1.25,
             "steps": 3,
             "samples": 12,
@@ -586,6 +590,12 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["mean_batches"] == pytest.approx(3.0)
     assert summary["mean_best_samples_per_sec"] == pytest.approx(250.0)
     assert summary["mean_headroom_ratio"] == pytest.approx(1.25)
+    assert summary["mean_dataset_setup_time_s"] == pytest.approx(0.05)
+    assert summary["sample_count_dataset_setup_time_s"] == pytest.approx(1.0)
+    assert summary["mean_loader_setup_time_s"] == pytest.approx(0.07)
+    assert summary["mean_model_setup_time_s"] == pytest.approx(0.13)
+    assert summary["mean_dataset_materialized_bytes"] == pytest.approx(4096.0)
+    assert summary["sample_count_dataset_materialized_bytes"] == pytest.approx(1.0)
     assert summary["mean_ema_samples_per_sec"] == pytest.approx(220.0)
     assert summary["mean_window_samples_per_sec"] == pytest.approx(210.0)
     assert summary["mean_window_time_s"] == pytest.approx(0.040)
@@ -644,6 +654,10 @@ def test_summarize_results_reports_best_runs_and_fallbacks() -> None:
     assert summary["best_reported"]["window_time_s"] == pytest.approx(0.040)
     assert summary["best_reported"]["window_batches"] == 2
     assert summary["best_reported"]["window_samples"] == 8
+    assert summary["best_reported"]["dataset_setup_time_s"] == pytest.approx(0.05)
+    assert summary["best_reported"]["loader_setup_time_s"] == pytest.approx(0.07)
+    assert summary["best_reported"]["model_setup_time_s"] == pytest.approx(0.13)
+    assert summary["best_reported"]["dataset_materialized_bytes"] == 4096
     assert summary["best_reported"]["steps"] == 3
     assert summary["best_reported"]["warmup_steps"] == 1
     assert summary["best_reported"]["steady_steps"] == 2

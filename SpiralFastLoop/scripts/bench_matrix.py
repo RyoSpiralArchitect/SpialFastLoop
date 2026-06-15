@@ -222,6 +222,18 @@ def _format_summary_row(row: dict) -> str:
         if end_to_end_wall_time_s is not None
         else "n/a"
     )
+    setup_time_s = _measured_summary_value(row, "mean_setup_time_s")
+    setup_text = f" setup={setup_time_s:.2f}s" if setup_time_s is not None else ""
+    setup_parts = []
+    for field, label in (
+        ("mean_dataset_setup_time_s", "dataset"),
+        ("mean_loader_setup_time_s", "loader"),
+        ("mean_model_setup_time_s", "model"),
+    ):
+        value = _measured_summary_value(row, field)
+        if value is not None and value > 0.0:
+            setup_parts.append(f"{label}={value:.2f}s")
+    setup_breakdown = f" init({','.join(setup_parts)})" if setup_parts else ""
     profile_parts = []
     forward_backward_pct = _measured_summary_value(row, "mean_profile_forward_backward_pct")
     if forward_backward_pct is not None:
@@ -288,6 +300,8 @@ def _format_summary_row(row: dict) -> str:
         f"{row['dataset_mode']} {row['compile_mode']} workers={row['workers']} "
         f"reported={reported_text} "
         f"e2e={end_to_end_text}"
+        f"{setup_text}"
+        f"{setup_breakdown}"
         f"{profile_suffix}"
     )
 

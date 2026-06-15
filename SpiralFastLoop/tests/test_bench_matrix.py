@@ -127,6 +127,25 @@ def test_format_summary_row_includes_profile_suffix_when_available() -> None:
     assert "opt=12.0%" in formatted
 
 
+def test_format_summary_row_includes_setup_breakdown_when_available() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_setup_time_s": 0.25,
+        "mean_dataset_setup_time_s": 0.05,
+        "mean_loader_setup_time_s": 0.07,
+        "mean_model_setup_time_s": 0.13,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "setup=0.25s" in formatted
+    assert "init(dataset=0.05s,loader=0.07s,model=0.13s)" in formatted
+
+
 def test_format_summary_row_includes_open_timer_counts_when_positive() -> None:
     row = {
         "dataset_mode": "generated",
@@ -591,6 +610,9 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "window_samples": 8,
             "end_to_end_wall_time_s": 3.0,
             "setup_time_s": 1.0,
+            "dataset_setup_time_s": 0.20,
+            "loader_setup_time_s": 0.30,
+            "model_setup_time_s": 0.50,
             "wall_time_s": 2.0,
             "cold_start_time_s": 0.5,
             "steps": 3,
@@ -653,6 +675,9 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "window_samples": 8,
             "end_to_end_wall_time_s": 1.0,
             "setup_time_s": 0.25,
+            "dataset_setup_time_s": 0.05,
+            "loader_setup_time_s": 0.07,
+            "model_setup_time_s": 0.13,
             "wall_time_s": 0.75,
             "cold_start_time_s": 0.1,
             "steps": 3,
@@ -760,6 +785,10 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["stddev_reported_samples_per_sec"] == pytest.approx(100.0)
     assert generated["mean_end_to_end_wall_time_s"] == pytest.approx(2.0)
     assert generated["stddev_end_to_end_wall_time_s"] == pytest.approx(1.0)
+    assert generated["mean_dataset_setup_time_s"] == pytest.approx(0.125)
+    assert generated["mean_loader_setup_time_s"] == pytest.approx(0.185)
+    assert generated["mean_model_setup_time_s"] == pytest.approx(0.315)
+    assert generated["mean_dataset_materialized_bytes"] == pytest.approx(0.0)
     assert generated["mean_p99_s"] == pytest.approx(0.015)
     assert generated["mean_std_batch_s"] == pytest.approx(0.0015)
     assert generated["mean_avg_batch_s"] == pytest.approx(0.005)

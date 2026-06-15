@@ -42,6 +42,13 @@ BASE_SUMMARY_FIELDS = (
     "cold_start_time_s",
 )
 
+SETUP_SUMMARY_FIELDS = (
+    "dataset_setup_time_s",
+    "loader_setup_time_s",
+    "model_setup_time_s",
+    "dataset_materialized_bytes",
+)
+
 BATCH_SUMMARY_FIELDS = (
     "p50_s",
     "p95_s",
@@ -172,6 +179,7 @@ SUMMARY_INTEGER_FIELDS = (
     WORKLOAD_INTEGER_SUMMARY_FIELDS
     | frozenset({
         "batches",
+        "dataset_materialized_bytes",
         "window_batches",
         "window_samples",
         "profile_flat_metric_invalid_count",
@@ -186,6 +194,7 @@ SUMMARY_INTEGER_FIELDS = (
 
 SUMMARY_FIELDS = (
     BASE_SUMMARY_FIELDS
+    + SETUP_SUMMARY_FIELDS
     + BATCH_SUMMARY_FIELDS
     + WORKLOAD_SUMMARY_FIELDS
     + DIAGNOSTIC_SUMMARY_FIELDS
@@ -216,6 +225,10 @@ BEST_RUN_FIELDS = (
     "window_samples",
     "end_to_end_wall_time_s",
     "setup_time_s",
+    "dataset_setup_time_s",
+    "loader_setup_time_s",
+    "model_setup_time_s",
+    "dataset_materialized_bytes",
     "wall_time_s",
     "steps",
     "samples",
@@ -293,6 +306,7 @@ BEST_RUN_BOOL_FIELDS = frozenset({
 BEST_RUN_INTEGER_FIELDS = frozenset({
     "run",
     "batches",
+    "dataset_materialized_bytes",
     "window_batches",
     "window_samples",
     "steps",
@@ -526,6 +540,7 @@ def summary_fields_for_rows(rows: list[dict]) -> tuple[str, ...]:
     for row in rows:
         present_fields.update(row.keys())
     batch_fields = tuple(field for field in BATCH_SUMMARY_FIELDS if field in present_fields)
+    setup_fields = tuple(field for field in SETUP_SUMMARY_FIELDS if field in present_fields)
     workload_fields = tuple(field for field in WORKLOAD_SUMMARY_FIELDS if field in present_fields)
     diagnostic_fields = tuple(
         field
@@ -534,7 +549,15 @@ def summary_fields_for_rows(rows: list[dict]) -> tuple[str, ...]:
     )
     profile_fields = tuple(field for field in PROFILE_SUMMARY_FIELDS if field in present_fields)
     memory_fields = tuple(field for field in DEVICE_MEMORY_SUMMARY_FIELDS if field in present_fields)
-    return BASE_SUMMARY_FIELDS + batch_fields + workload_fields + diagnostic_fields + profile_fields + memory_fields
+    return (
+        BASE_SUMMARY_FIELDS
+        + setup_fields
+        + batch_fields
+        + workload_fields
+        + diagnostic_fields
+        + profile_fields
+        + memory_fields
+    )
 
 
 def count_profiled_rows(rows: list[dict]) -> int:
