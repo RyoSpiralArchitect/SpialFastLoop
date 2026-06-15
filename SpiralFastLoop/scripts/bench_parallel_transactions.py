@@ -73,6 +73,9 @@ WORKLOAD_SUMMARY_FIELDS = (
     "steady_total_time_s",
     "steady_p99_s",
 )
+DIAGNOSTIC_SUMMARY_FIELDS = (
+    "scheduler_step_failures",
+)
 WORKLOAD_INTEGER_SUMMARY_FIELDS = frozenset({
     "steps",
     "samples",
@@ -87,6 +90,7 @@ WORKLOAD_INTEGER_SUMMARY_FIELDS = frozenset({
     "steady_steps",
     "steady_samples",
     "steady_optimizer_steps",
+    "scheduler_step_failures",
 })
 
 PROFILE_PHASE_SUMMARY_FIELDS = (
@@ -172,6 +176,7 @@ SUMMARY_FIELDS = (
     BASE_SUMMARY_FIELDS
     + BATCH_SUMMARY_FIELDS
     + WORKLOAD_SUMMARY_FIELDS
+    + DIAGNOSTIC_SUMMARY_FIELDS
     + PROFILE_SUMMARY_FIELDS
     + DEVICE_MEMORY_SUMMARY_FIELDS
 )
@@ -196,6 +201,8 @@ BEST_RUN_FIELDS = (
     "grad_accum",
     "partial_optimizer_steps",
     "grad_accum_tail_steps",
+    "scheduler_step_failures",
+    "scheduler_last_error",
     "warmup_steps",
     "warmup_samples",
     "warmup_optimizer_steps",
@@ -255,6 +262,7 @@ BEST_RUN_TEXT_FIELDS = frozenset({
     "dataset_mode",
     "profile_model_status",
     "profile_model_hook_last_error",
+    "scheduler_last_error",
 })
 BEST_RUN_BOOL_FIELDS = frozenset({
     "profile_model_requested",
@@ -268,6 +276,7 @@ BEST_RUN_INTEGER_FIELDS = frozenset({
     "grad_accum",
     "partial_optimizer_steps",
     "grad_accum_tail_steps",
+    "scheduler_step_failures",
     "warmup_steps",
     "warmup_samples",
     "warmup_optimizer_steps",
@@ -291,6 +300,7 @@ BEST_RUN_INTEGER_FIELDS = frozenset({
     "mps_recommended_max_mem_bytes",
 })
 BEST_RUN_POSITIVE_INTEGER_FIELDS = frozenset({"grad_accum"})
+BEST_RUN_POSITIVE_ONLY_INTEGER_FIELDS = frozenset({"scheduler_step_failures"})
 PROFILE_MODEL_RESULT_FIELDS = frozenset({
     "profile_model_requested",
     "profile_model_enabled",
@@ -373,6 +383,13 @@ def _compact_run(row: dict) -> dict:
                     value = _summary_choice(value, PROFILE_MODEL_STATUS_CHOICES, field)
                 except ValueError:
                     continue
+            elif field == "scheduler_last_error":
+                failures = _display_count_value(row.get("scheduler_step_failures"))
+                if failures is None or failures <= 0:
+                    continue
+                if not isinstance(value, str) or not value.strip():
+                    continue
+                value = value.strip()
             elif not isinstance(value, str) or not value.strip():
                 continue
             else:
@@ -392,6 +409,8 @@ def _compact_run(row: dict) -> dict:
                 else:
                     value = _non_negative_int_setting(value, field)
             except ValueError:
+                continue
+            if field in BEST_RUN_POSITIVE_ONLY_INTEGER_FIELDS and value <= 0:
                 continue
         else:
             numeric_value = _finite_summary_value(value)
@@ -456,15 +475,41 @@ def _best_finite_row(
     return selector(candidates, key=lambda item: item[0])[1]
 
 
+def _summary_field_has_signal(rows: list[dict], field: str) -> bool:
+    min_value = _summary_metric_min_value(field)
+    max_value = _summary_metric_max_value(field)
+    integer = field in SUMMARY_INTEGER_FIELDS
+    for row in rows:
+        if field not in row:
+            continue
+        value = _finite_summary_value(row[field])
+        if value is None:
+            return True
+        if value > 0.0:
+            return True
+        if value < min_value:
+            return True
+        if max_value is not None and value > max_value:
+            return True
+        if integer and not value.is_integer():
+            return True
+    return False
+
+
 def summary_fields_for_rows(rows: list[dict]) -> tuple[str, ...]:
     present_fields = set()
     for row in rows:
         present_fields.update(row.keys())
     batch_fields = tuple(field for field in BATCH_SUMMARY_FIELDS if field in present_fields)
     workload_fields = tuple(field for field in WORKLOAD_SUMMARY_FIELDS if field in present_fields)
+    diagnostic_fields = tuple(
+        field
+        for field in DIAGNOSTIC_SUMMARY_FIELDS
+        if field in present_fields and _summary_field_has_signal(rows, field)
+    )
     profile_fields = tuple(field for field in PROFILE_SUMMARY_FIELDS if field in present_fields)
     memory_fields = tuple(field for field in DEVICE_MEMORY_SUMMARY_FIELDS if field in present_fields)
-    return BASE_SUMMARY_FIELDS + batch_fields + workload_fields + profile_fields + memory_fields
+    return BASE_SUMMARY_FIELDS + batch_fields + workload_fields + diagnostic_fields + profile_fields + memory_fields
 
 
 def count_profiled_rows(rows: list[dict]) -> int:
@@ -841,6 +886,17 @@ def _format_profile_model_hook_summary(metrics: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+def _format_scheduler_summary(metrics: dict[str, Any]) -> str:
+    failures = _display_count_value(metrics.get("scheduler_step_failures"))
+    if failures is None or failures <= 0:
+        return ""
+    parts = [f"failures={failures}"]
+    last_error = metrics.get("scheduler_last_error")
+    if isinstance(last_error, str) and last_error.strip():
+        parts.append(f"error={last_error.strip()}")
+    return " ".join(parts)
+
+
 def _profile_child_rows(profile: dict[str, Any], section: str, group: str) -> list[object]:
     sections = _dict_value(profile.get(section))
     group_profile = _dict_value(sections.get(group))
@@ -1195,6 +1251,9 @@ def main() -> None:
         profile_model_summary = _format_profile_model_hook_summary(metrics)
         if profile_model_summary:
             print(f"  profile_model: {profile_model_summary}")
+        scheduler_summary = _format_scheduler_summary(metrics)
+        if scheduler_summary:
+            print(f"  scheduler: {scheduler_summary}")
         profile = _dict_value(metrics.get("profile"))
         if profile:
             open_timer_summary = _format_profile_open_timer_summary(profile)

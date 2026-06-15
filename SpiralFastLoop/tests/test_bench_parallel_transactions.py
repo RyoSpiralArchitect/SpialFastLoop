@@ -24,6 +24,7 @@ from scripts.bench_parallel_transactions import (
     _format_profile_breakdown_summary,
     _format_profile_model_hook_summary,
     _format_profile_open_timer_summary,
+    _format_scheduler_summary,
     _has_positive_display_value,
     _profile_row_name,
     build_model,
@@ -643,6 +644,55 @@ def test_summarize_results_preserves_best_run_profile_model_failure_context() ->
     assert best_reported["profile_model_enabled"] is True
     assert best_reported["profile_model_status"] == "hook_failures"
     assert best_reported["profile_model_hook_last_error"] == "RuntimeError: forward hook boom"
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_results_omits_zero_only_scheduler_diagnostics() -> None:
+    summary = summarize_results([
+        {
+            "run": 0,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 300.0,
+            "samples_per_sec": 280.0,
+            "wall_time_s": 1.0,
+            "scheduler_step_failures": 0,
+            "scheduler_last_error": "RuntimeError: stale scheduler error",
+        },
+    ])
+
+    assert "mean_scheduler_step_failures" not in summary
+    assert "max_scheduler_step_failures" not in summary
+    assert "scheduler_step_failures" not in summary["best_reported"]
+    assert "scheduler_last_error" not in summary["best_reported"]
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_results_preserves_scheduler_failure_context() -> None:
+    summary = summarize_results([
+        {
+            "run": 0,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 200.0,
+            "samples_per_sec": 180.0,
+            "wall_time_s": 1.1,
+            "scheduler_step_failures": 0,
+            "scheduler_last_error": "",
+        },
+        {
+            "run": 1,
+            "dataset_mode": "generated",
+            "reported_samples_per_sec": 300.0,
+            "samples_per_sec": 280.0,
+            "wall_time_s": 1.0,
+            "scheduler_step_failures": 2,
+            "scheduler_last_error": "RuntimeError: scheduler boom",
+        },
+    ])
+
+    assert summary["mean_scheduler_step_failures"] == pytest.approx(1.0)
+    assert summary["max_scheduler_step_failures"] == pytest.approx(2.0)
+    assert summary["best_reported"]["scheduler_step_failures"] == 2
+    assert summary["best_reported"]["scheduler_last_error"] == "RuntimeError: scheduler boom"
     json.dumps(summary, allow_nan=False)
 
 
@@ -1341,6 +1391,26 @@ def test_display_formatters_hide_malformed_values() -> None:
     assert _has_positive_display_value(2)
     for raw in (0, None, True, "2", float("nan"), float("inf"), FailingFloat()):
         assert not _has_positive_display_value(raw)
+
+
+def test_format_scheduler_summary_reports_failures_and_last_error() -> None:
+    assert _format_scheduler_summary({
+        "scheduler_step_failures": 2,
+        "scheduler_last_error": " RuntimeError: scheduler boom ",
+    }) == "failures=2 error=RuntimeError: scheduler boom"
+
+    assert _format_scheduler_summary({
+        "scheduler_step_failures": 1,
+        "scheduler_last_error": "",
+    }) == "failures=1"
+
+
+@pytest.mark.parametrize("raw", [0, None, True, "2", -1, 1.5, float("nan")])
+def test_format_scheduler_summary_omits_zero_or_malformed_failures(raw: object) -> None:
+    assert _format_scheduler_summary({
+        "scheduler_step_failures": raw,
+        "scheduler_last_error": "RuntimeError: scheduler boom",
+    }) == ""
 
 
 def test_format_profile_breakdown_summary_includes_overtracked_when_positive() -> None:

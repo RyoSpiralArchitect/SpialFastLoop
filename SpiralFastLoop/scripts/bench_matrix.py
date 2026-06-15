@@ -19,6 +19,7 @@ from bench_parallel_transactions import (
     _finite_summary_value,
     _format_metric_value,
     _format_profile_model_hook_summary,
+    _format_scheduler_summary,
     _int_arg,
     _positive_sample_count_value,
     _profile_model_status_counts,
@@ -279,6 +280,9 @@ def _format_summary_row(row: dict) -> str:
         status_parts.append(f"invalid={status_invalid_count}")
     if status_parts:
         profile_parts.append(f"status({','.join(status_parts)})")
+    scheduler_failures = _measured_summary_value(row, "mean_scheduler_step_failures")
+    if scheduler_failures is not None and scheduler_failures > 0.0:
+        profile_parts.append(f"scheduler(failures={scheduler_failures:.1f})")
     profile_suffix = f" {' '.join(profile_parts)}" if profile_parts else ""
     return (
         f"{row['dataset_mode']} {row['compile_mode']} workers={row['workers']} "
@@ -301,12 +305,15 @@ def _format_run_row(dataset_mode: str, compile_mode: str, workers: int, run_inde
     )
     profile_model_summary = _format_profile_model_hook_summary(result)
     profile_suffix = f" profile_model({profile_model_summary})" if profile_model_summary else ""
+    scheduler_summary = _format_scheduler_summary(result)
+    scheduler_suffix = f" scheduler({scheduler_summary})" if scheduler_summary else ""
     return (
         f"{dataset_mode:>12} {compile_mode:>10} workers={workers:<2} "
         f"run={run_index:<2} "
         f"steady={steady_text} "
         f"e2e={e2e_text}"
         f"{profile_suffix}"
+        f"{scheduler_suffix}"
     )
 
 

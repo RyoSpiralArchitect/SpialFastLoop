@@ -184,6 +184,38 @@ def test_format_summary_row_includes_profile_model_status_counts() -> None:
     assert "status(hook_failures=1,ok=2,invalid=1)" in formatted
 
 
+def test_format_summary_row_includes_scheduler_failures_when_positive() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_scheduler_step_failures": 1.5,
+        "sample_count_scheduler_step_failures": 2.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "scheduler(failures=1.5)" in formatted
+
+
+def test_format_summary_row_omits_zero_scheduler_failures() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_scheduler_step_failures": 0.0,
+        "sample_count_scheduler_step_failures": 2.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "scheduler(" not in formatted
+
+
 def test_format_summary_row_omits_not_requested_profile_model_status_counts() -> None:
     row = {
         "dataset_mode": "generated",
@@ -499,6 +531,23 @@ def test_format_run_row_includes_profile_model_hook_summary_when_requested() -> 
     assert "profile_model(status=no_matching_modules modules=0 hooks=0 failures=0)" in row
 
 
+def test_format_run_row_includes_scheduler_failure_summary() -> None:
+    row = _format_run_row(
+        "generated",
+        "no-compile",
+        0,
+        0,
+        {
+            "reported_samples_per_sec": 123.45,
+            "end_to_end_wall_time_s": 1.234,
+            "scheduler_step_failures": 2,
+            "scheduler_last_error": "RuntimeError: scheduler boom",
+        },
+    )
+
+    assert "scheduler(failures=2 error=RuntimeError: scheduler boom)" in row
+
+
 def test_format_run_row_marks_malformed_metrics_as_na() -> None:
     row = _format_run_row(
         "generated",
@@ -796,6 +845,70 @@ def test_summarize_rows_omits_not_requested_profile_model_fields() -> None:
     assert "mean_profile_model_hook_failures" not in group
     assert "profile_model_status_counts" not in summary["best_reported"]
     assert "mean_profile_model_modules_selected" not in summary["best_reported"]
+
+
+def test_summarize_rows_omits_zero_only_scheduler_diagnostics() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+            "scheduler_step_failures": 0,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert "mean_scheduler_step_failures" not in group
+    assert "mean_scheduler_step_failures" not in summary["best_reported"]
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_rows_includes_scheduler_failures_when_positive() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+            "scheduler_step_failures": 0,
+        },
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 120.0,
+            "samples_per_sec": 95.0,
+            "steady_samples_per_sec": 120.0,
+            "end_to_end_wall_time_s": 0.9,
+            "setup_time_s": 0.20,
+            "wall_time_s": 0.70,
+            "dataset_materialized_bytes": 0,
+            "scheduler_step_failures": 2,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert group["mean_scheduler_step_failures"] == pytest.approx(1.0)
+    assert group["max_scheduler_step_failures"] == pytest.approx(2.0)
+    assert summary["best_reported"]["mean_scheduler_step_failures"] == pytest.approx(1.0)
+    json.dumps(summary, allow_nan=False)
 
 
 def test_summarize_rows_ignores_missing_rows_for_profile_aggregates() -> None:
