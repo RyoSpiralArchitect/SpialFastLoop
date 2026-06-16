@@ -271,7 +271,11 @@ def _format_summary_jitter(row: dict) -> str:
         ("reported_samples_per_sec", "reported_sd", 1, "/s"),
         ("end_to_end_wall_time_s", "e2e_sd", 2, "s"),
     ):
-        sample_count = _positive_sample_count_value(row.get(f"sample_count_{metric_name}"))
+        sample_count_field = f"sample_count_{metric_name}"
+        if sample_count_field in row:
+            sample_count = _positive_sample_count_value(row.get(sample_count_field))
+        else:
+            sample_count = _positive_sample_count_value(row.get("runs"))
         if sample_count is None or sample_count <= 1:
             continue
         stddev = _finite_summary_value(row.get(f"stddev_{metric_name}"))

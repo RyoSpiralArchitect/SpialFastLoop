@@ -251,11 +251,10 @@ def test_format_summary_row_includes_jitter_for_repeated_runs() -> None:
         "dataset_mode": "generated",
         "compile_mode": "no-compile",
         "workers": 0,
+        "runs": 3,
         "mean_reported_samples_per_sec": 200.0,
-        "sample_count_reported_samples_per_sec": 3.0,
         "stddev_reported_samples_per_sec": 12.345,
         "mean_end_to_end_wall_time_s": 1.25,
-        "sample_count_end_to_end_wall_time_s": 3.0,
         "stddev_end_to_end_wall_time_s": 0.045,
     }
 
