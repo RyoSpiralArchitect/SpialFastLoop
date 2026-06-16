@@ -265,6 +265,24 @@ def _format_phase_tail_parts(row: dict, *, aggregate: bool) -> list[str]:
     return parts
 
 
+def _format_summary_jitter(row: dict) -> str:
+    parts = []
+    for metric_name, label, precision, suffix in (
+        ("reported_samples_per_sec", "reported_sd", 1, "/s"),
+        ("end_to_end_wall_time_s", "e2e_sd", 2, "s"),
+    ):
+        sample_count = _positive_sample_count_value(row.get(f"sample_count_{metric_name}"))
+        if sample_count is None or sample_count <= 1:
+            continue
+        stddev = _finite_summary_value(row.get(f"stddev_{metric_name}"))
+        if stddev is None or stddev <= 0.0:
+            continue
+        parts.append(f"{label}={stddev:.{precision}f}{suffix}")
+    if not parts:
+        return ""
+    return f"jitter({','.join(parts)})"
+
+
 def _format_top_bottleneck_candidate(row: dict) -> str:
     candidate = row.get("profile_bottleneck_top_candidate")
     if not isinstance(candidate, dict):
@@ -340,6 +358,9 @@ def _format_summary_row(row: dict) -> str:
     })
     setup_breakdown_text = f" {setup_breakdown}" if setup_breakdown else ""
     profile_parts = []
+    jitter_text = _format_summary_jitter(row)
+    if jitter_text:
+        profile_parts.append(jitter_text)
     forward_backward_pct = _measured_summary_value(row, "mean_profile_forward_backward_pct")
     if forward_backward_pct is not None:
         profile_parts.append(f"fwd+bwd={forward_backward_pct:.1f}%")
