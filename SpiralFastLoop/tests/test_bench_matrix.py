@@ -281,6 +281,33 @@ def test_format_summary_row_omits_jitter_for_single_or_stable_runs() -> None:
     assert "jitter(" not in formatted
 
 
+def test_format_summary_row_includes_matrix_cold_run_split() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "runs": 5,
+        "mean_reported_samples_per_sec": 200.0,
+        "stddev_reported_samples_per_sec": 30.0,
+        "mean_end_to_end_wall_time_s": 0.50,
+        "stddev_end_to_end_wall_time_s": 0.40,
+        "matrix_cold_run_index": 0,
+        "matrix_post_cold_runs": 4,
+        "matrix_cold_run_end_to_end_wall_time_s": 1.40,
+        "matrix_post_cold_mean_end_to_end_wall_time_s": 0.20,
+        "matrix_cold_run_vs_post_cold_ratio_end_to_end_wall_time_s": 7.0,
+        "matrix_cold_run_vs_post_cold_delta_setup_time_s": 1.10,
+        "matrix_post_cold_stddev_reported_samples_per_sec": 3.25,
+        "matrix_post_cold_stddev_end_to_end_wall_time_s": 0.016,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "jitter(reported_sd=30.0/s,e2e_sd=0.40s)" in formatted
+    assert "cold(run0,e2e=1.40s/post=0.20s,x=7.0,setup_delta=1.10s)" in formatted
+    assert "post_jitter(reported_sd=3.2/s,e2e_sd=0.02s)" in formatted
+
+
 def test_format_summary_row_includes_forward_top_position() -> None:
     row = {
         "dataset_mode": "generated",
@@ -433,12 +460,32 @@ def test_format_summary_row_includes_backward_ready_position() -> None:
         "sample_count_profile_backward_grad_ready_span_avg_ms": 2.0,
         "mean_profile_backward_grad_ready_span_pct": 27.5,
         "sample_count_profile_backward_grad_ready_span_pct": 2.0,
+        "mean_profile_backward_grad_ready_top_p95_ms": 4.5,
+        "sample_count_profile_backward_grad_ready_top_p95_ms": 2.0,
+        "mean_profile_backward_grad_ready_top_p95_pct_of_parent": 56.25,
+        "sample_count_profile_backward_grad_ready_top_p95_pct_of_parent": 2.0,
+        "mean_profile_backward_grad_ready_top_p99_ms": 5.5,
+        "sample_count_profile_backward_grad_ready_top_p99_ms": 2.0,
+        "mean_profile_backward_grad_ready_top_p99_pct_of_parent": 68.75,
+        "sample_count_profile_backward_grad_ready_top_p99_pct_of_parent": 2.0,
+        "mean_profile_backward_grad_ready_top_std_ms": 0.75,
+        "sample_count_profile_backward_grad_ready_top_std_ms": 2.0,
+        "mean_profile_backward_grad_ready_child_count": 3.0,
+        "sample_count_profile_backward_grad_ready_child_count": 2.0,
+        "mean_profile_backward_grad_ready_top_calls": 20.0,
+        "sample_count_profile_backward_grad_ready_top_calls": 2.0,
+        "mean_profile_backward_grad_ready_top_sample_count": 20.0,
+        "sample_count_profile_backward_grad_ready_top_sample_count": 2.0,
+        "mean_profile_backward_grad_ready_top_window_sample_count": 16.0,
+        "sample_count_profile_backward_grad_ready_top_window_sample_count": 2.0,
     }
 
     formatted = _format_summary_row(row)
 
     assert "bwd_span=2.75ms@27.5%" in formatted
     assert "bwd_ready=42.5%@3.25ms" in formatted
+    assert "bwd_ready_tail(p95=4.50ms@56.2%,p99=5.50ms@68.8%,std=0.75ms)" in formatted
+    assert "bwd_ready_shape(children=3,calls=20,samples=20,window=16)" in formatted
 
 
 def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
@@ -925,6 +972,34 @@ def test_format_run_row_includes_phase_tail_latency() -> None:
     assert "fwd_tail(p95=6.25ms,p99=7.50ms)" in row
     assert "bwd_tail(p95=8.00ms)" in row
     assert "opt_tail(std=0.75ms)" in row
+
+
+def test_format_run_row_includes_backward_ready_tail_shape() -> None:
+    row = _format_run_row(
+        "generated",
+        "no-compile",
+        0,
+        0,
+        {
+            "reported_samples_per_sec": 123.45,
+            "end_to_end_wall_time_s": 1.234,
+            "profile_backward_grad_ready_span_avg_ms": 2.5,
+            "profile_backward_grad_ready_span_pct": 25.0,
+            "profile_backward_grad_ready_top_pct": 40.0,
+            "profile_backward_grad_ready_top_avg_ms": 4.0,
+            "profile_backward_grad_ready_top_p95_ms": 5.0,
+            "profile_backward_grad_ready_top_p95_pct_of_parent": 50.0,
+            "profile_backward_grad_ready_top_p99_ms": 6.0,
+            "profile_backward_grad_ready_top_p99_pct_of_parent": 60.0,
+            "profile_backward_grad_ready_child_count": 2,
+            "profile_backward_grad_ready_top_calls": 8,
+        },
+    )
+
+    assert "bwd_span=2.50ms@25.0%" in row
+    assert "bwd_ready=40.0%@4.00ms" in row
+    assert "bwd_ready_tail(p95=5.00ms@50.0%,p99=6.00ms@60.0%)" in row
+    assert "bwd_ready_shape(children=2,calls=8)" in row
 
 
 def test_format_run_row_includes_profile_bottleneck_summary() -> None:
@@ -1504,6 +1579,57 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert summary["best_reported"]["mean_steady_p99_s"] == pytest.approx(0.02)
 
 
+def test_summarize_rows_splits_matrix_cold_run_from_post_cold_runs() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "run": 0,
+            "reported_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.4,
+            "setup_time_s": 1.2,
+            "wall_time_s": 1.4,
+        },
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "run": 1,
+            "reported_samples_per_sec": 290.0,
+            "end_to_end_wall_time_s": 0.22,
+            "setup_time_s": 0.10,
+            "wall_time_s": 0.22,
+        },
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "run": 2,
+            "reported_samples_per_sec": 310.0,
+            "end_to_end_wall_time_s": 0.18,
+            "setup_time_s": 0.12,
+            "wall_time_s": 0.18,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert group["matrix_cold_run_index"] == 0
+    assert group["matrix_post_cold_runs"] == 2
+    assert group["matrix_cold_run_end_to_end_wall_time_s"] == pytest.approx(1.4)
+    assert group["matrix_post_cold_mean_end_to_end_wall_time_s"] == pytest.approx(0.20)
+    assert group["matrix_post_cold_stddev_end_to_end_wall_time_s"] == pytest.approx(0.02)
+    assert group["matrix_cold_run_vs_post_cold_delta_end_to_end_wall_time_s"] == pytest.approx(1.2)
+    assert group["matrix_cold_run_vs_post_cold_ratio_end_to_end_wall_time_s"] == pytest.approx(7.0)
+    assert group["matrix_cold_run_vs_post_cold_delta_setup_time_s"] == pytest.approx(1.09)
+    assert group["matrix_cold_run_vs_post_cold_ratio_setup_time_s"] == pytest.approx(1.2 / 0.11)
+    assert group["matrix_post_cold_mean_reported_samples_per_sec"] == pytest.approx(300.0)
+    assert group["matrix_post_cold_stddev_reported_samples_per_sec"] == pytest.approx(10.0)
+    json.dumps(summary, allow_nan=False)
+
+
 def test_summarize_rows_skips_profile_fields_when_absent() -> None:
     rows = [
         {
@@ -1598,6 +1724,8 @@ def test_summarize_rows_preserves_top_profile_distribution_metrics() -> None:
             "profile_forward_top_std_ms": 0.5,
             "profile_forward_top_sample_count": 3,
             "profile_backward_grad_ready_top_p99_ms": 5.0,
+            "profile_backward_grad_ready_top_p95_pct_of_parent": 45.0,
+            "profile_backward_grad_ready_top_p99_pct_of_parent": 50.0,
             "profile_optimizer_top_p99_ms": 3.0,
             "profile_optimizer_top_window_sample_count": 2,
         },
@@ -1615,6 +1743,8 @@ def test_summarize_rows_preserves_top_profile_distribution_metrics() -> None:
             "profile_forward_top_std_ms": 0.7,
             "profile_forward_top_sample_count": 5,
             "profile_backward_grad_ready_top_p99_ms": 7.0,
+            "profile_backward_grad_ready_top_p95_pct_of_parent": 55.0,
+            "profile_backward_grad_ready_top_p99_pct_of_parent": 60.0,
             "profile_optimizer_top_p99_ms": 4.0,
             "profile_optimizer_top_window_sample_count": 4,
         },
@@ -1627,6 +1757,8 @@ def test_summarize_rows_preserves_top_profile_distribution_metrics() -> None:
     assert group["mean_profile_forward_top_std_ms"] == pytest.approx(0.6)
     assert group["mean_profile_forward_top_sample_count"] == pytest.approx(4.0)
     assert group["mean_profile_backward_grad_ready_top_p99_ms"] == pytest.approx(6.0)
+    assert group["mean_profile_backward_grad_ready_top_p95_pct_of_parent"] == pytest.approx(50.0)
+    assert group["mean_profile_backward_grad_ready_top_p99_pct_of_parent"] == pytest.approx(55.0)
     assert group["mean_profile_optimizer_top_p99_ms"] == pytest.approx(3.5)
     assert group["mean_profile_optimizer_top_window_sample_count"] == pytest.approx(3.0)
     assert summary["best_reported"]["mean_profile_forward_top_p99_ms"] == pytest.approx(7.0)
@@ -1867,6 +1999,46 @@ def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
     assert summary["best_reported"]["profile_bottleneck_category_summary"] == materialized[
         "profile_bottleneck_category_summary"
     ]
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_rows_adds_backward_ready_tail_bottleneck_candidate() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.0,
+            "wall_time_s": 0.8,
+            "profile_backward_pct": 40.0,
+            "profile_backward_grad_ready_top_pct": 50.0,
+            "profile_backward_grad_ready_top_p95_pct_of_parent": 80.0,
+            "profile_backward_grad_ready_top_p99_pct_of_parent": 95.0,
+            "profile_backward_grad_ready_top_p95_ms": 8.0,
+            "profile_backward_grad_ready_top_p99_ms": 9.5,
+            "profile_backward_grad_ready_top_calls": 4,
+            "profile_backward_grad_ready_child_count": 2,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+    candidates = group["profile_bottleneck_candidates"]
+    tail_candidate = next(
+        candidate for candidate in candidates
+        if candidate["name"] == "backward_ready_tail_position"
+    )
+
+    assert tail_candidate["category"] == "readiness_tail"
+    assert tail_candidate["score"] == pytest.approx(32.0)
+    assert tail_candidate["value"] == pytest.approx(80.0)
+    assert tail_candidate["parent_value"] == pytest.approx(40.0)
+    assert tail_candidate["p99_pct_of_parent"] == pytest.approx(95.0)
+    assert tail_candidate["p95_ms"] == pytest.approx(8.0)
+    assert group["profile_bottleneck_category_summary"]["readiness_tail"]["top_candidate"] == (
+        "backward_ready_tail_position"
+    )
     json.dumps(summary, allow_nan=False)
 
 

@@ -270,6 +270,32 @@ def _add_profile_top_distribution_metrics(
         )
 
 
+def _add_profile_backward_event_tail_pct_metrics(
+    metrics: Dict[str, Any],
+    top_child: Mapping[str, Any],
+    group: Mapping[str, Any],
+    invalid_fields: list[str],
+) -> None:
+    parent_avg_ms = _finite_profile_value(group.get("parent_avg_ms"))
+    if parent_avg_ms is None or parent_avg_ms <= 0.0:
+        return
+    for source_name in ("p95", "p99"):
+        metric_name = f"profile_backward_grad_ready_top_{source_name}_pct_of_parent"
+        if f"{source_name}_pct_of_parent" in top_child:
+            _set_profile_metric_if_present(
+                metrics,
+                metric_name,
+                top_child,
+                f"{source_name}_pct_of_parent",
+                invalid_fields,
+            )
+            continue
+        raw_ms = top_child.get(f"{source_name}_ms")
+        value_ms = _finite_profile_value(raw_ms)
+        if value_ms is not None and value_ms >= 0.0:
+            metrics[metric_name] = 100.0 * value_ms / parent_avg_ms
+
+
 def _add_profile_breakdown_metrics(
     metrics: Dict[str, Any],
     profile: Mapping[str, Any],
@@ -413,6 +439,7 @@ def _add_profile_backward_event_metrics(
         max_value=100.0,
     )
     _add_profile_top_distribution_metrics(metrics, "profile_backward_grad_ready", top_child, invalid_fields)
+    _add_profile_backward_event_tail_pct_metrics(metrics, top_child, group, invalid_fields)
     _set_profile_count_metric_if_present(
         metrics,
         "profile_backward_grad_ready_top_calls",

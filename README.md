@@ -15,6 +15,7 @@ It also ships an optional **Surprise→Repair (Surprisal Sandwich)** mechanism t
 - **Data transfer tweaks**: non_blocking transfers; pin_memory recommended
 - **`torch.compile` (best-effort)**: reduces Python overhead
 - **Phase profiling**: opt-in timings for data wait, transfer, forward, loss, backward, optimizer, and module-level model drilldowns
+- **Benchmark diagnostics**: cold/post-cold matrix splits, jitter summaries, and ranked bottleneck pressure candidates
 - **Sync reduction**: `.item()` minimized; `zero_grad(set_to_none=True)`
 - **Trigger hook (optional)**: per-sample loss driven injection (e.g., "Surprise→Repair" text augmentation)
 
@@ -71,11 +72,15 @@ entire model. Benchmark summaries also flatten the forward drilldown into
 fields such as `profile_forward_child_count`, `profile_forward_top_avg_ms`,
 `profile_forward_top_pct_of_parent`, and `profile_forward_top_p95_ms`, plus
 backward gradient-ready fields such as `profile_backward_grad_ready_top_avg_ms` and
-`profile_backward_grad_ready_top_pct`. Optimizer drilldowns are available under
+`profile_backward_grad_ready_top_pct`. Backward ready tail fields such as
+`profile_backward_grad_ready_top_p95_pct_of_parent` and
+`profile_backward_grad_ready_top_p99_pct_of_parent` show whether the slowest
+ready module lands late inside the parent backward phase, which is useful when
+the average looks small but p95/p99 pressure is high. Optimizer drilldowns are available under
 `phase_breakdowns.optimizer` and flattened as `profile_optimizer_top_avg_ms`,
 `profile_optimizer_top_pct_of_parent`, `profile_optimizer_top_p95_ms`, and
 related tracked/untracked fields. Benchmark console drilldown lines include
-top-child `avg` and `p95` timings when distribution tracking is enabled.
+top-child `avg`, `p95`, and `p99` timings when distribution tracking is enabled.
 The top-level phases include `data_wait`, so loader stalls can be separated from
 compute time, and their distribution windows are flattened as fields like
 `profile_forward_p95_ms`, `profile_forward_p99_ms`, and
@@ -94,7 +99,8 @@ capped. Summaries also expose `profile_bottleneck_top_candidate`,
 `profile_bottleneck_severity_counts`,
 `profile_bottleneck_severity_thresholds`, and
 `profile_bottleneck_category_summary` for dashboards that compare phase-share,
-coverage-gap, child-hotspot, and readiness-span pressure directly. Category
+coverage-gap, child-hotspot, readiness-span, and readiness-tail pressure
+directly. Category
 summaries include max, total, mean, ranking `pressure_score`, `pressure_rank`,
 top-candidate score, label/reason/next-step, metric/value/provenance, and
 returned/omitted candidate counts plus severity-count pressure per category.
@@ -125,6 +131,14 @@ separately as `cold_start_time_s`, `warmup_samples_per_sec`, and
 throughput when steady steps exist. `compile_init_time_s` captures the immediate
 `torch.compile` wrapper setup cost, while lazy first-forward compilation shows up
 inside the warmup/cold-start window.
+
+For repeated matrix runs, `scripts/bench_matrix.py` also separates the earliest
+run from post-cold runs. Summary rows include compact fragments such as
+`cold(run0,e2e=0.80s/post=0.03s,x=24.9,setup_delta=0.65s)` and
+`post_jitter(reported_sd=...,e2e_sd=...)`, so one-time model/setup effects do
+not get confused with steady jitter. The corresponding JSON fields are emitted
+with `matrix_cold_run_*`, `matrix_post_cold_*`, and
+`matrix_cold_run_vs_post_cold_*` prefixes.
 
 For short MPS or smoke-test runs where compile startup dominates, pass
 `--no-compile` in the benchmark scripts or `FastTrainer(..., use_compile=False)`.
@@ -179,14 +193,18 @@ stats across repeated runs.
 Run a compact comparison matrix:
 ```bash
 python scripts/bench_matrix.py \
-  --device cpu --steps 16 --runs 1 --worker-counts 0 \
+  --device cpu --steps 20 --runs 5 --worker-counts 0 \
   --dataset-modes generated,materialized \
   --compile-modes no-compile \
+  --collect-profile --profile-model --profile-model-depth 1 \
   --json-out reports/bench_matrix.json \
   --summary-out reports/bench_matrix_summary.json
 ```
 Matrix summaries include per-config means, min/max values, stddev, best steady
-throughput, and best end-to-end configuration.
+throughput, best end-to-end configuration, cold/post-cold jitter splits, and
+ranked bottleneck pressure candidates. Backward ready summaries include compact
+fragments such as `bwd_ready_tail(p95=...@...,p99=...@...)` and
+`bwd_ready_shape(children=...,calls=...,samples=...,window=...)`.
 
 Drill into ResNet blocks:
 ```bash

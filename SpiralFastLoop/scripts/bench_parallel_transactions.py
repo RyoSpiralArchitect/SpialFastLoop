@@ -257,6 +257,8 @@ PROFILE_EVENT_SUMMARY_FIELDS = (
     "profile_backward_grad_ready_top_avg_ms",
     "profile_backward_grad_ready_top_pct",
     *_profile_top_summary_fields("profile_backward_grad_ready"),
+    "profile_backward_grad_ready_top_p95_pct_of_parent",
+    "profile_backward_grad_ready_top_p99_pct_of_parent",
     "profile_backward_grad_ready_top_calls",
 )
 
@@ -482,7 +484,9 @@ BEST_RUN_FIELDS = (
     "profile_backward_grad_ready_top_pct",
     "profile_backward_grad_ready_top_p50_ms",
     "profile_backward_grad_ready_top_p95_ms",
+    "profile_backward_grad_ready_top_p95_pct_of_parent",
     "profile_backward_grad_ready_top_p99_ms",
+    "profile_backward_grad_ready_top_p99_pct_of_parent",
     "profile_backward_grad_ready_top_std_ms",
     "profile_backward_grad_ready_top_min_ms",
     "profile_backward_grad_ready_top_max_ms",
@@ -728,6 +732,25 @@ PROFILE_BOTTLENECK_CANDIDATE_SPECS = (
             ("avg_ms", "profile_backward_grad_ready_top_avg_ms"),
             ("p95_ms", "profile_backward_grad_ready_top_p95_ms"),
             ("p99_ms", "profile_backward_grad_ready_top_p99_ms"),
+            ("calls", "profile_backward_grad_ready_top_calls"),
+            ("child_count", "profile_backward_grad_ready_child_count"),
+        ),
+    },
+    {
+        "name": "backward_ready_tail_position",
+        "label": "backward ready tail position",
+        "category": "readiness_tail",
+        "metric": "profile_backward_grad_ready_top_p95_pct_of_parent",
+        "parent_metric": "profile_backward_pct",
+        "unit": "pct_of_parent",
+        "reason": "the slowest ready module lands late in backward tail latency",
+        "next_step": "compare p95/p99 ready positions before changing backward work",
+        "details": (
+            ("p95_pct_of_parent", "profile_backward_grad_ready_top_p95_pct_of_parent"),
+            ("p99_pct_of_parent", "profile_backward_grad_ready_top_p99_pct_of_parent"),
+            ("p95_ms", "profile_backward_grad_ready_top_p95_ms"),
+            ("p99_ms", "profile_backward_grad_ready_top_p99_ms"),
+            ("avg_pct_of_parent", "profile_backward_grad_ready_top_pct"),
             ("calls", "profile_backward_grad_ready_top_calls"),
             ("child_count", "profile_backward_grad_ready_child_count"),
         ),
@@ -2019,7 +2042,13 @@ def _format_profile_event_timing(
             suffix="ms",
         )
         if p95_text is not None:
-            parts.append(f"p95={p95_text}")
+            p95_pct_text = _format_non_negative_metric_value(
+                row.get("p95_pct_of_parent"),
+                precision=1,
+                suffix="%",
+            )
+            suffix = f"@{p95_pct_text}" if p95_pct_text is not None else ""
+            parts.append(f"p95={p95_text}{suffix}")
         for field, label in (
             ("p99_ms", "p99"),
             ("std_ms", "std"),
@@ -2030,7 +2059,13 @@ def _format_profile_event_timing(
                 suffix="ms",
             )
             if value_text is not None:
-                parts.append(f"{label}={value_text}")
+                pct_text = _format_non_negative_metric_value(
+                    row.get(f"{label}_pct_of_parent"),
+                    precision=1,
+                    suffix="%",
+                )
+                suffix = f"@{pct_text}" if pct_text is not None else ""
+                parts.append(f"{label}={value_text}{suffix}")
     parts.extend(_profile_count_fields(row))
     return " ".join(parts)
 

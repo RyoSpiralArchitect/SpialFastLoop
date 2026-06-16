@@ -15,6 +15,8 @@ rewriting a project around a heavyweight framework.
 - Phase profiling for train, evaluate, and predict loops, including data wait,
   transfer, forward, loss, postprocess, metrics, optimizer, and selected module
   drilldowns
+- Matrix benchmark diagnostics for cold/post-cold jitter, setup pressure, and
+  ranked bottleneck candidates
 - Trigger hooks for per-sample-loss driven hard-sample injection
 
 ## Install
@@ -122,6 +124,15 @@ dominated by compile startup. Use `--meter-fast-mode` to skip throughput
 tail/window bookkeeping, and `--no-profile-distribution` when profile totals
 are enough without per-phase p50/p95/p99/std samples.
 
+Model profiling also records backward gradient-ready positions. Summary fields
+such as `profile_backward_grad_ready_top_pct`,
+`profile_backward_grad_ready_top_p95_pct_of_parent`, and
+`profile_backward_grad_ready_top_p99_pct_of_parent` show whether a selected
+module is merely slow on average or lands late in the backward tail. Matrix
+output condenses that signal into `bwd_ready_tail(...)`,
+`bwd_ready_shape(...)`, and the `backward_ready_tail_position` bottleneck
+candidate.
+
 ## Example Smoke Runs
 
 The examples emit strict JSON so they can be used as tiny CI or notebook smoke
@@ -177,7 +188,9 @@ With `--profile-model`, backward grad-ready rows print `avg_ms@pct`, where
 `pct` is the average event position within the parent backward phase. Aggregate
 summaries also expose backward grad-ready top timing and position fields for
 matrix comparisons, plus earliest/latest/span readiness fields that show how
-wide the backward readiness window is. Forward and optimizer drilldowns include
+wide the backward readiness window is. Backward ready p95/p99 parent-position
+fields make tail pressure visible when average timing is not enough. Forward
+and optimizer drilldowns include
 `coverage_pct`, `untracked_pct`, and `overtracked_pct_of_parent` so module-level
 hooks can be judged against their parent phase. Human profile summaries include
 `calls`, timing `samples`, and bounded `window` counts when distribution samples
@@ -186,17 +199,24 @@ printed labels such as `model.layer1`.
 
 ```bash
 python3 scripts/bench_matrix.py \
-  --device cpu --steps 16 --runs 1 --worker-counts 0 \
+  --device cpu --steps 20 --runs 5 --worker-counts 0 \
   --dataset-modes generated,materialized \
   --compile-modes no-compile \
+  --collect-profile --profile-model --profile-model-depth 1 \
   --json-out reports/bench_matrix.json \
   --summary-out reports/bench_matrix_summary.json
 ```
 Matrix summaries include per-config means, min/max values, stddev, setup
-breakdowns, best steady throughput, and best end-to-end configuration. Profile
-summaries preserve phase fields such as `user_metrics`, `postprocess`, and
+breakdowns, best steady throughput, and best end-to-end configuration. Repeated
+runs split the earliest run from post-cold runs with `matrix_cold_run_*`,
+`matrix_post_cold_*`, and `matrix_cold_run_vs_post_cold_*` fields; console
+rows show compact `cold(...)` and `post_jitter(...)` fragments so one-time setup
+or first-run spikes do not masquerade as steady jitter. Profile summaries
+preserve phase fields such as `user_metrics`, `postprocess`, and
 `collect_output` when a run emits them. Per-config groups also carry
-`summary_diagnostic_fields` for missing, non-finite, or out-of-range inputs.
+`summary_diagnostic_fields` for missing, non-finite, or out-of-range inputs and
+ranked bottleneck pressure categories for phase share, child hotspots, coverage
+gaps, readiness span, and readiness tail.
 
 ## License
 
