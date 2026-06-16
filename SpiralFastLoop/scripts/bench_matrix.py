@@ -127,6 +127,82 @@ def _group_key(row: dict) -> tuple[str, str, int]:
     )
 
 
+MATRIX_COLD_RUN_METRICS = (
+    "reported_samples_per_sec",
+    "end_to_end_wall_time_s",
+    "setup_time_s",
+)
+
+
+def _row_run_index(row: dict) -> Optional[int]:
+    raw = row.get("run")
+    if isinstance(raw, (bool, str)):
+        return None
+    try:
+        return non_negative_int_arg(raw)
+    except argparse.ArgumentTypeError:
+        return None
+
+
+def _valid_metric_value(row: dict, field: str) -> Optional[float]:
+    value = _finite_summary_value(row.get(field))
+    if value is None:
+        return None
+    if value < _summary_metric_min_value(field):
+        return None
+    max_value = _summary_metric_max_value(field)
+    if max_value is not None and value > max_value:
+        return None
+    return value
+
+
+def _add_matrix_cold_run_summary(summary: dict, group_rows: list[dict]) -> None:
+    indexed_rows = [
+        (run_index, position, row)
+        for position, row in enumerate(group_rows)
+        if (run_index := _row_run_index(row)) is not None
+    ]
+    if len(indexed_rows) <= 1:
+        return
+
+    cold_run_index, cold_position, cold_row = min(
+        indexed_rows,
+        key=lambda item: (item[0], item[1]),
+    )
+    post_cold_rows = [
+        row
+        for _run_index, position, row in indexed_rows
+        if position != cold_position
+    ]
+    if not post_cold_rows:
+        return
+
+    summary["matrix_cold_run_index"] = cold_run_index
+    summary["matrix_post_cold_runs"] = len(post_cold_rows)
+    for field in MATRIX_COLD_RUN_METRICS:
+        cold_value = _valid_metric_value(cold_row, field)
+        if cold_value is not None:
+            summary[f"matrix_cold_run_{field}"] = cold_value
+
+        metric_stats = summarize_metric(
+            post_cold_rows,
+            field,
+            missing_as_zero=field in BASE_SUMMARY_FIELDS,
+            min_value=_summary_metric_min_value(field),
+            max_value=_summary_metric_max_value(field),
+            integer=field in SUMMARY_INTEGER_FIELDS,
+        )
+        for stat_name, value in metric_stats.items():
+            summary[f"matrix_post_cold_{stat_name}_{field}"] = value
+
+        post_mean = _finite_summary_value(metric_stats.get("mean"))
+        if cold_value is None or post_mean is None or post_mean < 0.0:
+            continue
+        summary[f"matrix_cold_run_vs_post_cold_delta_{field}"] = cold_value - post_mean
+        if post_mean > 0.0:
+            summary[f"matrix_cold_run_vs_post_cold_ratio_{field}"] = cold_value / post_mean
+
+
 def summarize_rows(rows: list[dict]) -> dict:
     groups: dict[tuple[str, str, int], list[dict]] = {}
     for row in rows:
@@ -183,6 +259,7 @@ def summarize_rows(rows: list[dict]) -> dict:
                 summary_diagnostics.append(diagnostic)
             for stat_name, value in metric_stats.items():
                 summary[f"{stat_name}_{field}"] = value
+        _add_matrix_cold_run_summary(summary, group_rows)
         _add_summary_diagnostic_totals(summary, summary_diagnostics)
         _add_profile_bottleneck_candidates(summary)
         summaries.append(summary)
@@ -287,6 +364,149 @@ def _format_summary_jitter(row: dict) -> str:
     return f"jitter({','.join(parts)})"
 
 
+def _format_post_cold_jitter(row: dict) -> str:
+    parts = []
+    for metric_name, label, precision, suffix in (
+        ("reported_samples_per_sec", "reported_sd", 1, "/s"),
+        ("end_to_end_wall_time_s", "e2e_sd", 2, "s"),
+    ):
+        sample_count_field = f"matrix_post_cold_sample_count_{metric_name}"
+        if sample_count_field in row:
+            sample_count = _positive_sample_count_value(row.get(sample_count_field))
+        else:
+            sample_count = _positive_sample_count_value(row.get("matrix_post_cold_runs"))
+        if sample_count is None or sample_count <= 1:
+            continue
+        stddev = _finite_summary_value(row.get(f"matrix_post_cold_stddev_{metric_name}"))
+        if stddev is None or stddev <= 0.0:
+            continue
+        parts.append(f"{label}={stddev:.{precision}f}{suffix}")
+    if not parts:
+        return ""
+    return f"post_jitter({','.join(parts)})"
+
+
+def _format_matrix_cold_run(row: dict) -> str:
+    post_cold_runs = _positive_sample_count_value(row.get("matrix_post_cold_runs"))
+    if post_cold_runs is None:
+        return ""
+    run_index = _row_run_index({"run": row.get("matrix_cold_run_index")})
+    run_label = f"run{run_index}" if run_index is not None else "run"
+    parts = [run_label]
+
+    cold_e2e = _finite_summary_value(row.get("matrix_cold_run_end_to_end_wall_time_s"))
+    post_e2e = _finite_summary_value(row.get("matrix_post_cold_mean_end_to_end_wall_time_s"))
+    if cold_e2e is not None and cold_e2e >= 0.0:
+        e2e_text = f"e2e={cold_e2e:.2f}s"
+        if post_e2e is not None and post_e2e >= 0.0:
+            e2e_text = f"{e2e_text}/post={post_e2e:.2f}s"
+        parts.append(e2e_text)
+
+    e2e_ratio = _finite_summary_value(
+        row.get("matrix_cold_run_vs_post_cold_ratio_end_to_end_wall_time_s")
+    )
+    if e2e_ratio is not None and e2e_ratio > 0.0:
+        parts.append(f"x={e2e_ratio:.1f}")
+
+    setup_delta = _finite_summary_value(
+        row.get("matrix_cold_run_vs_post_cold_delta_setup_time_s")
+    )
+    if setup_delta is not None and abs(setup_delta) >= 0.005:
+        parts.append(f"setup_delta={setup_delta:.2f}s")
+    return f"cold({','.join(parts)})" if len(parts) > 1 else ""
+
+
+def _format_compact_count(raw: Optional[float]) -> Optional[str]:
+    if raw is None:
+        return None
+    if raw.is_integer():
+        return str(int(raw))
+    return f"{raw:.1f}"
+
+
+def _profile_metric_value(row: dict, field: str, *, aggregate: bool) -> Optional[float]:
+    if aggregate:
+        return _measured_summary_value(row, f"mean_{field}")
+    return _direct_profile_metric_value(row, field)
+
+
+def _format_backward_ready_parts(row: dict, *, aggregate: bool) -> list[str]:
+    parts = []
+    span_ms = _profile_metric_value(
+        row,
+        "profile_backward_grad_ready_span_avg_ms",
+        aggregate=aggregate,
+    )
+    span_pct = _profile_metric_value(
+        row,
+        "profile_backward_grad_ready_span_pct",
+        aggregate=aggregate,
+    )
+    if span_ms is not None:
+        span_text = f"bwd_span={span_ms:.2f}ms"
+        if span_pct is not None:
+            span_text = f"{span_text}@{span_pct:.1f}%"
+        parts.append(span_text)
+
+    ready_pct = _profile_metric_value(row, "profile_backward_grad_ready_top_pct", aggregate=aggregate)
+    ready_avg_ms = _profile_metric_value(
+        row,
+        "profile_backward_grad_ready_top_avg_ms",
+        aggregate=aggregate,
+    )
+    if ready_pct is not None:
+        ready_text = f"bwd_ready={ready_pct:.1f}%"
+        if ready_avg_ms is not None:
+            ready_text = f"{ready_text}@{ready_avg_ms:.2f}ms"
+        parts.append(ready_text)
+
+    tail_parts = []
+    for field_name, pct_field_name, label in (
+        (
+            "profile_backward_grad_ready_top_p95_ms",
+            "profile_backward_grad_ready_top_p95_pct_of_parent",
+            "p95",
+        ),
+        (
+            "profile_backward_grad_ready_top_p99_ms",
+            "profile_backward_grad_ready_top_p99_pct_of_parent",
+            "p99",
+        ),
+        (
+            "profile_backward_grad_ready_top_std_ms",
+            "",
+            "std",
+        ),
+    ):
+        value = _profile_metric_value(row, field_name, aggregate=aggregate)
+        if value is None:
+            continue
+        text = f"{label}={value:.2f}ms"
+        if pct_field_name:
+            pct_value = _profile_metric_value(row, pct_field_name, aggregate=aggregate)
+            if pct_value is not None:
+                text = f"{text}@{pct_value:.1f}%"
+        tail_parts.append(text)
+    if tail_parts:
+        parts.append(f"bwd_ready_tail({','.join(tail_parts)})")
+
+    shape_parts = []
+    for field_name, label in (
+        ("profile_backward_grad_ready_child_count", "children"),
+        ("profile_backward_grad_ready_top_calls", "calls"),
+        ("profile_backward_grad_ready_top_sample_count", "samples"),
+        ("profile_backward_grad_ready_top_window_sample_count", "window"),
+    ):
+        text = _format_compact_count(
+            _profile_metric_value(row, field_name, aggregate=aggregate)
+        )
+        if text is not None:
+            shape_parts.append(f"{label}={text}")
+    if shape_parts:
+        parts.append(f"bwd_ready_shape({','.join(shape_parts)})")
+    return parts
+
+
 def _format_top_bottleneck_candidate(row: dict) -> str:
     candidate = row.get("profile_bottleneck_top_candidate")
     if not isinstance(candidate, dict):
@@ -365,6 +585,12 @@ def _format_summary_row(row: dict) -> str:
     jitter_text = _format_summary_jitter(row)
     if jitter_text:
         profile_parts.append(jitter_text)
+    cold_run_text = _format_matrix_cold_run(row)
+    if cold_run_text:
+        profile_parts.append(cold_run_text)
+    post_cold_jitter_text = _format_post_cold_jitter(row)
+    if post_cold_jitter_text:
+        profile_parts.append(post_cold_jitter_text)
     forward_backward_pct = _measured_summary_value(row, "mean_profile_forward_backward_pct")
     if forward_backward_pct is not None:
         profile_parts.append(f"fwd+bwd={forward_backward_pct:.1f}%")
@@ -395,20 +621,7 @@ def _format_summary_row(row: dict) -> str:
             optimizer_text = f"{optimizer_text}@{optimizer_top_avg_ms:.2f}ms"
         profile_parts.append(optimizer_text)
     profile_parts.extend(_format_phase_tail_parts(row, aggregate=True))
-    backward_ready_pct = _measured_summary_value(row, "mean_profile_backward_grad_ready_top_pct")
-    backward_ready_avg_ms = _measured_summary_value(row, "mean_profile_backward_grad_ready_top_avg_ms")
-    backward_ready_span_ms = _measured_summary_value(row, "mean_profile_backward_grad_ready_span_avg_ms")
-    backward_ready_span_pct = _measured_summary_value(row, "mean_profile_backward_grad_ready_span_pct")
-    if backward_ready_span_ms is not None:
-        span_text = f"bwd_span={backward_ready_span_ms:.2f}ms"
-        if backward_ready_span_pct is not None:
-            span_text = f"{span_text}@{backward_ready_span_pct:.1f}%"
-        profile_parts.append(span_text)
-    if backward_ready_pct is not None:
-        ready_text = f"bwd_ready={backward_ready_pct:.1f}%"
-        if backward_ready_avg_ms is not None:
-            ready_text = f"{ready_text}@{backward_ready_avg_ms:.2f}ms"
-        profile_parts.append(ready_text)
+    profile_parts.extend(_format_backward_ready_parts(row, aggregate=True))
     open_phase_count = _measured_summary_value(row, "mean_profile_open_phase_count")
     open_detail_count = _measured_summary_value(row, "mean_profile_open_detail_count")
     open_parts = []
@@ -510,6 +723,7 @@ def _format_run_row(dataset_mode: str, compile_mode: str, workers: int, run_inde
     scheduler_summary = _format_scheduler_summary(result)
     if scheduler_summary:
         profile_parts.append(f"scheduler({scheduler_summary})")
+    profile_parts.extend(_format_backward_ready_parts(result, aggregate=False))
     bottleneck_source = _annotate_profile_bottleneck_candidates(dict(result))
     bottleneck_text = _format_top_bottleneck_candidate(bottleneck_source)
     if bottleneck_text:

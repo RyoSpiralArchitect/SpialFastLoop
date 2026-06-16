@@ -26,7 +26,9 @@ PROFILE_COMPACT_DISTRIBUTION_FIELDS = (
     "window_sample_count",
     "p50_ms",
     "p95_ms",
+    "p95_pct_of_parent",
     "p99_ms",
+    "p99_pct_of_parent",
     "std_ms",
     "min_ms",
     "max_ms",
@@ -1036,6 +1038,22 @@ class PhaseProfiler:
                 row[field] = source[field]
         return row
 
+    @staticmethod
+    def _add_event_tail_pct_of_parent(row: Dict[str, Any], parent_avg_ms: Optional[float]) -> None:
+        if parent_avg_ms is None or parent_avg_ms <= 0.0:
+            return
+        for source_name in ("p95_ms", "p99_ms"):
+            raw = row.get(source_name)
+            if raw is None or isinstance(raw, (bool, str)):
+                continue
+            try:
+                value = float(raw)
+            except Exception:
+                continue
+            if not math.isfinite(value) or value < 0.0:
+                continue
+            row[f"{source_name[:-3]}_pct_of_parent"] = 100.0 * value / parent_avg_ms
+
     def start(self, name: str) -> None:
         if not self.enabled:
             return
@@ -1204,8 +1222,11 @@ class PhaseProfiler:
                     self.event_calls.get(group, {}).get(name, 0),
                     self.event_samples.get(group, {}).get(name, ()),
                 )
+                parent_avg_ms = None
                 if event_parent_avg_s is not None and event_parent_avg_s > 0.0:
-                    row["avg_pct_of_parent"] = (row["avg_ms"] / 1e3) * 100.0 / event_parent_avg_s
+                    parent_avg_ms = event_parent_avg_s * 1e3
+                    row["avg_pct_of_parent"] = 100.0 * row["avg_ms"] / parent_avg_ms
+                    self._add_event_tail_pct_of_parent(row, parent_avg_ms)
                 children[name] = row
 
             def compact_event_child(name: str, row: Mapping[str, Any]) -> Dict[str, Any]:

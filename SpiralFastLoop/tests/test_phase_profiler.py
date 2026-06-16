@@ -531,11 +531,12 @@ def test_phase_profiler_event_preserves_body_exception_on_invalid_elapsed(
 def test_phase_profiler_events_report_parent_relative_position(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    timestamps = iter([1.0, 1.04, 1.10])
+    timestamps = iter([1.0, 1.04, 1.08, 1.10])
     monkeypatch.setattr(utils_mod.time, "perf_counter", lambda: next(timestamps))
     profiler = PhaseProfiler(enabled=True)
 
     profiler.start("backward")
+    profiler.record_event_since_start("backward", "backward_grad_ready", "model.0")
     profiler.record_event_since_start("backward", "backward_grad_ready", "model.0")
     profiler.stop("backward")
 
@@ -546,9 +547,13 @@ def test_phase_profiler_events_report_parent_relative_position(
     assert event_group["parent"] == "backward"
     assert event_group["parent_total_s"] == pytest.approx(0.10)
     assert event_group["parent_avg_ms"] == pytest.approx(100.0)
-    assert child["avg_ms"] == pytest.approx(40.0)
-    assert child["avg_pct_of_parent"] == pytest.approx(40.0)
-    assert top_child["avg_pct_of_parent"] == pytest.approx(40.0)
+    assert child["avg_ms"] == pytest.approx(60.0)
+    assert child["avg_pct_of_parent"] == pytest.approx(60.0)
+    assert child["p95_pct_of_parent"] == pytest.approx(80.0)
+    assert child["p99_pct_of_parent"] == pytest.approx(80.0)
+    assert top_child["avg_pct_of_parent"] == pytest.approx(60.0)
+    assert top_child["p95_pct_of_parent"] == pytest.approx(80.0)
+    assert top_child["p99_pct_of_parent"] == pytest.approx(80.0)
 
 
 def test_phase_profiler_events_report_readiness_span(
@@ -3321,7 +3326,9 @@ def test_profile_flat_metrics_include_backward_event_position() -> None:
     assert metrics["profile_backward_grad_ready_top_pct"] == pytest.approx(40.0)
     assert metrics["profile_backward_grad_ready_top_p50_ms"] == pytest.approx(8.5)
     assert metrics["profile_backward_grad_ready_top_p95_ms"] == pytest.approx(9.0)
+    assert metrics["profile_backward_grad_ready_top_p95_pct_of_parent"] == pytest.approx(45.0)
     assert metrics["profile_backward_grad_ready_top_p99_ms"] == pytest.approx(9.5)
+    assert metrics["profile_backward_grad_ready_top_p99_pct_of_parent"] == pytest.approx(47.5)
     assert metrics["profile_backward_grad_ready_top_std_ms"] == pytest.approx(0.5)
     assert metrics["profile_backward_grad_ready_top_min_ms"] == pytest.approx(8.0)
     assert metrics["profile_backward_grad_ready_top_max_ms"] == pytest.approx(10.0)
@@ -3363,6 +3370,8 @@ def test_profile_flat_metrics_tolerate_partial_backward_event_rows() -> None:
     assert "profile_backward_grad_ready_span_pct" not in metrics
     assert "profile_backward_grad_ready_top_pct" not in metrics
     assert "profile_backward_grad_ready_top_p95_ms" not in metrics
+    assert "profile_backward_grad_ready_top_p95_pct_of_parent" not in metrics
+    assert "profile_backward_grad_ready_top_p99_pct_of_parent" not in metrics
     assert "profile_backward_grad_ready_top_calls" not in metrics
     assert metrics["profile_flat_metric_invalid_count"] == 0
     assert "profile_flat_metric_invalid_fields" not in metrics
@@ -3417,7 +3426,9 @@ def test_profile_flat_metrics_reject_invalid_backward_event_values() -> None:
     assert "profile_backward_grad_ready_top_pct" not in metrics
     assert "profile_backward_grad_ready_top_p50_ms" not in metrics
     assert "profile_backward_grad_ready_top_p95_ms" not in metrics
+    assert "profile_backward_grad_ready_top_p95_pct_of_parent" not in metrics
     assert "profile_backward_grad_ready_top_p99_ms" not in metrics
+    assert "profile_backward_grad_ready_top_p99_pct_of_parent" not in metrics
     assert "profile_backward_grad_ready_top_std_ms" not in metrics
     assert "profile_backward_grad_ready_top_min_ms" not in metrics
     assert "profile_backward_grad_ready_top_max_ms" not in metrics
