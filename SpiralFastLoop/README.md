@@ -12,8 +12,9 @@ rewriting a project around a heavyweight framework.
 - AMP policy helpers for accelerator-specific dtype choices
 - Gradient accumulation with low-overhead metrics
 - Optional `torch.compile` with `use_compile=False` for short smoke runs
-- Phase profiling for data wait, transfer, forward, loss, backward, optimizer,
-  and selected module drilldowns
+- Phase profiling for train, evaluate, and predict loops, including data wait,
+  transfer, forward, loss, postprocess, metrics, optimizer, and selected module
+  drilldowns
 - Trigger hooks for per-sample-loss driven hard-sample injection
 
 ## Install
@@ -52,6 +53,20 @@ metrics = trainer.train_one_epoch(loader, criterion, steps=200)
 print(metrics["reported_samples_per_sec"])
 ```
 
+For the shortest dataset-first path, let the trainer build the loader and still
+pass training options directly:
+
+```python
+metrics = trainer.fit(
+    dataset,
+    criterion,
+    batch_size=256,
+    steps=200,
+    collect_profile=True,
+    warmup_steps=4,
+)
+```
+
 ## Profiling
 
 ```python
@@ -70,14 +85,76 @@ print(metrics["profile"]["phase_breakdowns"]["forward"]["top_children"][:3])
 print(metrics["profile"]["phase_events"]["backward_grad_ready"]["top_children"][:3])
 ```
 
+Evaluation uses the same lightweight phase profiler:
+
+```python
+eval_metrics = trainer.evaluate(
+    loader,
+    criterion,
+    steps=50,
+    collect_profile=True,
+)
+print(eval_metrics["profile"]["top_phases"][:3])
+```
+
+Prediction keeps the default list return value. Ask for metrics explicitly when
+you want inference timings:
+
+```python
+predictions, pred_metrics = trainer.predict(
+    loader,
+    steps=50,
+    collect_profile=True,
+)
+print(pred_metrics["profile"]["top_phases"][:3])
+```
+
+If prediction inputs do not expose an inferable batch dimension, the returned
+metrics report `unmeasured_steps` and `batch_size_inference_failures` instead of
+silently presenting those steps as measured throughput.
+Train, evaluation, and prediction metrics all expose `reported_samples_per_sec`;
+CUDA/MPS runs also include device memory fields such as `cuda_max_mem_bytes` or
+`mps_current_mem_bytes` when the backend exposes them.
+
 Benchmark scripts default to `--log-interval 0` to avoid extra synchronization
 in timing runs. Use `--no-compile` when short MPS or CPU smoke tests are
-dominated by compile startup.
+dominated by compile startup. Use `--meter-fast-mode` to skip throughput
+tail/window bookkeeping, and `--no-profile-distribution` when profile totals
+are enough without per-phase p50/p95/p99/std samples.
+
+## Example Smoke Runs
+
+The examples emit strict JSON so they can be used as tiny CI or notebook smoke
+runs before scaling up the benchmark size.
+
+```bash
+PYTHONNOUSERSITE=1 python3 examples/bench_synth.py \
+  --device cpu --samples 8 --feature-dim 4 --hidden-dim 8 --classes 2 \
+  --batch-size 4 --steps 1 --grad-accum 1 --workers 0 \
+  --log-interval 0 --no-compile \
+  --meter-fast-mode --collect-profile --no-profile-distribution
+```
+
+```bash
+PYTHONNOUSERSITE=1 python3 examples/train_resnet.py \
+  --dataset fake --device cpu --samples 8 --feature-dim 4 --classes 2 \
+  --batch-size 4 --steps 1 --grad-accum 1 --workers 0 \
+  --log-interval 0 --no-compile \
+  --meter-fast-mode --collect-profile --no-profile-distribution
+```
+
+Both commands print top-level `device`, `config`, and `metrics` fields; the
+ResNet example also reports the resolved `dataset`. `PYTHONNOUSERSITE=1` keeps
+local Python startup hooks from writing extra text to JSON stdout. Increase
+`--samples`, `--steps`, and model sizes for throughput runs, add
+`--collect-profile --profile-sync --profile-window 512` for synchronized
+phase timings with per-phase tail samples, or use
+`--dataset cifar10 --download` when CIFAR-10 should be fetched explicitly.
 
 ## Transactional Benchmark
 
 ```bash
-python scripts/bench_parallel_transactions.py \
+python3 scripts/bench_parallel_transactions.py \
   --device mps --steps 40 --runs 1 --workers 2 \
   --dataset-mode materialized \
   --warmup-steps 4 --no-compile \
@@ -88,21 +165,38 @@ python scripts/bench_parallel_transactions.py \
 ```
 
 The transactional benchmark reports training-only `wall_time_s`, separate
-`setup_time_s`, combined `end_to_end_wall_time_s`, and
+`setup_time_s`, combined `end_to_end_wall_time_s`, and an `init(...)`
+breakdown for dataset, loader, model, and compile setup. It also records
 `dataset_materialized_bytes` so materialized-data runs remain transparent.
-Use `--summary-out` to capture mean/min/max/stddev timing and throughput
-stats across repeated runs.
+Use `--summary-out` to capture mean/min/max/stddev timing, setup, throughput,
+and run-context stats across repeated runs. Aggregate summaries also include
+`summary_diagnostic_fields` when metrics contain missing, non-finite, or
+out-of-range values, plus best-run omitted-field lists when a selected run has
+malformed values that are left out of `best_reported` or `best_end_to_end`.
+With `--profile-model`, backward grad-ready rows print `avg_ms@pct`, where
+`pct` is the average event position within the parent backward phase. Aggregate
+summaries also expose backward grad-ready top timing and position fields for
+matrix comparisons, plus earliest/latest/span readiness fields that show how
+wide the backward readiness window is. Forward and optimizer drilldowns include
+`coverage_pct`, `untracked_pct`, and `overtracked_pct_of_parent` so module-level
+hooks can be judged against their parent phase. Human profile summaries include
+`calls`, timing `samples`, and bounded `window` counts when distribution samples
+are available. Include filters accept either module names such as `layer1` or
+printed labels such as `model.layer1`.
 
 ```bash
-python scripts/bench_matrix.py \
+python3 scripts/bench_matrix.py \
   --device cpu --steps 16 --runs 1 --worker-counts 0 \
   --dataset-modes generated,materialized \
   --compile-modes no-compile \
   --json-out reports/bench_matrix.json \
   --summary-out reports/bench_matrix_summary.json
 ```
-Matrix summaries include per-config means, min/max values, stddev, best steady
-throughput, and best end-to-end configuration.
+Matrix summaries include per-config means, min/max values, stddev, setup
+breakdowns, best steady throughput, and best end-to-end configuration. Profile
+summaries preserve phase fields such as `user_metrics`, `postprocess`, and
+`collect_output` when a run emits them. Per-config groups also carry
+`summary_diagnostic_fields` for missing, non-finite, or out-of-range inputs.
 
 ## License
 

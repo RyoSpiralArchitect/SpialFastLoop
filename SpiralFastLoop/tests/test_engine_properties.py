@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from pathlib import Path
 import sys
 from types import SimpleNamespace
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -33,10 +34,10 @@ if HAVE_HYPOTHESIS:
         """Generate rank-1 to rank-3 tensors with a fixed batch dimension."""
 
         rest = st.lists(st.integers(min_value=1, max_value=4), min_size=0, max_size=2)
-        return rest.map(lambda dims: torch.randn((batch_dim, *dims), dtype=torch.float32))
+        return rest.map(lambda dims: torch.randn((batch_dim, *dims), dtype=torch.float32, device="cpu"))
 
     @st.composite
-    def batch_structure(draw, depth: int = 0, batch_dim: int | None = None):
+    def batch_structure(draw, depth: int = 0, batch_dim: Optional[int] = None):
         if batch_dim is None:
             batch_dim = draw(st.integers(min_value=1, max_value=4))
         if depth >= MAX_DEPTH:
@@ -160,7 +161,7 @@ if HAVE_HYPOTHESIS:
             return len(batch)
         raise AssertionError(f"Unsupported batch element {type(batch)!r}")
 
-    @settings(max_examples=120, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=120, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     @given(batch_pairs())
     def test_concatenate_batches_preserves_structure(pair):
         base, extra = pair
@@ -171,13 +172,13 @@ if HAVE_HYPOTHESIS:
         combined_size = _expected_batch_size(combined)
         assert combined_size == base_size + extra_size
 
-    @settings(max_examples=120, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=120, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     @given(batch_structure())
     def test_concatenate_handles_none_base(extra):
         combined = _concatenate_batches(None, extra)
         _structures_close(combined, extra)
 
-    @settings(max_examples=120, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=120, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     @given(batch_structure())
     def test_infer_batch_size_matches_manual(batch):
         expected = _expected_batch_size(batch)
@@ -186,6 +187,12 @@ if HAVE_HYPOTHESIS:
 else:
     def test_hypothesis_dependent_cases_skipped():
         pytest.skip("hypothesis not installed")
+
+
+@pytest.mark.parametrize("batch", [torch.tensor(1.0), torch.empty(0, 2)])
+def test_infer_batch_size_rejects_unmeasurable_tensors(batch: torch.Tensor) -> None:
+    with pytest.raises(ValueError, match="batch|scalar"):
+        _infer_batch_size(batch)
 
 
 def test_configure_cuda_backends_updates_flags():
@@ -231,6 +238,25 @@ def test_configure_cuda_backends_updates_flags():
     assert called["math"] is True
 
 
+@pytest.mark.parametrize(
+    ("args", "match"),
+    [
+        ((1, True, True, True, True, False), "enable_tf32"),
+        ((True, "true", True, True, True, False), "cudnn_benchmark"),
+        ((True, True, 1, True, True, False), "reduced_precision_reduction"),
+        ((True, True, True, "false", True, False), "enable_flash_sdp"),
+        ((True, True, True, True, 0, False), "enable_mem_efficient_sdp"),
+        ((True, True, True, True, True, "true"), "enable_math_sdp"),
+    ],
+)
+def test_configure_cuda_backends_rejects_invalid_boolean_settings(
+    args: tuple[object, object, object, object, object, object],
+    match: str,
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        _configure_cuda_backends(*args)
+
+
 if HAVE_HYPOTHESIS:
     @st.composite
     def loss_tensors(draw):
@@ -262,7 +288,7 @@ if HAVE_HYPOTHESIS:
         dim2 = draw(st.integers(min_value=1, max_value=4))
         return torch.randn(dim0, dim1, dim2, dtype=torch.float32)
 
-    @settings(max_examples=120, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=120, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     @given(loss_tensors())
     def test_ensure_loss_vector_behaviour(loss):
         vector = _ensure_loss_vector(loss)

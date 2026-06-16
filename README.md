@@ -67,13 +67,55 @@ print(metrics["profile"]["phase_events"]["backward_grad_ready"]["top_children"][
 `phase_breakdowns.forward` and backward gradient-ready timings under
 `phase_events.backward_grad_ready`. Use `profile_model_include="layer1,layer4"`
 with `profile_model_depth=2` to drill into selected blocks without hooking the
-entire model. The top-level phases include `data_wait`, so loader stalls can be
-separated from compute time. Throughput summaries include `p99_s` and
-`std_batch_s`, and optimizer internals are exposed under
-`phase_breakdowns.optimizer`. Set `profile_sync=True` only when you need stricter
-accelerator timings; it synchronizes around profiled regions and slows the run
-down. Use `--no-profile-distribution` in benchmark scripts to keep totals while
-skipping percentile windows when profiler overhead matters.
+entire model. Benchmark summaries also flatten the forward drilldown into
+fields such as `profile_forward_child_count`, `profile_forward_top_avg_ms`,
+`profile_forward_top_pct_of_parent`, and `profile_forward_top_p95_ms`, plus
+backward gradient-ready fields such as `profile_backward_grad_ready_top_avg_ms` and
+`profile_backward_grad_ready_top_pct`. Optimizer drilldowns are available under
+`phase_breakdowns.optimizer` and flattened as `profile_optimizer_top_avg_ms`,
+`profile_optimizer_top_pct_of_parent`, `profile_optimizer_top_p95_ms`, and
+related tracked/untracked fields. Benchmark console drilldown lines include
+top-child `avg` and `p95` timings when distribution tracking is enabled.
+The top-level phases include `data_wait`, so loader stalls can be separated from
+compute time, and their distribution windows are flattened as fields like
+`profile_forward_p95_ms`, `profile_forward_p99_ms`, and
+`profile_forward_std_ms` when distribution tracking is enabled. Benchmark
+output surfaces those tails in the `phases:` line, and matrix output also
+surfaces compact summaries such as `fwd_tail(p95=...)`, `bwd_tail(p99=...)`,
+and `opt_tail(std=...)`. Aggregate benchmark summaries also include ranked
+`profile_bottleneck_candidates` with the strongest phase, top-child, untracked,
+and backward-readiness-span signals normalized into profile-percentage scores;
+each candidate carries a `high`/`medium`/`low` severity label, reason,
+next-step hint, rank, `score_basis`/`score_formula` provenance for direct versus
+parent-weighted scores, and returned/omitted candidate counts when the list is
+capped. Summaries also expose `profile_bottleneck_top_candidate`,
+`profile_bottleneck_top_category`,
+`profile_bottleneck_category_order`,
+`profile_bottleneck_severity_counts`,
+`profile_bottleneck_severity_thresholds`, and
+`profile_bottleneck_category_summary` for dashboards that compare phase-share,
+coverage-gap, child-hotspot, and readiness-span pressure directly. Category
+summaries include max, total, mean, ranking `pressure_score`, `pressure_rank`,
+top-candidate score, label/reason/next-step, metric/value/provenance, and
+returned/omitted candidate counts plus severity-count pressure per category.
+Compact best-run snapshots preserve these bottleneck fields when they are present
+on the selected run. Individual benchmark runs and raw JSON rows are annotated
+with the same candidate fields, so dashboards can compare per-run and aggregate
+bottlenecks without recomputing them.
+Matrix summaries surface the same signal as
+compact `hotspot=...` and strongest-first `pressure(...)` fragments, including
+the top hotspot severity, category-level severity suffixes such as `[high]`,
+category pressure ranks such as `#1`, category `sum=...`, and
+category `omitted=...` and `top_omitted` markers when the candidate list is capped, plus
+`severity_counts(...)` and global cap markers such as
+`candidates=8/9;omitted=1;limit=8`. The
+transactional benchmark prints the same severity-aware `Bottleneck:` line before
+the aggregate JSON when candidates are available.
+The ResNet drilldown script prints the same top-phase tail fields. Throughput
+summaries include `p99_s` and `std_batch_s`. Set `profile_sync=True` only when
+you need stricter accelerator timings; it synchronizes around profiled regions
+and slows the run down. Use `--no-profile-distribution` in benchmark scripts to
+keep totals while skipping percentile windows when profiler overhead matters.
 
 For cold-start versus steady-state reads, pass `warmup_steps=N`. The first `N`
 completed training steps are still executed and measured, but they are reported

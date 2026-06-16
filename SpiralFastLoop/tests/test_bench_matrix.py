@@ -1,18 +1,27 @@
 from __future__ import annotations
 
+import json
 import sys
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scripts import bench_matrix as bm
 from scripts.bench_matrix import (
     _compile_requested,
+    _format_run_row,
+    _format_summary_row,
+    _measured_summary_value,
     _parse_csv_choices,
     _parse_worker_counts,
+    _run_args,
+    parse_args,
     summarize_rows,
 )
+from scripts.bench_parallel_transactions import BenchmarkResult
 
 
 def test_parse_csv_choices_trims_and_validates_values() -> None:
@@ -20,15 +29,21 @@ def test_parse_csv_choices_trims_and_validates_values() -> None:
         "generated",
         "materialized",
     ]
+    assert _parse_csv_choices("generated,,", {"generated"}, name="modes") == ["generated"]
 
     with pytest.raises(ValueError):
         _parse_csv_choices("", {"generated"}, name="modes")
     with pytest.raises(ValueError):
         _parse_csv_choices("generated,other", {"generated"}, name="modes")
+    with pytest.raises(ValueError, match="comma-separated string"):
+        _parse_csv_choices(True, {"generated"}, name="modes")
+    with pytest.raises(ValueError, match="duplicate"):
+        _parse_csv_choices("generated,generated", {"generated"}, name="modes")
 
 
 def test_parse_worker_counts_rejects_empty_or_negative_values() -> None:
     assert _parse_worker_counts("0, 2") == [0, 2]
+    assert _parse_worker_counts("0,,") == [0]
 
     with pytest.raises(ValueError):
         _parse_worker_counts("")
@@ -36,6 +51,10 @@ def test_parse_worker_counts_rejects_empty_or_negative_values() -> None:
         _parse_worker_counts("-1")
     with pytest.raises(ValueError):
         _parse_worker_counts("cpu")
+    with pytest.raises(ValueError, match="comma-separated string"):
+        _parse_worker_counts(None)
+    with pytest.raises(ValueError, match="duplicate"):
+        _parse_worker_counts("0,0")
 
 
 def test_compile_requested_maps_modes() -> None:
@@ -46,33 +65,1209 @@ def test_compile_requested_maps_modes() -> None:
         _compile_requested("sometimes")
 
 
+def test_parse_args_rejects_zero_profile_model_depth(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["bench_matrix.py", "--profile-model-depth", "0"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        parse_args()
+
+    assert exc_info.value.code == 2
+
+
+def test_parse_args_rejects_fractional_seed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["bench_matrix.py", "--seed", "1.5"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        parse_args()
+
+    assert exc_info.value.code == 2
+
+
+def test_parse_args_rejects_invalid_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["bench_matrix.py", "--device", "gpu"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        parse_args()
+
+    assert exc_info.value.code == 2
+
+
+def test_parse_args_accepts_meter_fast_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["bench_matrix.py", "--meter-fast-mode"])
+
+    args = parse_args()
+
+    assert args.meter_fast_mode is True
+
+
+def test_run_args_preserves_meter_fast_mode() -> None:
+    args = Namespace(
+        transactions=128,
+        feature_dim=16,
+        num_classes=4,
+        batch_size=32,
+        grad_accum=2,
+        steps=4,
+        warmup_steps=1,
+        runs=1,
+        learning_rate=3e-4,
+        seed=1234,
+        meter_fast_mode=True,
+        device="cpu",
+        prefetch_factor=2,
+        log_interval=0,
+        collect_profile=False,
+        profile_sync=False,
+        profile_distribution=True,
+        profile_window=16,
+        profile_model=False,
+        profile_model_depth=1,
+        profile_model_max_modules=8,
+        profile_model_include=None,
+    )
+
+    run_args = _run_args(args, "generated", "no-compile", 0)
+
+    assert run_args.meter_fast_mode is True
+
+
+def test_main_writes_run_and_summary_bottleneck_annotations(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    json_out = tmp_path / "rows.json"
+    summary_out = tmp_path / "summary.json"
+    args = Namespace(
+        transactions=128,
+        feature_dim=16,
+        num_classes=4,
+        batch_size=32,
+        grad_accum=2,
+        steps=4,
+        warmup_steps=1,
+        runs=1,
+        learning_rate=3e-4,
+        seed=1234,
+        meter_fast_mode=True,
+        device="cpu",
+        prefetch_factor=2,
+        log_interval=0,
+        dataset_modes="generated",
+        compile_modes="no-compile",
+        worker_counts="0",
+        collect_profile=True,
+        profile_sync=False,
+        profile_distribution=True,
+        profile_window=16,
+        profile_model=False,
+        profile_model_depth=1,
+        profile_model_max_modules=8,
+        profile_model_include=None,
+        json_out=json_out,
+        summary_out=summary_out,
+    )
+
+    def fake_run_once(_args: Namespace, run_index: int) -> BenchmarkResult:
+        return BenchmarkResult(
+            wall_time_s=0.50,
+            trainer_metrics={
+                "run": run_index,
+                "reported_samples_per_sec": 200.0,
+                "samples_per_sec": 180.0,
+                "end_to_end_wall_time_s": 0.50,
+                "wall_time_s": 0.50,
+                "profile_forward_pct": 55.0,
+                "profile_forward_top_pct_of_parent": 50.0,
+                "profile_backward_pct": 20.0,
+            },
+            run_index=run_index,
+        )
+
+    monkeypatch.setattr(bm, "parse_args", lambda: args)
+    monkeypatch.setattr(bm, "run_once", fake_run_once)
+
+    bm.main()
+
+    output = capsys.readouterr().out
+    assert "hotspot=forward_phase:55.0%(phase_share,high)" in output
+
+    rows = json.loads(json_out.read_text())
+    assert rows[0]["profile_bottleneck_top_candidate"]["name"] == "forward_phase"
+    assert rows[0]["profile_bottleneck_candidates"][1]["name"] == "forward_top_child"
+    assert rows[0]["matrix_dataset_mode"] == "generated"
+
+    summary = json.loads(summary_out.read_text())
+    group = summary["groups"][0]
+    assert group["profile_bottleneck_top_candidate"]["name"] == "forward_phase"
+    assert summary["best_reported"]["profile_bottleneck_top_candidate"]["name"] == "forward_phase"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["bench_matrix.py", "--dataset-modes", "generated,cached"],
+        ["bench_matrix.py", "--compile-modes", "compile,maybe"],
+        ["bench_matrix.py", "--worker-counts", "0,-1"],
+    ],
+)
+def test_parse_args_rejects_invalid_matrix_dimensions(
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+) -> None:
+    monkeypatch.setattr(sys, "argv", argv)
+
+    with pytest.raises(SystemExit) as exc_info:
+        parse_args()
+
+    assert exc_info.value.code == 2
+
+
+def test_format_summary_row_includes_profile_suffix_when_available() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_forward_backward_pct": 62.5,
+        "mean_profile_forward_coverage_pct": 87.5,
+        "mean_profile_loss_pct": 8.5,
+        "mean_profile_optimizer_pct": 12.0,
+        "mean_profile_optimizer_coverage_pct": 75.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "fwd+bwd=62.5%" in formatted
+    assert "fwd_cover=87.5%" in formatted
+    assert "loss=8.5%" in formatted
+    assert "opt=12.0%" in formatted
+    assert "opt_cover=75.0%" in formatted
+
+
+def test_format_summary_row_includes_jitter_for_repeated_runs() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "runs": 3,
+        "mean_reported_samples_per_sec": 200.0,
+        "stddev_reported_samples_per_sec": 12.345,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "stddev_end_to_end_wall_time_s": 0.045,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "jitter(reported_sd=12.3/s,e2e_sd=0.04s)" in formatted
+
+
+def test_format_summary_row_omits_jitter_for_single_or_stable_runs() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "sample_count_reported_samples_per_sec": 1.0,
+        "stddev_reported_samples_per_sec": 12.345,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "sample_count_end_to_end_wall_time_s": 3.0,
+        "stddev_end_to_end_wall_time_s": 0.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "jitter(" not in formatted
+
+
+def test_format_summary_row_includes_forward_top_position() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_forward_top_pct_of_parent": 125.0,
+        "sample_count_profile_forward_top_pct_of_parent": 2.0,
+        "mean_profile_forward_top_avg_ms": 6.25,
+        "sample_count_profile_forward_top_avg_ms": 2.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "fwd_top=125.0%@6.25ms" in formatted
+
+
+def test_format_summary_row_includes_optimizer_top_position() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_optimizer_top_pct_of_parent": 80.0,
+        "sample_count_profile_optimizer_top_pct_of_parent": 2.0,
+        "mean_profile_optimizer_top_avg_ms": 2.25,
+        "sample_count_profile_optimizer_top_avg_ms": 2.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "opt_top=80.0%@2.25ms" in formatted
+
+
+def test_format_summary_row_includes_phase_tail_latency() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_forward_p95_ms": 6.25,
+        "sample_count_profile_forward_p95_ms": 2.0,
+        "mean_profile_forward_p99_ms": 7.5,
+        "sample_count_profile_forward_p99_ms": 2.0,
+        "mean_profile_backward_p95_ms": 8.0,
+        "sample_count_profile_backward_p95_ms": 2.0,
+        "mean_profile_optimizer_std_ms": 0.75,
+        "sample_count_profile_optimizer_std_ms": 2.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "fwd_tail(p95=6.25ms,p99=7.50ms)" in formatted
+    assert "bwd_tail(p95=8.00ms)" in formatted
+    assert "opt_tail(std=0.75ms)" in formatted
+
+
+def test_format_summary_row_includes_setup_breakdown_when_available() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_setup_time_s": 0.25,
+        "mean_dataset_setup_time_s": 0.05,
+        "mean_loader_setup_time_s": 0.07,
+        "mean_model_setup_time_s": 0.13,
+        "mean_compile_init_time_s": 0.02,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "setup=0.25s" in formatted
+    assert "init(dataset=0.05s,loader=0.07s,model=0.13s,compile=0.02s)" in formatted
+
+
+def test_format_summary_row_includes_open_timer_counts_when_positive() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_open_phase_count": 0.5,
+        "sample_count_profile_open_phase_count": 2.0,
+        "mean_profile_open_detail_count": 2.0,
+        "sample_count_profile_open_detail_count": 2.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "open(phases=0.5,details=2.0)" in formatted
+
+
+def test_format_summary_row_includes_profile_model_hook_counts_when_positive() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_model_modules_selected": 2.0,
+        "sample_count_profile_model_modules_selected": 2.0,
+        "mean_profile_model_hook_count": 4.0,
+        "sample_count_profile_model_hook_count": 2.0,
+        "mean_profile_model_hook_failures": 0.5,
+        "sample_count_profile_model_hook_failures": 2.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "model(modules=2.0,hooks=4.0,failures=0.5)" in formatted
+
+
+def test_format_summary_row_includes_profile_model_status_counts() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "profile_model_status_counts": {
+            "hook_failures": 1,
+            "ok": 2,
+        },
+        "profile_model_status_invalid_count": 1,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "status(hook_failures=1,ok=2,invalid=1)" in formatted
+
+
+def test_format_summary_row_includes_backward_ready_position() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_backward_grad_ready_top_pct": 42.5,
+        "sample_count_profile_backward_grad_ready_top_pct": 2.0,
+        "mean_profile_backward_grad_ready_top_avg_ms": 3.25,
+        "sample_count_profile_backward_grad_ready_top_avg_ms": 2.0,
+        "mean_profile_backward_grad_ready_span_avg_ms": 2.75,
+        "sample_count_profile_backward_grad_ready_span_avg_ms": 2.0,
+        "mean_profile_backward_grad_ready_span_pct": 27.5,
+        "sample_count_profile_backward_grad_ready_span_pct": 2.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "bwd_span=2.75ms@27.5%" in formatted
+    assert "bwd_ready=42.5%@3.25ms" in formatted
+
+
+def test_format_summary_row_includes_profile_bottleneck_candidate() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "profile_bottleneck_candidates": [
+            {
+                "name": "backward_phase",
+                "score": 42.5,
+                "score_unit": "profile_pct",
+                "rank": 1,
+            },
+        ],
+        "profile_bottleneck_top_candidate": {
+            "name": "forward_phase",
+            "score": 55.0,
+            "score_unit": "profile_pct",
+            "rank": 1,
+            "category": "phase_share",
+            "severity": "high",
+        },
+        "profile_bottleneck_severity_counts": {
+            "high": 2,
+            "medium": 1,
+        },
+        "profile_bottleneck_candidate_count": 3,
+        "profile_bottleneck_candidate_returned_count": 2,
+        "profile_bottleneck_candidate_limit": 2,
+        "profile_bottleneck_candidate_omitted_count": 1,
+        "profile_bottleneck_category_summary": {
+            "child_hotspot": {
+                "count": 1,
+                "max_score": 35.0,
+                "total_score": 35.0,
+                "omitted_count": 1,
+                "score_unit": "profile_pct",
+                "top_candidate": "forward_top_child",
+                "top_candidate_returned": False,
+                "top_rank": 2,
+                "top_severity": "high",
+                "pressure_rank": 2,
+            },
+            "phase_share": {
+                "count": 2,
+                "max_score": 55.0,
+                "total_score": 75.0,
+                "score_unit": "profile_pct",
+                "top_candidate": "forward_phase",
+                "top_rank": 1,
+                "top_severity": "high",
+                "pressure_rank": 1,
+            },
+        },
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "hotspot=forward_phase:55.0%(phase_share,high)" in formatted
+    assert (
+        "pressure(#1 phase_share:forward_phase=55.0%[high];sum=75.0%,"
+        "#2 child_hotspot:forward_top_child=35.0%[high];sum=35.0%;omitted=1;top_omitted)"
+    ) in formatted
+    assert "severity_counts(high=2,medium=1)" in formatted
+    assert "candidates=2/3;omitted=1;limit=2" in formatted
+
+
+def test_format_summary_row_orders_bottleneck_pressure_by_total_score_and_skips_malformed() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "profile_bottleneck_category_summary": {
+            "phase_share": {
+                "count": 2,
+                "max_score": 20.0,
+                "total_score": 40.0,
+                "score_unit": "profile_pct",
+                "top_candidate": "forward_phase",
+                "top_rank": 2,
+            },
+            "child_hotspot": {
+                "count": 1,
+                "max_score": 30.0,
+                "total_score": 30.0,
+                "omitted_count": 2,
+                "score_unit": "profile_pct",
+                "top_candidate": "forward_top_child",
+                "top_rank": "bad",
+            },
+            "bad_score": {
+                "max_score": "bad",
+                "top_candidate": "ignored",
+            },
+            "bad_candidate": {
+                "max_score": 99.0,
+                "top_candidate": "",
+            },
+        },
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert (
+        "pressure(phase_share:forward_phase=20.0%;sum=40.0%,"
+        "child_hotspot:forward_top_child=30.0%;sum=30.0%;omitted=2)"
+    ) in formatted
+    assert "bad_score" not in formatted
+    assert "bad_candidate" not in formatted
+
+
+def test_format_summary_row_includes_scheduler_failures_when_positive() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_scheduler_step_failures": 1.5,
+        "sample_count_scheduler_step_failures": 2.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "scheduler(failures=1.5)" in formatted
+
+
+def test_format_summary_row_omits_zero_scheduler_failures() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_scheduler_step_failures": 0.0,
+        "sample_count_scheduler_step_failures": 2.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "scheduler(" not in formatted
+
+
+def test_format_summary_row_omits_not_requested_profile_model_status_counts() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "profile_model_status_counts": {
+            "not_requested": 2,
+        },
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "status(" not in formatted
+
+
+def test_format_summary_row_omits_profile_suffix_when_absent() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "fwd+bwd" not in formatted
+    assert "loss=" not in formatted
+    assert "opt=" not in formatted
+
+
+def test_format_summary_row_omits_zero_or_unmeasured_open_timer_counts() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_open_phase_count": 0.0,
+        "sample_count_profile_open_phase_count": 2.0,
+        "mean_profile_open_detail_count": 3.0,
+        "sample_count_profile_open_detail_count": 0.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "open(" not in formatted
+
+
+def test_format_summary_row_omits_zero_or_unmeasured_profile_model_counts() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_model_modules_selected": 0.0,
+        "sample_count_profile_model_modules_selected": 2.0,
+        "mean_profile_model_hook_count": 4.0,
+        "sample_count_profile_model_hook_count": 0.0,
+        "mean_profile_model_hook_failures": 0.0,
+        "sample_count_profile_model_hook_failures": 2.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "model(" not in formatted
+
+
+def test_format_summary_row_omits_malformed_profile_model_status_counts() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "profile_model_status_counts": {
+            "ok": "2",
+            "hook_failures": True,
+        },
+        "profile_model_status_invalid_count": "1",
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "status(" not in formatted
+
+
+def test_format_run_row_marks_invalid_profile_model_status() -> None:
+    formatted = _format_run_row(
+        "generated",
+        "no-compile",
+        0,
+        0,
+        {
+            "reported_samples_per_sec": 200.0,
+            "end_to_end_wall_time_s": 1.25,
+            "profile_model_requested": True,
+            "profile_model_status": "missing",
+            "profile_model_modules_selected": 2,
+            "profile_model_hook_count": 4,
+            "profile_model_hook_failures": 0,
+        },
+    )
+
+    assert "profile_model(status=invalid modules=2 hooks=4 failures=0)" in formatted
+    assert "missing" not in formatted
+
+
+def test_format_summary_row_marks_unmeasured_base_fields() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 0.0,
+        "sample_count_reported_samples_per_sec": 0.0,
+        "non_finite_count_reported_samples_per_sec": 1.0,
+        "mean_end_to_end_wall_time_s": 0.0,
+        "sample_count_end_to_end_wall_time_s": 0.0,
+        "non_finite_count_end_to_end_wall_time_s": 1.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "reported=n/a" in formatted
+    assert "e2e=n/a" in formatted
+    assert "reported=0.0/s" not in formatted
+    assert "e2e=0.00s" not in formatted
+
+
+def test_measured_summary_value_rejects_bool_and_string_values() -> None:
+    assert _measured_summary_value(
+        {"mean_reported_samples_per_sec": True},
+        "mean_reported_samples_per_sec",
+    ) is None
+    assert _measured_summary_value(
+        {
+            "mean_reported_samples_per_sec": 100.0,
+            "sample_count_reported_samples_per_sec": True,
+        },
+        "mean_reported_samples_per_sec",
+    ) is None
+    assert _measured_summary_value(
+        {"mean_reported_samples_per_sec": "100.0"},
+        "mean_reported_samples_per_sec",
+    ) is None
+    assert _measured_summary_value(
+        {
+            "mean_reported_samples_per_sec": 100.0,
+            "sample_count_reported_samples_per_sec": "1",
+        },
+        "mean_reported_samples_per_sec",
+    ) is None
+
+
+def test_measured_summary_value_rejects_negative_values() -> None:
+    assert _measured_summary_value(
+        {"mean_reported_samples_per_sec": -1.0},
+        "mean_reported_samples_per_sec",
+    ) is None
+
+
+def test_measured_summary_value_rejects_fractional_sample_count() -> None:
+    assert _measured_summary_value(
+        {
+            "mean_reported_samples_per_sec": 100.0,
+            "sample_count_reported_samples_per_sec": 0.5,
+        },
+        "mean_reported_samples_per_sec",
+    ) is None
+
+
+def test_measured_summary_value_rejects_out_of_range_percentages() -> None:
+    assert _measured_summary_value(
+        {"mean_profile_forward_backward_pct": 125.0},
+        "mean_profile_forward_backward_pct",
+    ) is None
+
+
+def test_format_summary_row_keeps_zero_when_it_was_measured() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 0.0,
+        "sample_count_reported_samples_per_sec": 1.0,
+        "mean_end_to_end_wall_time_s": 0.0,
+        "sample_count_end_to_end_wall_time_s": 1.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "reported=0.0/s" in formatted
+    assert "e2e=0.00s" in formatted
+
+
+def test_format_summary_row_omits_unmeasured_profile_suffix() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_forward_backward_pct": 0.0,
+        "sample_count_profile_forward_backward_pct": 0.0,
+        "non_finite_count_profile_forward_backward_pct": 1.0,
+        "mean_profile_loss_pct": 0.0,
+        "sample_count_profile_loss_pct": 0.0,
+        "non_finite_count_profile_loss_pct": 1.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "fwd+bwd" not in formatted
+    assert "loss=" not in formatted
+    assert "opt=" not in formatted
+
+
+def test_format_summary_row_omits_unmeasured_phase_tail_latency() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_forward_p95_ms": 0.0,
+        "sample_count_profile_forward_p95_ms": 0.0,
+        "mean_profile_backward_p99_ms": -1.0,
+        "mean_profile_optimizer_std_ms": "slow",
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "tail(" not in formatted
+
+
+def test_format_summary_row_includes_only_measured_profile_parts() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_forward_backward_pct": 62.5,
+        "sample_count_profile_forward_backward_pct": 2.0,
+        "mean_profile_loss_pct": 0.0,
+        "sample_count_profile_loss_pct": 0.0,
+        "mean_profile_optimizer_pct": 12.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "fwd+bwd=62.5%" in formatted
+    assert "loss=" not in formatted
+    assert "opt=12.0%" in formatted
+
+
+def test_format_summary_row_omits_out_of_range_profile_parts() -> None:
+    row = {
+        "dataset_mode": "generated",
+        "compile_mode": "no-compile",
+        "workers": 0,
+        "mean_reported_samples_per_sec": 200.0,
+        "mean_end_to_end_wall_time_s": 1.25,
+        "mean_profile_forward_backward_pct": 125.0,
+        "mean_profile_loss_pct": 8.0,
+    }
+
+    formatted = _format_summary_row(row)
+
+    assert "fwd+bwd" not in formatted
+    assert "loss=8.0%" in formatted
+
+
+def test_format_run_row_uses_reported_and_e2e_metrics() -> None:
+    row = _format_run_row(
+        "generated",
+        "no-compile",
+        2,
+        3,
+        {
+            "reported_samples_per_sec": 123.45,
+            "samples_per_sec": 99.0,
+            "end_to_end_wall_time_s": 1.234,
+            "wall_time_s": 0.5,
+        },
+    )
+
+    assert "generated no-compile workers=2" in row
+    assert "run=3" in row
+    assert "steady=123.5/s" in row
+    assert "e2e=1.23s" in row
+    assert "profile_model(" not in row
+
+
+def test_format_run_row_includes_setup_breakdown_when_available() -> None:
+    row = _format_run_row(
+        "generated",
+        "no-compile",
+        0,
+        0,
+        {
+            "reported_samples_per_sec": 123.45,
+            "end_to_end_wall_time_s": 1.234,
+            "setup_time_s": 0.27,
+            "dataset_setup_time_s": 0.05,
+            "loader_setup_time_s": 0.07,
+            "model_setup_time_s": 0.13,
+            "compile_init_time_s": 0.02,
+        },
+    )
+
+    assert "setup=0.27s" in row
+    assert "init(dataset=0.05s,loader=0.07s,model=0.13s,compile=0.02s)" in row
+    assert "init(" in row.split("e2e=")[0]
+
+
+def test_format_run_row_includes_phase_tail_latency() -> None:
+    row = _format_run_row(
+        "generated",
+        "no-compile",
+        0,
+        0,
+        {
+            "reported_samples_per_sec": 123.45,
+            "end_to_end_wall_time_s": 1.234,
+            "profile_forward_p95_ms": 6.25,
+            "profile_forward_p99_ms": 7.5,
+            "profile_backward_p95_ms": 8.0,
+            "profile_optimizer_std_ms": 0.75,
+        },
+    )
+
+    assert "fwd_tail(p95=6.25ms,p99=7.50ms)" in row
+    assert "bwd_tail(p95=8.00ms)" in row
+    assert "opt_tail(std=0.75ms)" in row
+
+
+def test_format_run_row_includes_profile_bottleneck_summary() -> None:
+    row = _format_run_row(
+        "generated",
+        "no-compile",
+        0,
+        0,
+        {
+            "reported_samples_per_sec": 123.45,
+            "end_to_end_wall_time_s": 1.234,
+            "profile_forward_pct": 55.0,
+            "profile_forward_top_pct_of_parent": 50.0,
+            "profile_backward_pct": 20.0,
+        },
+    )
+
+    assert "hotspot=forward_phase:55.0%(phase_share,high)" in row
+    assert (
+        "pressure(#1 phase_share:forward_phase=55.0%[high];sum=75.0%,"
+        "#2 child_hotspot:forward_top_child=27.5%[high];sum=27.5%)"
+    ) in row
+    assert "severity_counts(high=2,medium=1)" in row
+
+
+def test_format_run_row_ignores_stale_profile_bottleneck_summary() -> None:
+    row = _format_run_row(
+        "generated",
+        "no-compile",
+        0,
+        0,
+        {
+            "reported_samples_per_sec": 123.45,
+            "end_to_end_wall_time_s": 1.234,
+            "profile_bottleneck_top_candidate": {
+                "name": "stale_phase",
+                "score": 99.0,
+                "score_unit": "profile_pct",
+            },
+            "profile_bottleneck_candidates": [
+                {
+                    "name": "stale_phase",
+                    "score": 99.0,
+                    "score_unit": "profile_pct",
+                },
+            ],
+        },
+    )
+
+    assert "hotspot=" not in row
+    assert "stale_phase" not in row
+
+
+def test_format_run_row_falls_back_to_total_metrics() -> None:
+    row = _format_run_row(
+        "materialized",
+        "compile",
+        0,
+        0,
+        {
+            "samples_per_sec": 80.0,
+            "wall_time_s": 2.0,
+        },
+    )
+
+    assert "steady=80.0/s" in row
+    assert "e2e=2.00s" in row
+
+
+def test_format_run_row_includes_profile_model_hook_summary_when_requested() -> None:
+    row = _format_run_row(
+        "generated",
+        "no-compile",
+        0,
+        0,
+        {
+            "reported_samples_per_sec": 123.45,
+            "end_to_end_wall_time_s": 1.234,
+            "profile_model_requested": True,
+            "profile_model_status": "no_matching_modules",
+            "profile_model_modules_selected": 0,
+            "profile_model_hook_count": 0,
+            "profile_model_hook_failures": 0,
+        },
+    )
+
+    assert "profile_model(status=no_matching_modules modules=0 hooks=0 failures=0)" in row
+
+
+def test_format_run_row_includes_scheduler_failure_summary() -> None:
+    row = _format_run_row(
+        "generated",
+        "no-compile",
+        0,
+        0,
+        {
+            "reported_samples_per_sec": 123.45,
+            "end_to_end_wall_time_s": 1.234,
+            "scheduler_step_failures": 2,
+            "scheduler_last_error": "RuntimeError: scheduler boom",
+        },
+    )
+
+    assert "scheduler(failures=2 error=RuntimeError: scheduler boom)" in row
+
+
+def test_format_run_row_marks_malformed_metrics_as_na() -> None:
+    row = _format_run_row(
+        "generated",
+        "no-compile",
+        0,
+        0,
+        {
+            "reported_samples_per_sec": "123.4",
+            "samples_per_sec": True,
+            "end_to_end_wall_time_s": "1.0",
+            "wall_time_s": "slow",
+        },
+    )
+
+    assert "steady=n/a" in row
+    assert "e2e=n/a" in row
+
+
 def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     rows = [
         {
             "matrix_dataset_mode": "generated",
             "matrix_compile_mode": "no-compile",
             "matrix_workers": 0,
+            "transactions": 64,
+            "batch_size": 4,
+            "num_workers": 0,
+            "world_size": 1,
             "reported_samples_per_sec": 100.0,
             "samples_per_sec": 80.0,
             "steady_samples_per_sec": 100.0,
+            "p99_s": 0.020,
+            "std_batch_s": 0.002,
+            "avg_batch_s": 0.006,
+            "last_batch_s": 0.007,
+            "min_batch_s": 0.004,
+            "max_batch_s": 0.009,
+            "batches": 3,
+            "best_samples_per_sec": 140.0,
+            "headroom_ratio": 1.4,
+            "ema_samples_per_sec": 110.0,
+            "window_samples_per_sec": 105.0,
+            "window_time_s": 0.080,
+            "window_batches": 2,
+            "window_samples": 8,
             "end_to_end_wall_time_s": 3.0,
             "setup_time_s": 1.0,
+            "dataset_setup_time_s": 0.20,
+            "loader_setup_time_s": 0.30,
+            "model_setup_time_s": 0.50,
+            "compile_init_time_s": 0.04,
             "wall_time_s": 2.0,
             "cold_start_time_s": 0.5,
+            "steps": 3,
+            "samples": 12,
+            "optimizer_steps": 2,
+            "grad_accum": 2,
+            "partial_optimizer_steps": 1,
+            "grad_accum_tail_steps": 1,
+            "warmup_steps": 1,
+            "warmup_samples": 4,
+            "warmup_optimizer_steps": 0,
+            "warmup_samples_per_sec": 70.0,
+            "warmup_total_time_s": 0.06,
+            "warmup_p99_s": 0.06,
+            "cold_start_steps": 1,
+            "cold_start_samples_per_sec": 70.0,
+            "steady_steps": 2,
+            "steady_samples": 8,
+            "steady_optimizer_steps": 2,
+            "steady_total_time_s": 0.09,
+            "steady_p99_s": 0.05,
             "dataset_materialized_bytes": 0,
+            "profile_flat_metric_invalid_count": 2.0,
+            "profile_open_phase_count": 2,
+            "profile_open_detail_count": 3,
+            "profile_model_status": "hook_failures",
+            "profile_model_modules_selected": 1,
+            "profile_model_hook_count": 3,
+            "profile_model_hook_failures": 1,
+            "profile_forward_backward_pct": 40.0,
+            "profile_forward_pct": 15.0,
+            "profile_forward_p95_ms": 2.0,
+            "profile_forward_p99_ms": 3.0,
+            "profile_forward_std_ms": 0.2,
+            "profile_forward_min_ms": 1.0,
+            "profile_forward_max_ms": 3.5,
+            "profile_forward_sample_count": 1,
+            "profile_forward_window_sample_count": 1,
+            "profile_forward_child_count": 1,
+            "profile_forward_tracked_time_s": 0.05,
+            "profile_forward_untracked_time_s": 0.01,
+            "profile_forward_overtracked_time_s": 0.0,
+            "profile_forward_coverage_pct": 80.0,
+            "profile_forward_untracked_pct": 20.0,
+            "profile_forward_overtracked_pct_of_parent": 0.0,
+            "profile_forward_top_time_s": 0.03,
+            "profile_forward_top_pct_of_parent": 30.0,
+            "profile_forward_top_avg_ms": 3.0,
+            "profile_forward_top_p95_ms": 3.5,
+            "profile_forward_top_calls": 1,
+            "profile_loss_pct": 4.0,
+            "profile_loss_reduce_pct": 1.0,
+            "profile_backward_pct": 25.0,
+            "profile_backward_grad_ready_child_count": 1,
+            "profile_backward_grad_ready_parent_avg_ms": 10.0,
+            "profile_backward_grad_ready_top_avg_ms": 3.0,
+            "profile_backward_grad_ready_top_pct": 30.0,
+            "profile_backward_grad_ready_top_p95_ms": 3.5,
+            "profile_backward_grad_ready_top_calls": 1,
+            "profile_optimizer_p95_ms": 4.0,
+            "profile_optimizer_child_count": 1,
+            "profile_optimizer_tracked_time_s": 0.02,
+            "profile_optimizer_untracked_time_s": 0.01,
+            "profile_optimizer_overtracked_time_s": 0.0,
+            "profile_optimizer_coverage_pct": 75.0,
+            "profile_optimizer_untracked_pct": 25.0,
+            "profile_optimizer_overtracked_pct_of_parent": 0.0,
+            "profile_optimizer_top_time_s": 0.015,
+            "profile_optimizer_top_pct_of_parent": 15.0,
+            "profile_optimizer_top_avg_ms": 1.5,
+            "profile_optimizer_top_p95_ms": 2.0,
+            "profile_optimizer_top_calls": 1,
+            "profile_user_metrics_pct": 2.0,
+            "profile_postprocess_pct": 4.0,
+            "profile_collect_output_pct": 1.0,
+            "profile_metrics_pct": 0.5,
         },
         {
             "matrix_dataset_mode": "generated",
             "matrix_compile_mode": "no-compile",
             "matrix_workers": 0,
+            "transactions": 64,
+            "batch_size": 4,
+            "num_workers": 0,
+            "world_size": 1,
             "reported_samples_per_sec": 300.0,
             "samples_per_sec": 240.0,
             "steady_samples_per_sec": 300.0,
+            "p99_s": 0.010,
+            "std_batch_s": 0.001,
+            "avg_batch_s": 0.004,
+            "last_batch_s": 0.003,
+            "min_batch_s": 0.002,
+            "max_batch_s": 0.006,
+            "batches": 3,
+            "best_samples_per_sec": 360.0,
+            "headroom_ratio": 1.2,
+            "ema_samples_per_sec": 320.0,
+            "window_samples_per_sec": 310.0,
+            "window_time_s": 0.040,
+            "window_batches": 2,
+            "window_samples": 8,
             "end_to_end_wall_time_s": 1.0,
             "setup_time_s": 0.25,
+            "dataset_setup_time_s": 0.05,
+            "loader_setup_time_s": 0.07,
+            "model_setup_time_s": 0.13,
+            "compile_init_time_s": 0.02,
             "wall_time_s": 0.75,
             "cold_start_time_s": 0.1,
+            "steps": 3,
+            "samples": 12,
+            "optimizer_steps": 2,
+            "grad_accum": 2,
+            "partial_optimizer_steps": 1,
+            "grad_accum_tail_steps": 1,
+            "warmup_steps": 1,
+            "warmup_samples": 4,
+            "warmup_optimizer_steps": 0,
+            "warmup_samples_per_sec": 90.0,
+            "warmup_total_time_s": 0.04,
+            "warmup_p99_s": 0.04,
+            "cold_start_steps": 1,
+            "cold_start_samples_per_sec": 90.0,
+            "steady_steps": 2,
+            "steady_samples": 8,
+            "steady_optimizer_steps": 2,
+            "steady_total_time_s": 0.06,
+            "steady_p99_s": 0.03,
             "dataset_materialized_bytes": 0,
+            "profile_flat_metric_invalid_count": 0.0,
+            "profile_open_phase_count": 0,
+            "profile_open_detail_count": 0,
+            "profile_model_status": "ok",
+            "profile_model_modules_selected": 2,
+            "profile_model_hook_count": 4,
+            "profile_model_hook_failures": 0,
+            "profile_forward_backward_pct": 60.0,
+            "profile_forward_pct": 20.0,
+            "profile_forward_p95_ms": 4.0,
+            "profile_forward_p99_ms": 6.0,
+            "profile_forward_std_ms": 0.4,
+            "profile_forward_min_ms": 2.0,
+            "profile_forward_max_ms": 7.5,
+            "profile_forward_sample_count": 3,
+            "profile_forward_window_sample_count": 2,
+            "profile_forward_child_count": 3,
+            "profile_forward_tracked_time_s": 0.09,
+            "profile_forward_untracked_time_s": 0.02,
+            "profile_forward_overtracked_time_s": 0.01,
+            "profile_forward_coverage_pct": 80.0,
+            "profile_forward_untracked_pct": 20.0,
+            "profile_forward_overtracked_pct_of_parent": 10.0,
+            "profile_forward_top_time_s": 0.07,
+            "profile_forward_top_pct_of_parent": 70.0,
+            "profile_forward_top_avg_ms": 7.0,
+            "profile_forward_top_p95_ms": 7.5,
+            "profile_forward_top_calls": 3,
+            "profile_loss_pct": 8.0,
+            "profile_loss_reduce_pct": 3.0,
+            "profile_backward_pct": 40.0,
+            "profile_backward_grad_ready_child_count": 3,
+            "profile_backward_grad_ready_parent_avg_ms": 14.0,
+            "profile_backward_grad_ready_top_avg_ms": 7.0,
+            "profile_backward_grad_ready_top_pct": 50.0,
+            "profile_backward_grad_ready_top_p95_ms": 7.5,
+            "profile_backward_grad_ready_top_calls": 3,
+            "profile_optimizer_p95_ms": 8.0,
+            "profile_optimizer_child_count": 3,
+            "profile_optimizer_tracked_time_s": 0.04,
+            "profile_optimizer_untracked_time_s": 0.02,
+            "profile_optimizer_overtracked_time_s": 0.01,
+            "profile_optimizer_coverage_pct": 80.0,
+            "profile_optimizer_untracked_pct": 20.0,
+            "profile_optimizer_overtracked_pct_of_parent": 10.0,
+            "profile_optimizer_top_time_s": 0.035,
+            "profile_optimizer_top_pct_of_parent": 35.0,
+            "profile_optimizer_top_avg_ms": 3.5,
+            "profile_optimizer_top_p95_ms": 4.0,
+            "profile_optimizer_top_calls": 3,
+            "profile_user_metrics_pct": 6.0,
+            "profile_postprocess_pct": 8.0,
+            "profile_collect_output_pct": 3.0,
+            "profile_metrics_pct": 1.5,
+            "cuda_current_mem_bytes": 1024,
+            "cuda_max_mem_bytes": 2048,
         },
         {
             "matrix_dataset_mode": "materialized",
@@ -81,11 +1276,85 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
             "reported_samples_per_sec": 250.0,
             "samples_per_sec": 180.0,
             "steady_samples_per_sec": 250.0,
+            "p99_s": 0.005,
+            "std_batch_s": 0.0005,
+            "best_samples_per_sec": 320.0,
+            "headroom_ratio": 1.28,
             "end_to_end_wall_time_s": 0.8,
             "setup_time_s": 0.2,
             "wall_time_s": 0.6,
             "cold_start_time_s": 0.05,
+            "steps": 3,
+            "samples": 12,
+            "optimizer_steps": 2,
+            "grad_accum": 2,
+            "partial_optimizer_steps": 1,
+            "grad_accum_tail_steps": 1,
+            "warmup_steps": 1,
+            "warmup_samples": 4,
+            "warmup_optimizer_steps": 0,
+            "warmup_samples_per_sec": 100.0,
+            "warmup_total_time_s": 0.03,
+            "warmup_p99_s": 0.03,
+            "cold_start_steps": 1,
+            "cold_start_samples_per_sec": 100.0,
+            "steady_steps": 2,
+            "steady_samples": 8,
+            "steady_optimizer_steps": 2,
+            "steady_total_time_s": 0.04,
+            "steady_p99_s": 0.02,
             "dataset_materialized_bytes": 1024,
+            "profile_flat_metric_invalid_count": 1.0,
+            "profile_open_phase_count": 0,
+            "profile_open_detail_count": 0,
+            "profile_model_status": "ok",
+            "profile_model_modules_selected": 2,
+            "profile_model_hook_count": 4,
+            "profile_model_hook_failures": 0,
+            "profile_forward_backward_pct": 55.0,
+            "profile_forward_pct": 25.0,
+            "profile_forward_p95_ms": 5.0,
+            "profile_forward_p99_ms": 7.0,
+            "profile_forward_std_ms": 0.5,
+            "profile_forward_min_ms": 2.5,
+            "profile_forward_max_ms": 8.0,
+            "profile_forward_sample_count": 2,
+            "profile_forward_window_sample_count": 2,
+            "profile_forward_child_count": 2,
+            "profile_forward_tracked_time_s": 0.06,
+            "profile_forward_untracked_time_s": 0.02,
+            "profile_forward_overtracked_time_s": 0.0,
+            "profile_forward_coverage_pct": 75.0,
+            "profile_forward_untracked_pct": 25.0,
+            "profile_forward_overtracked_pct_of_parent": 0.0,
+            "profile_forward_top_time_s": 0.055,
+            "profile_forward_top_pct_of_parent": 55.0,
+            "profile_forward_top_avg_ms": 5.5,
+            "profile_forward_top_p95_ms": 6.0,
+            "profile_forward_top_calls": 2,
+            "profile_loss_pct": 6.0,
+            "profile_loss_reduce_pct": 2.0,
+            "profile_backward_pct": 30.0,
+            "profile_backward_grad_ready_child_count": 2,
+            "profile_backward_grad_ready_parent_avg_ms": 12.0,
+            "profile_backward_grad_ready_top_avg_ms": 4.0,
+            "profile_backward_grad_ready_top_pct": 45.0,
+            "profile_backward_grad_ready_top_p95_ms": 4.5,
+            "profile_backward_grad_ready_top_calls": 2,
+            "profile_optimizer_p95_ms": 6.0,
+            "profile_optimizer_child_count": 2,
+            "profile_optimizer_tracked_time_s": 0.03,
+            "profile_optimizer_untracked_time_s": 0.02,
+            "profile_optimizer_overtracked_time_s": 0.0,
+            "profile_optimizer_coverage_pct": 60.0,
+            "profile_optimizer_untracked_pct": 40.0,
+            "profile_optimizer_overtracked_pct_of_parent": 0.0,
+            "profile_optimizer_top_time_s": 0.025,
+            "profile_optimizer_top_pct_of_parent": 25.0,
+            "profile_optimizer_top_avg_ms": 2.5,
+            "profile_optimizer_top_p95_ms": 3.0,
+            "profile_optimizer_top_calls": 2,
+            "profile_metrics_pct": 1.0,
         },
     ]
 
@@ -104,6 +1373,993 @@ def test_summarize_rows_groups_configs_and_ranks_best() -> None:
     assert generated["stddev_reported_samples_per_sec"] == pytest.approx(100.0)
     assert generated["mean_end_to_end_wall_time_s"] == pytest.approx(2.0)
     assert generated["stddev_end_to_end_wall_time_s"] == pytest.approx(1.0)
+    assert generated["mean_dataset_setup_time_s"] == pytest.approx(0.125)
+    assert generated["mean_loader_setup_time_s"] == pytest.approx(0.185)
+    assert generated["mean_model_setup_time_s"] == pytest.approx(0.315)
+    assert generated["mean_compile_init_time_s"] == pytest.approx(0.03)
+    assert generated["mean_transactions"] == pytest.approx(64.0)
+    assert generated["mean_batch_size"] == pytest.approx(4.0)
+    assert generated["mean_num_workers"] == pytest.approx(0.0)
+    assert generated["mean_world_size"] == pytest.approx(1.0)
+    assert generated["mean_dataset_materialized_bytes"] == pytest.approx(0.0)
+    assert generated["mean_p99_s"] == pytest.approx(0.015)
+    assert generated["mean_std_batch_s"] == pytest.approx(0.0015)
+    assert generated["mean_avg_batch_s"] == pytest.approx(0.005)
+    assert generated["mean_last_batch_s"] == pytest.approx(0.005)
+    assert generated["mean_min_batch_s"] == pytest.approx(0.003)
+    assert generated["mean_max_batch_s"] == pytest.approx(0.0075)
+    assert generated["mean_batches"] == pytest.approx(3.0)
+    assert generated["mean_best_samples_per_sec"] == pytest.approx(250.0)
+    assert generated["mean_headroom_ratio"] == pytest.approx(1.3)
+    assert generated["mean_ema_samples_per_sec"] == pytest.approx(215.0)
+    assert generated["mean_window_samples_per_sec"] == pytest.approx(207.5)
+    assert generated["mean_window_time_s"] == pytest.approx(0.06)
+    assert generated["mean_window_batches"] == pytest.approx(2.0)
+    assert generated["mean_window_samples"] == pytest.approx(8.0)
+    assert generated["mean_steps"] == pytest.approx(3.0)
+    assert generated["mean_samples"] == pytest.approx(12.0)
+    assert generated["mean_optimizer_steps"] == pytest.approx(2.0)
+    assert generated["mean_grad_accum"] == pytest.approx(2.0)
+    assert generated["mean_partial_optimizer_steps"] == pytest.approx(1.0)
+    assert generated["mean_grad_accum_tail_steps"] == pytest.approx(1.0)
+    assert generated["mean_warmup_steps"] == pytest.approx(1.0)
+    assert generated["mean_warmup_samples_per_sec"] == pytest.approx(80.0)
+    assert generated["mean_cold_start_samples_per_sec"] == pytest.approx(80.0)
+    assert generated["mean_steady_steps"] == pytest.approx(2.0)
+    assert generated["mean_steady_p99_s"] == pytest.approx(0.04)
+    assert generated["mean_profile_flat_metric_invalid_count"] == pytest.approx(1.0)
+    assert generated["max_profile_flat_metric_invalid_count"] == pytest.approx(2.0)
+    assert generated["mean_profile_open_phase_count"] == pytest.approx(1.0)
+    assert generated["max_profile_open_detail_count"] == pytest.approx(3.0)
+    assert generated["mean_profile_model_modules_selected"] == pytest.approx(1.5)
+    assert generated["max_profile_model_hook_count"] == pytest.approx(4.0)
+    assert generated["mean_profile_model_hook_failures"] == pytest.approx(0.5)
+    assert generated["profile_model_status_counts"] == {"hook_failures": 1, "ok": 1}
+    assert generated["mean_profile_forward_backward_pct"] == pytest.approx(50.0)
+    assert generated["mean_profile_forward_p95_ms"] == pytest.approx(3.0)
+    assert generated["mean_profile_forward_p99_ms"] == pytest.approx(4.5)
+    assert generated["mean_profile_forward_std_ms"] == pytest.approx(0.3)
+    assert generated["mean_profile_forward_min_ms"] == pytest.approx(1.5)
+    assert generated["mean_profile_forward_max_ms"] == pytest.approx(5.5)
+    assert generated["mean_profile_forward_sample_count"] == pytest.approx(2.0)
+    assert generated["mean_profile_forward_window_sample_count"] == pytest.approx(1.5)
+    assert generated["mean_profile_forward_child_count"] == pytest.approx(2.0)
+    assert generated["mean_profile_forward_tracked_time_s"] == pytest.approx(0.07)
+    assert generated["mean_profile_forward_untracked_time_s"] == pytest.approx(0.015)
+    assert generated["mean_profile_forward_overtracked_time_s"] == pytest.approx(0.005)
+    assert generated["mean_profile_forward_coverage_pct"] == pytest.approx(80.0)
+    assert generated["mean_profile_forward_untracked_pct"] == pytest.approx(20.0)
+    assert generated["mean_profile_forward_overtracked_pct_of_parent"] == pytest.approx(5.0)
+    assert generated["mean_profile_forward_top_time_s"] == pytest.approx(0.05)
+    assert generated["mean_profile_forward_top_pct_of_parent"] == pytest.approx(50.0)
+    assert generated["mean_profile_forward_top_avg_ms"] == pytest.approx(5.0)
+    assert generated["mean_profile_forward_top_p95_ms"] == pytest.approx(5.5)
+    assert generated["mean_profile_forward_top_calls"] == pytest.approx(2.0)
+    assert generated["mean_profile_loss_pct"] == pytest.approx(6.0)
+    assert generated["mean_profile_loss_reduce_pct"] == pytest.approx(2.0)
+    assert generated["mean_profile_user_metrics_pct"] == pytest.approx(4.0)
+    assert generated["mean_profile_postprocess_pct"] == pytest.approx(6.0)
+    assert generated["mean_profile_collect_output_pct"] == pytest.approx(2.0)
+    assert generated["mean_profile_metrics_pct"] == pytest.approx(1.0)
+    assert generated["max_profile_backward_pct"] == pytest.approx(40.0)
+    assert generated["mean_profile_backward_grad_ready_child_count"] == pytest.approx(2.0)
+    assert generated["mean_profile_backward_grad_ready_parent_avg_ms"] == pytest.approx(12.0)
+    assert generated["mean_profile_backward_grad_ready_top_avg_ms"] == pytest.approx(5.0)
+    assert generated["mean_profile_backward_grad_ready_top_pct"] == pytest.approx(40.0)
+    assert generated["mean_profile_backward_grad_ready_top_p95_ms"] == pytest.approx(5.5)
+    assert generated["mean_profile_backward_grad_ready_top_calls"] == pytest.approx(2.0)
+    assert generated["mean_profile_optimizer_child_count"] == pytest.approx(2.0)
+    assert generated["mean_profile_optimizer_p95_ms"] == pytest.approx(6.0)
+    assert generated["mean_profile_optimizer_tracked_time_s"] == pytest.approx(0.03)
+    assert generated["mean_profile_optimizer_untracked_time_s"] == pytest.approx(0.015)
+    assert generated["mean_profile_optimizer_overtracked_time_s"] == pytest.approx(0.005)
+    assert generated["mean_profile_optimizer_coverage_pct"] == pytest.approx(77.5)
+    assert generated["mean_profile_optimizer_untracked_pct"] == pytest.approx(22.5)
+    assert generated["mean_profile_optimizer_overtracked_pct_of_parent"] == pytest.approx(5.0)
+    assert generated["mean_profile_optimizer_top_time_s"] == pytest.approx(0.025)
+    assert generated["mean_profile_optimizer_top_pct_of_parent"] == pytest.approx(25.0)
+    assert generated["mean_profile_optimizer_top_avg_ms"] == pytest.approx(2.5)
+    assert generated["mean_profile_optimizer_top_p95_ms"] == pytest.approx(3.0)
+    assert generated["mean_profile_optimizer_top_calls"] == pytest.approx(2.0)
+    assert generated["mean_cuda_current_mem_bytes"] == pytest.approx(1024.0)
+    assert generated["sample_count_cuda_current_mem_bytes"] == pytest.approx(1.0)
+    assert generated["mean_cuda_max_mem_bytes"] == pytest.approx(2048.0)
+    assert generated["profiled_runs"] == 2
+    assert summary["best_reported"]["mean_profile_flat_metric_invalid_count"] == pytest.approx(1.0)
+    assert summary["best_reported"]["mean_profile_open_phase_count"] == pytest.approx(0.0)
+    assert summary["best_reported"]["mean_profile_open_detail_count"] == pytest.approx(0.0)
+    assert summary["best_reported"]["mean_profile_model_modules_selected"] == pytest.approx(2.0)
+    assert summary["best_reported"]["mean_profile_model_hook_count"] == pytest.approx(4.0)
+    assert summary["best_reported"]["mean_profile_model_hook_failures"] == pytest.approx(0.0)
+    assert summary["best_reported"]["profile_model_status_counts"] == {"ok": 1}
+    assert summary["best_reported"]["mean_profile_forward_backward_pct"] == pytest.approx(55.0)
+    assert summary["best_reported"]["mean_profile_forward_p95_ms"] == pytest.approx(5.0)
+    assert summary["best_reported"]["mean_profile_forward_p99_ms"] == pytest.approx(7.0)
+    assert summary["best_reported"]["mean_profile_forward_std_ms"] == pytest.approx(0.5)
+    assert summary["best_reported"]["mean_profile_forward_min_ms"] == pytest.approx(2.5)
+    assert summary["best_reported"]["mean_profile_forward_max_ms"] == pytest.approx(8.0)
+    assert summary["best_reported"]["mean_profile_forward_sample_count"] == pytest.approx(2.0)
+    assert summary["best_reported"]["mean_profile_forward_window_sample_count"] == pytest.approx(2.0)
+    assert summary["best_reported"]["mean_profile_forward_top_pct_of_parent"] == pytest.approx(55.0)
+    assert summary["best_reported"]["mean_profile_forward_coverage_pct"] == pytest.approx(75.0)
+    assert summary["best_reported"]["mean_profile_forward_untracked_pct"] == pytest.approx(25.0)
+    assert summary["best_reported"]["mean_profile_forward_overtracked_pct_of_parent"] == pytest.approx(0.0)
+    assert summary["best_reported"]["mean_profile_forward_top_avg_ms"] == pytest.approx(5.5)
+    assert summary["best_reported"]["mean_profile_forward_top_p95_ms"] == pytest.approx(6.0)
+    assert summary["best_reported"]["mean_profile_forward_top_calls"] == pytest.approx(2.0)
+    assert summary["best_reported"]["mean_profile_optimizer_top_pct_of_parent"] == pytest.approx(25.0)
+    assert summary["best_reported"]["mean_profile_optimizer_coverage_pct"] == pytest.approx(60.0)
+    assert summary["best_reported"]["mean_profile_optimizer_untracked_pct"] == pytest.approx(40.0)
+    assert summary["best_reported"]["mean_profile_optimizer_overtracked_pct_of_parent"] == pytest.approx(0.0)
+    assert summary["best_reported"]["mean_profile_optimizer_top_avg_ms"] == pytest.approx(2.5)
+    assert summary["best_reported"]["mean_profile_optimizer_top_p95_ms"] == pytest.approx(3.0)
+    assert summary["best_reported"]["mean_profile_optimizer_top_calls"] == pytest.approx(2.0)
+    assert summary["best_reported"]["mean_profile_optimizer_p95_ms"] == pytest.approx(6.0)
+    assert summary["best_reported"]["mean_profile_loss_pct"] == pytest.approx(6.0)
+    assert summary["best_reported"]["mean_profile_backward_grad_ready_top_pct"] == pytest.approx(45.0)
+    assert summary["best_reported"]["mean_profile_backward_grad_ready_top_avg_ms"] == pytest.approx(4.0)
+    assert summary["best_reported"]["mean_profile_backward_grad_ready_top_p95_ms"] == pytest.approx(4.5)
+    assert summary["best_reported"]["mean_profile_backward_grad_ready_top_calls"] == pytest.approx(2.0)
+    assert summary["best_reported"]["mean_steps"] == pytest.approx(3.0)
+    assert summary["best_reported"]["mean_steady_p99_s"] == pytest.approx(0.02)
+
+
+def test_summarize_rows_skips_profile_fields_when_absent() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert group["mean_reported_samples_per_sec"] == pytest.approx(100.0)
+    assert "mean_profile_forward_backward_pct" not in group
+    assert "mean_profile_forward_backward_pct" not in summary["best_reported"]
+    assert "profile_bottleneck_candidates" not in group
+    assert "profile_bottleneck_candidates" not in summary["best_reported"]
+    assert "profiled_runs" not in group
+
+
+def test_summarize_rows_surfaces_group_diagnostic_fields() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 90.0,
+            "end_to_end_wall_time_s": 1.1,
+            "setup_time_s": 0.1,
+            "wall_time_s": 1.0,
+            "cold_start_time_s": 0.2,
+            "grad_accum": 2,
+            "profile_forward_backward_pct": 50.0,
+            "profile_model_status": "unknown_status",
+        },
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": float("nan"),
+            "samples_per_sec": 95.0,
+            "end_to_end_wall_time_s": 0.9,
+            "setup_time_s": 0.1,
+            "wall_time_s": 0.8,
+            "grad_accum": 0,
+            "profile_forward_backward_pct": 125.0,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+    diagnostics = {
+        diagnostic["field"]: diagnostic
+        for diagnostic in group["summary_diagnostic_fields"]
+    }
+
+    assert group["summary_diagnostic_field_count"] == 5
+    assert group["summary_missing_field_count"] == 1
+    assert group["summary_non_finite_field_count"] == 1
+    assert group["summary_invalid_field_count"] == 3
+    assert diagnostics["profile_model_status"]["invalid_count"] == 1
+    assert diagnostics["reported_samples_per_sec"]["non_finite_count"] == 1
+    assert diagnostics["cold_start_time_s"]["missing_count"] == 1
+    assert diagnostics["grad_accum"]["invalid_count"] == 1
+    assert diagnostics["profile_forward_backward_pct"]["invalid_count"] == 1
+    assert summary["best_reported"]["summary_diagnostic_fields"] == group["summary_diagnostic_fields"]
+    assert "samples_per_sec" not in diagnostics
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_rows_preserves_top_profile_distribution_metrics() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+            "profile_forward_top_p99_ms": 6.0,
+            "profile_forward_top_std_ms": 0.5,
+            "profile_forward_top_sample_count": 3,
+            "profile_backward_grad_ready_top_p99_ms": 5.0,
+            "profile_optimizer_top_p99_ms": 3.0,
+            "profile_optimizer_top_window_sample_count": 2,
+        },
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 300.0,
+            "samples_per_sec": 280.0,
+            "end_to_end_wall_time_s": 0.5,
+            "setup_time_s": 0.15,
+            "wall_time_s": 0.35,
+            "dataset_materialized_bytes": 0,
+            "profile_forward_top_p99_ms": 8.0,
+            "profile_forward_top_std_ms": 0.7,
+            "profile_forward_top_sample_count": 5,
+            "profile_backward_grad_ready_top_p99_ms": 7.0,
+            "profile_optimizer_top_p99_ms": 4.0,
+            "profile_optimizer_top_window_sample_count": 4,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert group["mean_profile_forward_top_p99_ms"] == pytest.approx(7.0)
+    assert group["mean_profile_forward_top_std_ms"] == pytest.approx(0.6)
+    assert group["mean_profile_forward_top_sample_count"] == pytest.approx(4.0)
+    assert group["mean_profile_backward_grad_ready_top_p99_ms"] == pytest.approx(6.0)
+    assert group["mean_profile_optimizer_top_p99_ms"] == pytest.approx(3.5)
+    assert group["mean_profile_optimizer_top_window_sample_count"] == pytest.approx(3.0)
+    assert summary["best_reported"]["mean_profile_forward_top_p99_ms"] == pytest.approx(7.0)
+    assert summary["best_reported"]["mean_profile_forward_top_sample_count"] == pytest.approx(4.0)
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_rows_preserves_backward_readiness_span_metrics() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 90.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "profile_backward_grad_ready_earliest_avg_ms": 2.0,
+            "profile_backward_grad_ready_latest_avg_ms": 8.0,
+            "profile_backward_grad_ready_span_avg_ms": 6.0,
+            "profile_backward_grad_ready_earliest_pct": 20.0,
+            "profile_backward_grad_ready_latest_pct": 80.0,
+            "profile_backward_grad_ready_span_pct": 60.0,
+        },
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 200.0,
+            "samples_per_sec": 180.0,
+            "end_to_end_wall_time_s": 0.5,
+            "setup_time_s": 0.15,
+            "wall_time_s": 0.35,
+            "profile_backward_grad_ready_earliest_avg_ms": 4.0,
+            "profile_backward_grad_ready_latest_avg_ms": 10.0,
+            "profile_backward_grad_ready_span_avg_ms": 6.0,
+            "profile_backward_grad_ready_earliest_pct": 40.0,
+            "profile_backward_grad_ready_latest_pct": 100.0,
+            "profile_backward_grad_ready_span_pct": 60.0,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert group["mean_profile_backward_grad_ready_earliest_avg_ms"] == pytest.approx(3.0)
+    assert group["mean_profile_backward_grad_ready_latest_avg_ms"] == pytest.approx(9.0)
+    assert group["mean_profile_backward_grad_ready_span_avg_ms"] == pytest.approx(6.0)
+    assert group["mean_profile_backward_grad_ready_earliest_pct"] == pytest.approx(30.0)
+    assert group["mean_profile_backward_grad_ready_latest_pct"] == pytest.approx(90.0)
+    assert group["mean_profile_backward_grad_ready_span_pct"] == pytest.approx(60.0)
+    assert summary["best_reported"]["mean_profile_backward_grad_ready_span_avg_ms"] == pytest.approx(6.0)
+    assert summary["best_reported"]["mean_profile_backward_grad_ready_latest_pct"] == pytest.approx(90.0)
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_rows_adds_profile_bottleneck_candidates_to_groups() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 90.0,
+            "end_to_end_wall_time_s": 1.0,
+            "wall_time_s": 0.8,
+            "profile_forward_pct": 20.0,
+            "profile_forward_top_pct_of_parent": 50.0,
+            "profile_forward_top_avg_ms": 5.0,
+            "profile_backward_pct": 30.0,
+            "profile_backward_grad_ready_span_pct": 50.0,
+            "profile_backward_grad_ready_span_avg_ms": 4.0,
+        },
+        {
+            "matrix_dataset_mode": "materialized",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 300.0,
+            "samples_per_sec": 280.0,
+            "end_to_end_wall_time_s": 0.5,
+            "wall_time_s": 0.4,
+            "profile_forward_pct": 10.0,
+            "profile_backward_pct": 60.0,
+            "profile_optimizer_pct": 5.0,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    generated, materialized = summary["groups"]
+
+    assert generated["profile_bottleneck_candidate_count"] == 4
+    assert generated["profile_bottleneck_candidate_returned_count"] == 4
+    assert generated["profile_bottleneck_candidate_limit"] == 8
+    assert "profile_bottleneck_candidate_omitted_count" not in generated
+    assert generated["profile_bottleneck_severity_thresholds"] == {
+        "score_unit": "profile_pct",
+        "levels": [
+            {"severity": "high", "min_score": pytest.approx(25.0)},
+            {"severity": "medium", "min_score": pytest.approx(10.0)},
+            {"severity": "low", "min_score": pytest.approx(0.0)},
+        ],
+    }
+    assert generated["profile_bottleneck_severity_counts"] == {"high": 1, "medium": 3}
+    assert generated["profile_bottleneck_top_candidate"] == generated["profile_bottleneck_candidates"][0]
+    assert generated["profile_bottleneck_category_order"] == [
+        "phase_share",
+        "readiness_span",
+        "child_hotspot",
+    ]
+    assert generated["profile_bottleneck_top_category"] == {
+        "category": "phase_share",
+        "count": 2,
+        "max_score": pytest.approx(30.0),
+        "total_score": pytest.approx(50.0),
+        "mean_score": pytest.approx(25.0),
+        "pressure_score": pytest.approx(50.0),
+        "pressure_score_unit": "profile_pct",
+        "returned_count": 2,
+        "omitted_count": 0,
+        "score_unit": "profile_pct",
+        "top_candidate": "backward_phase",
+        "top_rank": 1,
+        "top_severity": "high",
+        "top_candidate_returned": True,
+        "top_score": pytest.approx(30.0),
+        "top_score_unit": "profile_pct",
+        "top_metric": "profile_backward_pct",
+        "top_value": pytest.approx(30.0),
+        "top_unit": "profile_pct",
+        "top_score_basis": "direct_metric",
+        "top_score_formula": "score=value",
+        "top_label": "backward phase",
+        "top_reason": "backward owns a large share of profiled loop time",
+        "top_next_step": "inspect gradient-ready span and backward top-child metrics",
+        "severity_counts": {"high": 1, "medium": 1},
+        "pressure_rank": 1,
+    }
+    assert generated["profile_bottleneck_category_summary"]["phase_share"] == {
+        "count": 2,
+        "max_score": pytest.approx(30.0),
+        "total_score": pytest.approx(50.0),
+        "mean_score": pytest.approx(25.0),
+        "pressure_score": pytest.approx(50.0),
+        "pressure_score_unit": "profile_pct",
+        "returned_count": 2,
+        "omitted_count": 0,
+        "score_unit": "profile_pct",
+        "top_candidate": "backward_phase",
+        "top_rank": 1,
+        "top_severity": "high",
+        "top_candidate_returned": True,
+        "top_score": pytest.approx(30.0),
+        "top_score_unit": "profile_pct",
+        "top_metric": "profile_backward_pct",
+        "top_value": pytest.approx(30.0),
+        "top_unit": "profile_pct",
+        "top_score_basis": "direct_metric",
+        "top_score_formula": "score=value",
+        "top_label": "backward phase",
+        "top_reason": "backward owns a large share of profiled loop time",
+        "top_next_step": "inspect gradient-ready span and backward top-child metrics",
+        "severity_counts": {"high": 1, "medium": 1},
+        "pressure_rank": 1,
+    }
+    assert generated["profile_bottleneck_category_summary"]["readiness_span"] == {
+        "count": 1,
+        "max_score": pytest.approx(15.0),
+        "total_score": pytest.approx(15.0),
+        "mean_score": pytest.approx(15.0),
+        "pressure_score": pytest.approx(15.0),
+        "pressure_score_unit": "profile_pct",
+        "returned_count": 1,
+        "omitted_count": 0,
+        "score_unit": "profile_pct",
+        "top_candidate": "backward_readiness_span",
+        "top_rank": 3,
+        "top_severity": "medium",
+        "top_candidate_returned": True,
+        "top_score": pytest.approx(15.0),
+        "top_score_unit": "profile_pct",
+        "top_metric": "profile_backward_grad_ready_span_pct",
+        "top_value": pytest.approx(50.0),
+        "top_unit": "pct_of_parent",
+        "top_score_basis": "parent_metric_weighted",
+        "top_score_formula": "score=parent_value*value/100",
+        "top_parent_metric": "profile_backward_pct",
+        "top_parent_value": pytest.approx(30.0),
+        "top_label": "backward readiness span",
+        "top_reason": "gradient readiness is spread across a large part of backward time",
+        "top_next_step": "look for long gaps between earliest and latest ready modules",
+        "severity_counts": {"medium": 1},
+        "pressure_rank": 2,
+    }
+    assert generated["profile_bottleneck_candidates"][0]["name"] == "backward_phase"
+    assert generated["profile_bottleneck_candidates"][0]["score"] == pytest.approx(30.0)
+    assert generated["profile_bottleneck_candidates"][0]["rank"] == 1
+    assert generated["profile_bottleneck_candidates"][0]["category"] == "phase_share"
+    assert generated["profile_bottleneck_candidates"][0]["severity"] == "high"
+    assert generated["profile_bottleneck_candidates"][0]["score_basis"] == "direct_metric"
+    assert generated["profile_bottleneck_candidates"][0]["score_formula"] == "score=value"
+    assert generated["profile_bottleneck_candidates"][0]["next_step"]
+    assert generated["profile_bottleneck_candidates"][1]["name"] == "forward_phase"
+    assert generated["profile_bottleneck_candidates"][1]["score"] == pytest.approx(20.0)
+    assert generated["profile_bottleneck_candidates"][1]["rank"] == 2
+    assert generated["profile_bottleneck_candidates"][1]["severity"] == "medium"
+    assert generated["profile_bottleneck_candidates"][2]["name"] == "backward_readiness_span"
+    assert generated["profile_bottleneck_candidates"][2]["score"] == pytest.approx(15.0)
+    assert generated["profile_bottleneck_candidates"][2]["rank"] == 3
+    assert generated["profile_bottleneck_candidates"][2]["severity"] == "medium"
+    assert generated["profile_bottleneck_candidates"][2]["score_basis"] == "parent_metric_weighted"
+    assert generated["profile_bottleneck_candidates"][2]["score_formula"] == "score=parent_value*value/100"
+    assert materialized["profile_bottleneck_severity_counts"] == {
+        "high": 1,
+        "medium": 1,
+        "low": 1,
+    }
+    assert materialized["profile_bottleneck_candidates"][0]["name"] == "backward_phase"
+    assert materialized["profile_bottleneck_candidates"][0]["score"] == pytest.approx(60.0)
+    assert materialized["profile_bottleneck_candidates"][0]["severity"] == "high"
+    assert summary["best_reported"]["dataset_mode"] == "materialized"
+    assert summary["best_reported"]["profile_bottleneck_candidates"] == materialized["profile_bottleneck_candidates"]
+    assert summary["best_reported"]["profile_bottleneck_top_candidate"] == materialized[
+        "profile_bottleneck_top_candidate"
+    ]
+    assert summary["best_reported"]["profile_bottleneck_top_category"] == materialized[
+        "profile_bottleneck_top_category"
+    ]
+    assert summary["best_reported"]["profile_bottleneck_category_order"] == materialized[
+        "profile_bottleneck_category_order"
+    ]
+    assert summary["best_reported"]["profile_bottleneck_severity_counts"] == materialized[
+        "profile_bottleneck_severity_counts"
+    ]
+    assert summary["best_reported"]["profile_bottleneck_severity_thresholds"] == materialized[
+        "profile_bottleneck_severity_thresholds"
+    ]
+    assert summary["best_reported"]["profile_bottleneck_category_summary"] == materialized[
+        "profile_bottleneck_category_summary"
+    ]
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_rows_omits_not_requested_profile_model_fields() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+            "profile_model_requested": False,
+            "profile_model_enabled": False,
+            "profile_model_status": "not_requested",
+            "profile_model_modules_selected": 0,
+            "profile_model_hook_count": 0,
+            "profile_model_hook_failures": 0,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert "profiled_runs" not in group
+    assert "profile_model_status_counts" not in group
+    assert "mean_profile_model_modules_selected" not in group
+    assert "mean_profile_model_hook_count" not in group
+    assert "mean_profile_model_hook_failures" not in group
+    assert "profile_model_status_counts" not in summary["best_reported"]
+    assert "mean_profile_model_modules_selected" not in summary["best_reported"]
+
+
+def test_summarize_rows_omits_zero_only_scheduler_diagnostics() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+            "scheduler_step_failures": 0,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert "mean_scheduler_step_failures" not in group
+    assert "mean_scheduler_step_failures" not in summary["best_reported"]
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_rows_includes_scheduler_failures_when_positive() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+            "scheduler_step_failures": 0,
+        },
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 120.0,
+            "samples_per_sec": 95.0,
+            "steady_samples_per_sec": 120.0,
+            "end_to_end_wall_time_s": 0.9,
+            "setup_time_s": 0.20,
+            "wall_time_s": 0.70,
+            "dataset_materialized_bytes": 0,
+            "scheduler_step_failures": 2,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert group["mean_scheduler_step_failures"] == pytest.approx(1.0)
+    assert group["max_scheduler_step_failures"] == pytest.approx(2.0)
+    assert summary["best_reported"]["mean_scheduler_step_failures"] == pytest.approx(1.0)
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_rows_ignores_missing_rows_for_profile_aggregates() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+        },
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 120.0,
+            "samples_per_sec": 95.0,
+            "steady_samples_per_sec": 120.0,
+            "end_to_end_wall_time_s": 0.9,
+            "setup_time_s": 0.20,
+            "wall_time_s": 0.70,
+            "dataset_materialized_bytes": 0,
+            "profile_forward_backward_pct": 60.0,
+            "profile_backward_pct": 35.0,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert group["runs"] == 2
+    assert group["profiled_runs"] == 1
+    assert group["mean_profile_forward_backward_pct"] == pytest.approx(60.0)
+    assert group["min_profile_forward_backward_pct"] == pytest.approx(60.0)
+    assert group["stddev_profile_forward_backward_pct"] == pytest.approx(0.0)
+    assert group["sample_count_profile_forward_backward_pct"] == pytest.approx(1.0)
+
+
+def test_summarize_rows_skips_non_finite_profile_values() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+            "profile_forward_backward_pct": float("inf"),
+        },
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 120.0,
+            "samples_per_sec": 95.0,
+            "steady_samples_per_sec": 120.0,
+            "end_to_end_wall_time_s": 0.9,
+            "setup_time_s": 0.20,
+            "wall_time_s": 0.70,
+            "dataset_materialized_bytes": 0,
+            "profile_forward_backward_pct": 60.0,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert group["profiled_runs"] == 2
+    assert group["mean_profile_forward_backward_pct"] == pytest.approx(60.0)
+    assert group["sample_count_profile_forward_backward_pct"] == pytest.approx(1.0)
+    assert group["non_finite_count_profile_forward_backward_pct"] == pytest.approx(1.0)
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_rows_skips_fractional_profile_invalid_count() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+            "profile_flat_metric_invalid_count": 0.5,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert group["mean_profile_flat_metric_invalid_count"] == pytest.approx(0.0)
+    assert group["sample_count_profile_flat_metric_invalid_count"] == pytest.approx(0.0)
+    assert group["invalid_count_profile_flat_metric_invalid_count"] == pytest.approx(1.0)
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_rows_skips_groups_with_no_finite_best_rank_values() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": float("nan"),
+            "samples_per_sec": float("nan"),
+            "steady_samples_per_sec": float("nan"),
+            "end_to_end_wall_time_s": float("inf"),
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+        },
+        {
+            "matrix_dataset_mode": "materialized",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 120.0,
+            "samples_per_sec": 95.0,
+            "steady_samples_per_sec": 120.0,
+            "end_to_end_wall_time_s": 0.9,
+            "setup_time_s": 0.20,
+            "wall_time_s": 0.70,
+            "dataset_materialized_bytes": 1024,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    generated = summary["groups"][0]
+
+    assert generated["sample_count_reported_samples_per_sec"] == pytest.approx(0.0)
+    assert generated["non_finite_count_reported_samples_per_sec"] == pytest.approx(1.0)
+    assert generated["sample_count_end_to_end_wall_time_s"] == pytest.approx(0.0)
+    assert generated["non_finite_count_end_to_end_wall_time_s"] == pytest.approx(1.0)
+    assert summary["best_reported"]["dataset_mode"] == "materialized"
+    assert summary["best_end_to_end"]["dataset_mode"] == "materialized"
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_rows_skips_groups_with_negative_best_rank_values() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": -10.0,
+            "samples_per_sec": -8.0,
+            "steady_samples_per_sec": -10.0,
+            "end_to_end_wall_time_s": -1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": -1.0,
+            "dataset_materialized_bytes": 0,
+        },
+        {
+            "matrix_dataset_mode": "materialized",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 120.0,
+            "steady_samples_per_sec": 120.0,
+            "end_to_end_wall_time_s": 0.9,
+            "setup_time_s": 0.20,
+            "wall_time_s": 0.70,
+            "dataset_materialized_bytes": 1024,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    generated = summary["groups"][0]
+
+    assert generated["sample_count_reported_samples_per_sec"] == pytest.approx(0.0)
+    assert generated["invalid_count_reported_samples_per_sec"] == pytest.approx(1.0)
+    assert generated["sample_count_end_to_end_wall_time_s"] == pytest.approx(0.0)
+    assert generated["invalid_count_end_to_end_wall_time_s"] == pytest.approx(1.0)
+    assert summary["best_reported"]["dataset_mode"] == "materialized"
+    assert summary["best_end_to_end"]["dataset_mode"] == "materialized"
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_rows_skips_out_of_range_profile_percentages() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": 0,
+            "profile_forward_backward_pct": 125.0,
+            "profile_forward_top_pct_of_parent": 125.0,
+            "profile_loss_pct": -1.0,
+            "profile_backward_pct": 40.0,
+        },
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 120.0,
+            "samples_per_sec": 95.0,
+            "steady_samples_per_sec": 120.0,
+            "end_to_end_wall_time_s": 0.9,
+            "setup_time_s": 0.20,
+            "wall_time_s": 0.70,
+            "dataset_materialized_bytes": 0,
+            "profile_forward_backward_pct": 60.0,
+            "profile_forward_top_pct_of_parent": 75.0,
+            "profile_loss_pct": 8.0,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert group["mean_profile_forward_backward_pct"] == pytest.approx(60.0)
+    assert group["sample_count_profile_forward_backward_pct"] == pytest.approx(1.0)
+    assert group["invalid_count_profile_forward_backward_pct"] == pytest.approx(1.0)
+    assert group["mean_profile_forward_top_pct_of_parent"] == pytest.approx(100.0)
+    assert "invalid_count_profile_forward_top_pct_of_parent" not in group
+    assert group["mean_profile_loss_pct"] == pytest.approx(8.0)
+    assert group["invalid_count_profile_loss_pct"] == pytest.approx(1.0)
+    assert group["mean_profile_backward_pct"] == pytest.approx(40.0)
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_rows_skips_groups_with_only_missing_best_rank_values() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": "generated",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "setup_time_s": 0.25,
+            "dataset_materialized_bytes": 0,
+        },
+        {
+            "matrix_dataset_mode": "materialized",
+            "matrix_compile_mode": "no-compile",
+            "matrix_workers": 0,
+            "reported_samples_per_sec": 120.0,
+            "steady_samples_per_sec": 120.0,
+            "end_to_end_wall_time_s": 0.9,
+            "setup_time_s": 0.20,
+            "wall_time_s": 0.70,
+            "dataset_materialized_bytes": 1024,
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    generated = summary["groups"][0]
+
+    assert generated["sample_count_reported_samples_per_sec"] == pytest.approx(0.0)
+    assert generated["missing_count_reported_samples_per_sec"] == pytest.approx(1.0)
+    assert generated["sample_count_end_to_end_wall_time_s"] == pytest.approx(0.0)
+    assert generated["missing_count_end_to_end_wall_time_s"] == pytest.approx(1.0)
+    assert summary["best_reported"]["dataset_mode"] == "materialized"
+    assert summary["best_end_to_end"]["dataset_mode"] == "materialized"
+    json.dumps(summary, allow_nan=False)
+
+
+def test_summarize_rows_accepts_string_integer_metadata() -> None:
+    rows = [
+        {
+            "matrix_dataset_mode": " materialized ",
+            "matrix_compile_mode": " no-compile ",
+            "matrix_workers": "2",
+            "reported_samples_per_sec": 100.0,
+            "samples_per_sec": 80.0,
+            "steady_samples_per_sec": 100.0,
+            "end_to_end_wall_time_s": 1.0,
+            "setup_time_s": 0.25,
+            "wall_time_s": 0.75,
+            "dataset_materialized_bytes": "1024",
+        },
+    ]
+
+    summary = summarize_rows(rows)
+    group = summary["groups"][0]
+
+    assert group["workers"] == 2
+    assert group["dataset_materialized_bytes"] == 1024
+    assert group["dataset_mode"] == "materialized"
+    assert group["compile_mode"] == "no-compile"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("matrix_workers", 1.5, "matrix_workers"),
+        ("matrix_workers", True, "matrix_workers"),
+        ("matrix_workers", -1, "matrix_workers"),
+        ("dataset_materialized_bytes", 1.5, "dataset_materialized_bytes"),
+        ("dataset_materialized_bytes", True, "dataset_materialized_bytes"),
+        ("dataset_materialized_bytes", -1, "dataset_materialized_bytes"),
+    ],
+)
+def test_summarize_rows_rejects_ambiguous_integer_metadata(
+    field: str,
+    value: object,
+    match: str,
+) -> None:
+    row = {
+        "matrix_dataset_mode": "generated",
+        "matrix_compile_mode": "no-compile",
+        "matrix_workers": 0,
+        "reported_samples_per_sec": 100.0,
+        "samples_per_sec": 80.0,
+        "steady_samples_per_sec": 100.0,
+        "end_to_end_wall_time_s": 1.0,
+        "setup_time_s": 0.25,
+        "wall_time_s": 0.75,
+        "dataset_materialized_bytes": 0,
+    }
+    row[field] = value
+
+    with pytest.raises(ValueError, match=match):
+        summarize_rows([row])
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("matrix_dataset_mode", None, "matrix_dataset_mode"),
+        ("matrix_dataset_mode", True, "matrix_dataset_mode"),
+        ("matrix_dataset_mode", "", "matrix_dataset_mode"),
+        ("matrix_dataset_mode", "archive", "matrix_dataset_mode"),
+        ("matrix_compile_mode", None, "matrix_compile_mode"),
+        ("matrix_compile_mode", True, "matrix_compile_mode"),
+        ("matrix_compile_mode", "   ", "matrix_compile_mode"),
+        ("matrix_compile_mode", "maybe", "matrix_compile_mode"),
+    ],
+)
+def test_summarize_rows_rejects_invalid_group_metadata(
+    field: str,
+    value: object,
+    match: str,
+) -> None:
+    row = {
+        "matrix_dataset_mode": "generated",
+        "matrix_compile_mode": "no-compile",
+        "matrix_workers": 0,
+        "reported_samples_per_sec": 100.0,
+        "samples_per_sec": 80.0,
+        "steady_samples_per_sec": 100.0,
+        "end_to_end_wall_time_s": 1.0,
+        "setup_time_s": 0.25,
+        "wall_time_s": 0.75,
+        "dataset_materialized_bytes": 0,
+    }
+    row[field] = value
+
+    with pytest.raises(ValueError, match=match):
+        summarize_rows([row])
+
+
+@pytest.mark.parametrize(
+    ("missing_field", "match"),
+    [
+        ("matrix_dataset_mode", "matrix_dataset_mode"),
+        ("matrix_compile_mode", "matrix_compile_mode"),
+        ("matrix_workers", "matrix_workers"),
+    ],
+)
+def test_summarize_rows_rejects_missing_group_metadata(
+    missing_field: str,
+    match: str,
+) -> None:
+    row = {
+        "matrix_dataset_mode": "generated",
+        "matrix_compile_mode": "no-compile",
+        "matrix_workers": 0,
+        "reported_samples_per_sec": 100.0,
+        "samples_per_sec": 80.0,
+        "steady_samples_per_sec": 100.0,
+        "end_to_end_wall_time_s": 1.0,
+        "setup_time_s": 0.25,
+        "wall_time_s": 0.75,
+        "dataset_materialized_bytes": 0,
+    }
+    del row[missing_field]
+
+    with pytest.raises(ValueError, match=match):
+        summarize_rows([row])
 
 
 def test_summarize_rows_handles_empty_input() -> None:

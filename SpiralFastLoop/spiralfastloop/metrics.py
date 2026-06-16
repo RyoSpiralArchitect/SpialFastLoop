@@ -3,10 +3,33 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional
 import csv
+import os
 import time
+from dataclasses import dataclass
+from typing import Any, Dict, Iterable, List, Optional, Union
+
+from .utils import _finite_float_setting, _non_negative_int_setting
+
+PathSetting = Union[str, os.PathLike[str]]
+
+
+def _path_setting(path: Any, name: str) -> str:
+    if not isinstance(path, (str, os.PathLike)):
+        raise ValueError(f"{name} must be a path string")
+    try:
+        normalized = os.fsdecode(path)
+    except Exception as exc:
+        raise ValueError(f"{name} must be a path string") from exc
+    if not isinstance(normalized, str) or normalized.strip() == "":
+        raise ValueError(f"{name} must be a non-empty path string")
+    return normalized
+
+
+def _optional_context_setting(context: Any) -> Optional[str]:
+    if context is None or isinstance(context, str):
+        return context
+    raise ValueError("context must be a string or None")
 
 
 @dataclass
@@ -40,7 +63,7 @@ class NormalizationMetricsCollector:
     """
 
     def __init__(self, *, history_limit: int = 512) -> None:
-        self.history_limit = max(0, history_limit)
+        self.history_limit = _non_negative_int_setting(history_limit, "history_limit")
         self._history: List[NormalizationEvent] = []
         self.total_events = 0
         self.zeroed_events = 0
@@ -60,18 +83,30 @@ class NormalizationMetricsCollector:
     ) -> None:
         """Register a normalization event."""
 
+        before_value = _finite_float_setting(before, "before")
+        after_value = _finite_float_setting(after, "after")
+        context_value = _optional_context_setting(context)
+        timestamp_value: Optional[float] = None
+        if timestamp is not None:
+            timestamp_value = _finite_float_setting(timestamp, "timestamp")
+
         self.total_events += 1
-        if after == 0.0:
+        if after_value == 0.0:
             self.zeroed_events += 1
-        self._sum_abs_before += abs(before)
-        self._sum_abs_after += abs(after)
+        self._sum_abs_before += abs(before_value)
+        self._sum_abs_after += abs(after_value)
 
         if self.history_limit == 0:
             return
 
-        if timestamp is None:
-            timestamp = time.time()
-        event = NormalizationEvent(timestamp=timestamp, before=before, after=after, context=context)
+        if timestamp_value is None:
+            timestamp_value = time.time()
+        event = NormalizationEvent(
+            timestamp=timestamp_value,
+            before=before_value,
+            after=after_value,
+            context=context_value,
+        )
         self._history.append(event)
         if len(self._history) > self.history_limit:
             self._history.pop(0)
@@ -80,7 +115,15 @@ class NormalizationMetricsCollector:
     # Accessors
     # ------------------------------------------------------------------
     def events(self) -> List[NormalizationEvent]:
-        return list(self._history)
+        return [
+            NormalizationEvent(
+                timestamp=event.timestamp,
+                before=event.before,
+                after=event.after,
+                context=event.context,
+            )
+            for event in self._history
+        ]
 
     def summary(self) -> Dict[str, float]:
         avg_before = self._sum_abs_before / self.total_events if self.total_events else 0.0
@@ -126,18 +169,52 @@ class NormalizationMetricsCollector:
             lines.append(f"Contexts seen  : {unique_contexts}")
         return "\n".join(lines)
 
-    def export_csv(self, path: str) -> None:
+    def export_csv(self, path: PathSetting) -> None:
         """Persist the rolling history to a CSV file for dashboards."""
 
+        normalized_path = _path_setting(path, "path")
+        directory = os.path.dirname(normalized_path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
         fieldnames = ["timestamp", "before", "after", "abs_before", "abs_after", "zeroed", "context"]
-        with open(path, "w", newline="") as handle:
+        with open(normalized_path, "w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=fieldnames)
             writer.writeheader()
             for row in self.to_timeseries():
                 writer.writerow(row)
 
     def merge(self, events: Iterable[NormalizationEvent]) -> None:
-        for event in events:
+        try:
+            iterator = iter(events)
+        except Exception as exc:
+            raise ValueError("events must be an iterable of NormalizationEvent items") from exc
+
+        validated_events: List[NormalizationEvent] = []
+        try:
+            for index, event in enumerate(iterator):
+                if not isinstance(event, NormalizationEvent):
+                    raise ValueError("events must contain NormalizationEvent items")
+                try:
+                    timestamp_value = _finite_float_setting(event.timestamp, f"events[{index}].timestamp")
+                    before_value = _finite_float_setting(event.before, f"events[{index}].before")
+                    after_value = _finite_float_setting(event.after, f"events[{index}].after")
+                    context_value = _optional_context_setting(event.context)
+                except ValueError as exc:
+                    raise ValueError(f"events[{index}] is invalid: {exc}") from exc
+                validated_events.append(
+                    NormalizationEvent(
+                        timestamp=timestamp_value,
+                        before=before_value,
+                        after=after_value,
+                        context=context_value,
+                    )
+                )
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError("events must be an iterable of NormalizationEvent items") from exc
+
+        for event in validated_events:
             self.record(event.before, event.after, context=event.context, timestamp=event.timestamp)
 
 

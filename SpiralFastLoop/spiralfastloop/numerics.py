@@ -25,7 +25,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass, field
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 __all__ = [
     "HybridCompensatedAccumulator",
@@ -80,6 +80,18 @@ def _stochastic_round(value: float, unit: float, rng: random.Random) -> float:
     return lower * unit
 
 
+def _finite_float_value(value: Any, name: str) -> float:
+    if isinstance(value, (bool, str, bytes, bytearray)):
+        raise ValueError(f"{name} must be a finite float")
+    try:
+        normalized = float(value)
+    except Exception as exc:
+        raise ValueError(f"{name} must be a finite float") from exc
+    if not math.isfinite(normalized):
+        raise ValueError(f"{name} must be a finite float")
+    return normalized
+
+
 @dataclass
 class HybridCompensatedAccumulator:
     """Running sum with compensation and stochastic rounding.
@@ -113,15 +125,18 @@ class HybridCompensatedAccumulator:
     _compensation: float = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        if not math.isfinite(self.unit) or self.unit <= 0.0:
+        unit = _finite_float_value(self.unit, "unit")
+        if unit <= 0.0:
             raise ValueError("unit must be a positive, finite float")
-        if not math.isfinite(self.initial_total):
-            raise ValueError("initial_total must be finite")
-        if not math.isfinite(self.initial_compensation):
-            raise ValueError("initial_compensation must be finite")
-        self._rng = self.rng or random.Random()
-        self._total = float(self.initial_total)
-        self._compensation = float(self.initial_compensation)
+        if self.rng is not None and not isinstance(self.rng, random.Random):
+            raise ValueError("rng must be a random.Random instance or None")
+        self.unit = unit
+        self._rng = self.rng if self.rng is not None else random.Random()
+        self._total = _finite_float_value(self.initial_total, "initial_total")
+        self._compensation = _finite_float_value(
+            self.initial_compensation,
+            "initial_compensation",
+        )
 
     # ------------------------------------------------------------------
     # Mutation helpers
@@ -129,9 +144,7 @@ class HybridCompensatedAccumulator:
     def add(self, value: float) -> None:
         """Add a single value into the accumulator."""
 
-        value = float(value)
-        if not math.isfinite(value):
-            raise ValueError("value must be finite")
+        value = _finite_float_value(value, "value")
 
         if abs(self._total) > abs(value):
             self._total, self._compensation = _kahan_step(
@@ -145,8 +158,18 @@ class HybridCompensatedAccumulator:
     def extend(self, values: Iterable[float]) -> None:
         """Add multiple values into the accumulator."""
 
-        for value in values:
-            self.add(value)
+        try:
+            iterator = iter(values)
+        except Exception as exc:
+            raise ValueError("values must be an iterable of finite floats") from exc
+
+        snapshot = self.snapshot()
+        try:
+            for value in iterator:
+                self.add(value)
+        except Exception:
+            self.restore(*snapshot)
+            raise
 
     # ------------------------------------------------------------------
     # Accessors
@@ -201,7 +224,7 @@ class HybridCompensatedAccumulator:
     def restore(self, total: float, compensation: float) -> None:
         """Restore a previously captured state."""
 
-        if not math.isfinite(total) or not math.isfinite(compensation):
-            raise ValueError("snapshot values must be finite")
-        self._total = float(total)
-        self._compensation = float(compensation)
+        total_value = _finite_float_value(total, "total")
+        compensation_value = _finite_float_value(compensation, "compensation")
+        self._total = total_value
+        self._compensation = compensation_value

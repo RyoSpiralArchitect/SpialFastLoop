@@ -4,44 +4,66 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from argparse import Namespace
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from bench_parallel_transactions import (
+    BASE_SUMMARY_FIELDS,
+    PROFILE_MODEL_STATUS_ORDER,
+    SUMMARY_INTEGER_FIELDS,
+    _best_finite_row,
+    _finite_summary_value,
+    _format_metric_value,
+    _format_profile_bottleneck_candidate_counts,
+    _format_profile_bottleneck_category_pressure,
+    _format_profile_bottleneck_severity_counts,
+    _format_profile_model_hook_summary,
+    _format_scheduler_summary,
+    _format_setup_breakdown,
+    _add_profile_bottleneck_candidates,
+    _add_summary_diagnostic_totals,
+    _int_arg,
+    _positive_sample_count_value,
+    _profile_model_status_counts,
+    _ranked_profile_bottleneck_category_items,
+    _summary_metric_diagnostic,
+    _summary_metric_max_value,
+    _summary_metric_min_value,
+    _summary_row,
+    count_profiled_rows,
+    device_arg,
     non_negative_int_arg,
     positive_float_arg,
     positive_int_arg,
     run_once,
     summarize_metric,
+    summary_fields_for_rows,
     validate_benchmark_args,
 )
-
-SUMMARY_FIELDS = (
-    "reported_samples_per_sec",
-    "samples_per_sec",
-    "steady_samples_per_sec",
-    "end_to_end_wall_time_s",
-    "setup_time_s",
-    "wall_time_s",
-    "cold_start_time_s",
-)
+from json_utils import dump_json
 
 
-def _parse_csv_choices(raw: str, allowed: set[str], *, name: str) -> list[str]:
+def _parse_csv_choices(raw: object, allowed: set[str], *, name: str) -> list[str]:
+    if not isinstance(raw, str):
+        raise ValueError(f"{name} must be a comma-separated string")
     values = [item.strip() for item in raw.split(",") if item.strip()]
     if not values:
         raise ValueError(f"{name} must include at least one value")
     invalid = sorted(set(values) - allowed)
     if invalid:
         raise ValueError(f"{name} includes unsupported values: {', '.join(invalid)}")
+    if len(set(values)) != len(values):
+        raise ValueError(f"{name} must not include duplicate values")
     return values
 
 
-def _parse_worker_counts(raw: str) -> list[int]:
+def _parse_worker_counts(raw: object) -> list[int]:
+    if not isinstance(raw, str):
+        raise ValueError("worker counts must be a comma-separated string")
     values = []
     for item in raw.split(","):
         text = item.strip()
@@ -54,6 +76,8 @@ def _parse_worker_counts(raw: str) -> list[int]:
         values.append(value)
     if not values:
         raise ValueError("worker counts must include at least one value")
+    if len(set(values)) != len(values):
+        raise ValueError("worker counts must not include duplicate values")
     return values
 
 
@@ -65,41 +89,121 @@ def _compile_requested(mode: str) -> bool:
     raise ValueError(f"unsupported compile mode: {mode}")
 
 
+def _non_negative_summary_int(raw: object, name: str) -> int:
+    try:
+        return non_negative_int_arg(raw)
+    except argparse.ArgumentTypeError as exc:
+        raise ValueError(f"{name} {exc}") from exc
+
+
+def _summary_choice(raw: object, allowed: set[str], name: str) -> str:
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    value = raw.strip()
+    if value not in allowed:
+        raise ValueError(f"{name} has unsupported value: {value}")
+    return value
+
+
+def _required_row_value(row: dict, field: str) -> object:
+    if field not in row:
+        raise ValueError(f"{field} is required")
+    return row[field]
+
+
 def _group_key(row: dict) -> tuple[str, str, int]:
     return (
-        str(row["matrix_dataset_mode"]),
-        str(row["matrix_compile_mode"]),
-        int(row["matrix_workers"]),
+        _summary_choice(
+            _required_row_value(row, "matrix_dataset_mode"),
+            {"generated", "materialized"},
+            "matrix_dataset_mode",
+        ),
+        _summary_choice(
+            _required_row_value(row, "matrix_compile_mode"),
+            {"compile", "no-compile"},
+            "matrix_compile_mode",
+        ),
+        _non_negative_summary_int(_required_row_value(row, "matrix_workers"), "matrix_workers"),
     )
 
 
 def summarize_rows(rows: list[dict]) -> dict:
     groups: dict[tuple[str, str, int], list[dict]] = {}
     for row in rows:
-        groups.setdefault(_group_key(row), []).append(row)
+        normalized_row = _summary_row(row)
+        groups.setdefault(_group_key(normalized_row), []).append(normalized_row)
 
     summaries = []
     for (dataset_mode, compile_mode, workers), group_rows in sorted(groups.items()):
+        present_fields = set()
+        for row in group_rows:
+            present_fields.update(row.keys())
         summary = {
             "dataset_mode": dataset_mode,
             "compile_mode": compile_mode,
             "workers": workers,
             "runs": len(group_rows),
             "dataset_materialized_bytes": max(
-                int(row.get("dataset_materialized_bytes", 0))
+                _non_negative_summary_int(
+                    row.get("dataset_materialized_bytes", 0),
+                    "dataset_materialized_bytes",
+                )
                 for row in group_rows
             ),
         }
-        for field in SUMMARY_FIELDS:
-            for stat_name, value in summarize_metric(group_rows, field).items():
+        summary_diagnostics: list[dict[str, object]] = []
+        profiled_runs = count_profiled_rows(group_rows)
+        if profiled_runs > 0:
+            summary["profiled_runs"] = profiled_runs
+        status_counts, status_invalid_count = _profile_model_status_counts(group_rows)
+        if status_counts:
+            summary["profile_model_status_counts"] = status_counts
+        if status_invalid_count > 0:
+            summary["profile_model_status_invalid_count"] = status_invalid_count
+            summary_diagnostics.append({
+                "field": "profile_model_status",
+                "invalid_count": status_invalid_count,
+            })
+        for field in summary_fields_for_rows(group_rows):
+            missing_as_zero = field in BASE_SUMMARY_FIELDS
+            metric_stats = summarize_metric(
+                group_rows,
+                field,
+                missing_as_zero=missing_as_zero,
+                min_value=_summary_metric_min_value(field),
+                max_value=_summary_metric_max_value(field),
+                integer=field in SUMMARY_INTEGER_FIELDS,
+            )
+            diagnostic = _summary_metric_diagnostic(
+                field,
+                metric_stats,
+                field_present=field in present_fields,
+            )
+            if diagnostic is not None:
+                summary_diagnostics.append(diagnostic)
+            for stat_name, value in metric_stats.items():
                 summary[f"{stat_name}_{field}"] = value
+        _add_summary_diagnostic_totals(summary, summary_diagnostics)
+        _add_profile_bottleneck_candidates(summary)
         summaries.append(summary)
 
     best_reported = None
     best_end_to_end = None
     if summaries:
-        best_reported = max(summaries, key=lambda row: row["mean_reported_samples_per_sec"])
-        best_end_to_end = min(summaries, key=lambda row: row["mean_end_to_end_wall_time_s"])
+        best_reported = _best_finite_row(
+            summaries,
+            "mean_reported_samples_per_sec",
+            prefer_high=True,
+            sample_count_field="sample_count_reported_samples_per_sec",
+            min_value=0.0,
+        )
+        best_end_to_end = _best_finite_row(
+            summaries,
+            "mean_end_to_end_wall_time_s",
+            prefer_high=False,
+            sample_count_field="sample_count_end_to_end_wall_time_s",
+            min_value=0.0,
+        )
 
     return {
         "runs": len(rows),
@@ -110,11 +214,323 @@ def summarize_rows(rows: list[dict]) -> dict:
     }
 
 
+def _measured_summary_value(row: dict, mean_field: str) -> Optional[float]:
+    if mean_field not in row:
+        return None
+    value = _finite_summary_value(row[mean_field])
+    if value is None:
+        return None
+    if value < 0.0:
+        return None
+
+    metric_name = mean_field[len("mean_"):] if mean_field.startswith("mean_") else mean_field
+    max_value = _summary_metric_max_value(metric_name)
+    if max_value is not None and value > max_value:
+        return None
+    sample_count_field = f"sample_count_{metric_name}"
+    if sample_count_field in row:
+        sample_count = _positive_sample_count_value(row[sample_count_field])
+        if sample_count is None:
+            return None
+    return value
+
+
+def _direct_profile_metric_value(row: dict, field: str) -> Optional[float]:
+    if field not in row:
+        return None
+    value = _finite_summary_value(row[field])
+    if value is None or value < 0.0:
+        return None
+    return value
+
+
+def _format_phase_tail_parts(row: dict, *, aggregate: bool) -> list[str]:
+    value_fn = _measured_summary_value if aggregate else _direct_profile_metric_value
+    field_prefix = "mean_" if aggregate else ""
+    parts = []
+    for label, phase_name in (
+        ("fwd", "forward"),
+        ("bwd", "backward"),
+        ("opt", "optimizer"),
+    ):
+        tail_parts = []
+        for metric_name in ("p95_ms", "p99_ms", "std_ms"):
+            field = f"{field_prefix}profile_{phase_name}_{metric_name}"
+            value = value_fn(row, field)
+            if value is None:
+                continue
+            tail_parts.append(f"{metric_name[:-3]}={value:.2f}ms")
+        if tail_parts:
+            parts.append(f"{label}_tail({','.join(tail_parts)})")
+    return parts
+
+
+def _format_summary_jitter(row: dict) -> str:
+    parts = []
+    for metric_name, label, precision, suffix in (
+        ("reported_samples_per_sec", "reported_sd", 1, "/s"),
+        ("end_to_end_wall_time_s", "e2e_sd", 2, "s"),
+    ):
+        sample_count_field = f"sample_count_{metric_name}"
+        if sample_count_field in row:
+            sample_count = _positive_sample_count_value(row.get(sample_count_field))
+        else:
+            sample_count = _positive_sample_count_value(row.get("runs"))
+        if sample_count is None or sample_count <= 1:
+            continue
+        stddev = _finite_summary_value(row.get(f"stddev_{metric_name}"))
+        if stddev is None or stddev <= 0.0:
+            continue
+        parts.append(f"{label}={stddev:.{precision}f}{suffix}")
+    if not parts:
+        return ""
+    return f"jitter({','.join(parts)})"
+
+
+def _format_top_bottleneck_candidate(row: dict) -> str:
+    candidate = row.get("profile_bottleneck_top_candidate")
+    if not isinstance(candidate, dict):
+        candidates = row.get("profile_bottleneck_candidates")
+        if not isinstance(candidates, list) or not candidates:
+            return ""
+        candidate = candidates[0]
+    if not isinstance(candidate, dict):
+        return ""
+    name = candidate.get("name")
+    if not isinstance(name, str) or not name:
+        return ""
+    score = _finite_summary_value(candidate.get("score"))
+    if score is None or score < 0.0:
+        return ""
+    suffix = "%" if candidate.get("score_unit") == "profile_pct" else ""
+    text = f"hotspot={name}:{score:.1f}{suffix}"
+    qualifiers = []
+    category = candidate.get("category")
+    if isinstance(category, str) and category:
+        qualifiers.append(category)
+    severity = candidate.get("severity")
+    if isinstance(severity, str) and severity:
+        qualifiers.append(severity)
+    if qualifiers:
+        text = f"{text}({','.join(qualifiers)})"
+    return text
+
+
+def _format_bottleneck_pressure(row: dict) -> str:
+    category_summary = row.get("profile_bottleneck_category_summary")
+    if not isinstance(category_summary, dict):
+        return ""
+    parts = []
+    for category_name, entry in _ranked_profile_bottleneck_category_items(category_summary):
+        part = _format_profile_bottleneck_category_pressure(
+            category_name,
+            entry,
+            include_count=False,
+        )
+        if part:
+            parts.append(part)
+    if not parts:
+        return ""
+    return f"pressure({','.join(parts)})"
+
+
+def _annotate_profile_bottleneck_candidates(row: dict) -> dict:
+    _add_profile_bottleneck_candidates(row)
+    return row
+
+
 def _format_summary_row(row: dict) -> str:
+    reported_samples_per_sec = _measured_summary_value(row, "mean_reported_samples_per_sec")
+    reported_text = (
+        f"{reported_samples_per_sec:.1f}/s"
+        if reported_samples_per_sec is not None
+        else "n/a"
+    )
+    end_to_end_wall_time_s = _measured_summary_value(row, "mean_end_to_end_wall_time_s")
+    end_to_end_text = (
+        f"{end_to_end_wall_time_s:.2f}s"
+        if end_to_end_wall_time_s is not None
+        else "n/a"
+    )
+    setup_time_s = _measured_summary_value(row, "mean_setup_time_s")
+    setup_text = f" setup={setup_time_s:.2f}s" if setup_time_s is not None else ""
+    setup_breakdown = _format_setup_breakdown({
+        "dataset_setup_time_s": _measured_summary_value(row, "mean_dataset_setup_time_s"),
+        "loader_setup_time_s": _measured_summary_value(row, "mean_loader_setup_time_s"),
+        "model_setup_time_s": _measured_summary_value(row, "mean_model_setup_time_s"),
+        "compile_init_time_s": _measured_summary_value(row, "mean_compile_init_time_s"),
+    })
+    setup_breakdown_text = f" {setup_breakdown}" if setup_breakdown else ""
+    profile_parts = []
+    jitter_text = _format_summary_jitter(row)
+    if jitter_text:
+        profile_parts.append(jitter_text)
+    forward_backward_pct = _measured_summary_value(row, "mean_profile_forward_backward_pct")
+    if forward_backward_pct is not None:
+        profile_parts.append(f"fwd+bwd={forward_backward_pct:.1f}%")
+    forward_coverage_pct = _measured_summary_value(row, "mean_profile_forward_coverage_pct")
+    if forward_coverage_pct is not None:
+        profile_parts.append(f"fwd_cover={forward_coverage_pct:.1f}%")
+    forward_top_pct = _measured_summary_value(row, "mean_profile_forward_top_pct_of_parent")
+    forward_top_avg_ms = _measured_summary_value(row, "mean_profile_forward_top_avg_ms")
+    if forward_top_pct is not None:
+        forward_text = f"fwd_top={forward_top_pct:.1f}%"
+        if forward_top_avg_ms is not None:
+            forward_text = f"{forward_text}@{forward_top_avg_ms:.2f}ms"
+        profile_parts.append(forward_text)
+    loss_pct = _measured_summary_value(row, "mean_profile_loss_pct")
+    if loss_pct is not None:
+        profile_parts.append(f"loss={loss_pct:.1f}%")
+    optimizer_pct = _measured_summary_value(row, "mean_profile_optimizer_pct")
+    if optimizer_pct is not None:
+        profile_parts.append(f"opt={optimizer_pct:.1f}%")
+    optimizer_coverage_pct = _measured_summary_value(row, "mean_profile_optimizer_coverage_pct")
+    if optimizer_coverage_pct is not None:
+        profile_parts.append(f"opt_cover={optimizer_coverage_pct:.1f}%")
+    optimizer_top_pct = _measured_summary_value(row, "mean_profile_optimizer_top_pct_of_parent")
+    optimizer_top_avg_ms = _measured_summary_value(row, "mean_profile_optimizer_top_avg_ms")
+    if optimizer_top_pct is not None:
+        optimizer_text = f"opt_top={optimizer_top_pct:.1f}%"
+        if optimizer_top_avg_ms is not None:
+            optimizer_text = f"{optimizer_text}@{optimizer_top_avg_ms:.2f}ms"
+        profile_parts.append(optimizer_text)
+    profile_parts.extend(_format_phase_tail_parts(row, aggregate=True))
+    backward_ready_pct = _measured_summary_value(row, "mean_profile_backward_grad_ready_top_pct")
+    backward_ready_avg_ms = _measured_summary_value(row, "mean_profile_backward_grad_ready_top_avg_ms")
+    backward_ready_span_ms = _measured_summary_value(row, "mean_profile_backward_grad_ready_span_avg_ms")
+    backward_ready_span_pct = _measured_summary_value(row, "mean_profile_backward_grad_ready_span_pct")
+    if backward_ready_span_ms is not None:
+        span_text = f"bwd_span={backward_ready_span_ms:.2f}ms"
+        if backward_ready_span_pct is not None:
+            span_text = f"{span_text}@{backward_ready_span_pct:.1f}%"
+        profile_parts.append(span_text)
+    if backward_ready_pct is not None:
+        ready_text = f"bwd_ready={backward_ready_pct:.1f}%"
+        if backward_ready_avg_ms is not None:
+            ready_text = f"{ready_text}@{backward_ready_avg_ms:.2f}ms"
+        profile_parts.append(ready_text)
+    open_phase_count = _measured_summary_value(row, "mean_profile_open_phase_count")
+    open_detail_count = _measured_summary_value(row, "mean_profile_open_detail_count")
+    open_parts = []
+    if open_phase_count is not None and open_phase_count > 0.0:
+        open_parts.append(f"phases={open_phase_count:.1f}")
+    if open_detail_count is not None and open_detail_count > 0.0:
+        open_parts.append(f"details={open_detail_count:.1f}")
+    if open_parts:
+        profile_parts.append(f"open({','.join(open_parts)})")
+    profile_model_modules = _measured_summary_value(row, "mean_profile_model_modules_selected")
+    profile_model_hooks = _measured_summary_value(row, "mean_profile_model_hook_count")
+    profile_model_failures = _measured_summary_value(row, "mean_profile_model_hook_failures")
+    model_parts = []
+    if profile_model_modules is not None and profile_model_modules > 0.0:
+        model_parts.append(f"modules={profile_model_modules:.1f}")
+    if profile_model_hooks is not None and profile_model_hooks > 0.0:
+        model_parts.append(f"hooks={profile_model_hooks:.1f}")
+    if profile_model_failures is not None and profile_model_failures > 0.0:
+        model_parts.append(f"failures={profile_model_failures:.1f}")
+    if model_parts:
+        profile_parts.append(f"model({','.join(model_parts)})")
+    status_counts = row.get("profile_model_status_counts")
+    status_parts = []
+    if isinstance(status_counts, dict):
+        for status in PROFILE_MODEL_STATUS_ORDER:
+            if status == "not_requested":
+                continue
+            raw_count = status_counts.get(status)
+            if isinstance(raw_count, (bool, str)):
+                continue
+            try:
+                count = non_negative_int_arg(raw_count)
+            except argparse.ArgumentTypeError:
+                continue
+            if count > 0:
+                status_parts.append(f"{status}={count}")
+    raw_status_invalid_count = row.get("profile_model_status_invalid_count")
+    if isinstance(raw_status_invalid_count, (bool, str)):
+        status_invalid_count = 0
+    else:
+        try:
+            status_invalid_count = non_negative_int_arg(raw_status_invalid_count)
+        except argparse.ArgumentTypeError:
+            status_invalid_count = 0
+    if status_invalid_count > 0:
+        status_parts.append(f"invalid={status_invalid_count}")
+    if status_parts:
+        profile_parts.append(f"status({','.join(status_parts)})")
+    bottleneck_text = _format_top_bottleneck_candidate(row)
+    if bottleneck_text:
+        profile_parts.append(bottleneck_text)
+    bottleneck_pressure = _format_bottleneck_pressure(row)
+    if bottleneck_pressure:
+        profile_parts.append(bottleneck_pressure)
+    bottleneck_severity_counts = _format_profile_bottleneck_severity_counts(row)
+    if bottleneck_severity_counts:
+        profile_parts.append(bottleneck_severity_counts)
+    bottleneck_candidate_counts = _format_profile_bottleneck_candidate_counts(row)
+    if bottleneck_candidate_counts:
+        profile_parts.append(bottleneck_candidate_counts)
+    scheduler_failures = _measured_summary_value(row, "mean_scheduler_step_failures")
+    if scheduler_failures is not None and scheduler_failures > 0.0:
+        profile_parts.append(f"scheduler(failures={scheduler_failures:.1f})")
+    profile_suffix = f" {' '.join(profile_parts)}" if profile_parts else ""
     return (
         f"{row['dataset_mode']} {row['compile_mode']} workers={row['workers']} "
-        f"reported={row['mean_reported_samples_per_sec']:.1f}/s "
-        f"e2e={row['mean_end_to_end_wall_time_s']:.2f}s"
+        f"reported={reported_text} "
+        f"e2e={end_to_end_text}"
+        f"{setup_text}"
+        f"{setup_breakdown_text}"
+        f"{profile_suffix}"
+    )
+
+
+def _format_run_row(dataset_mode: str, compile_mode: str, workers: int, run_index: int, result: dict) -> str:
+    steady_text = _format_metric_value(
+        result.get("reported_samples_per_sec", result.get("samples_per_sec")),
+        precision=1,
+        suffix="/s",
+    )
+    e2e_text = _format_metric_value(
+        result.get("end_to_end_wall_time_s", result.get("wall_time_s")),
+        precision=2,
+        suffix="s",
+    )
+    setup_parts = []
+    if "setup_time_s" in result:
+        setup_parts.append(
+            f"setup={_format_metric_value(result.get('setup_time_s'), precision=2, suffix='s')}"
+        )
+    setup_breakdown = _format_setup_breakdown(result)
+    if setup_breakdown:
+        setup_parts.append(setup_breakdown)
+    setup_prefix = f"{' '.join(setup_parts)} " if setup_parts else ""
+    profile_parts = _format_phase_tail_parts(result, aggregate=False)
+    profile_model_summary = _format_profile_model_hook_summary(result)
+    if profile_model_summary:
+        profile_parts.append(f"profile_model({profile_model_summary})")
+    scheduler_summary = _format_scheduler_summary(result)
+    if scheduler_summary:
+        profile_parts.append(f"scheduler({scheduler_summary})")
+    bottleneck_source = _annotate_profile_bottleneck_candidates(dict(result))
+    bottleneck_text = _format_top_bottleneck_candidate(bottleneck_source)
+    if bottleneck_text:
+        profile_parts.append(bottleneck_text)
+    bottleneck_pressure = _format_bottleneck_pressure(bottleneck_source)
+    if bottleneck_pressure:
+        profile_parts.append(bottleneck_pressure)
+    bottleneck_severity_counts = _format_profile_bottleneck_severity_counts(bottleneck_source)
+    if bottleneck_severity_counts:
+        profile_parts.append(bottleneck_severity_counts)
+    bottleneck_candidate_counts = _format_profile_bottleneck_candidate_counts(bottleneck_source)
+    if bottleneck_candidate_counts:
+        profile_parts.append(bottleneck_candidate_counts)
+    profile_suffix = f" {' '.join(profile_parts)}" if profile_parts else ""
+    return (
+        f"{dataset_mode:>12} {compile_mode:>10} workers={workers:<2} "
+        f"run={run_index:<2} "
+        f"steady={steady_text} "
+        f"{setup_prefix}"
+        f"e2e={e2e_text}"
+        f"{profile_suffix}"
     )
 
 
@@ -129,8 +545,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup-steps", type=non_negative_int_arg, default=2)
     parser.add_argument("--runs", type=positive_int_arg, default=1)
     parser.add_argument("--learning-rate", type=positive_float_arg, default=3e-4)
-    parser.add_argument("--seed", type=int, default=1234)
-    parser.add_argument("--device", type=str, default="auto")
+    parser.add_argument("--seed", type=_int_arg, default=1234)
+    parser.add_argument("--meter-fast-mode", action="store_true", help="Use lighter throughput meters without tail/window stats.")
+    parser.add_argument("--device", type=device_arg, default="auto")
     parser.add_argument("--prefetch-factor", type=positive_int_arg, default=4)
     parser.add_argument("--log-interval", type=non_negative_int_arg, default=0)
     parser.add_argument("--dataset-modes", type=str, default="generated,materialized")
@@ -141,7 +558,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-profile-distribution", dest="profile_distribution", action="store_false")
     parser.add_argument("--profile-window", type=positive_int_arg, default=512)
     parser.add_argument("--profile-model", action="store_true")
-    parser.add_argument("--profile-model-depth", type=non_negative_int_arg, default=1)
+    parser.add_argument("--profile-model-depth", type=positive_int_arg, default=1)
     parser.add_argument("--profile-model-max-modules", type=positive_int_arg, default=64)
     parser.add_argument("--profile-model-include", type=str, default=None)
     parser.add_argument("--json-out", type=str, default=None)
@@ -149,6 +566,17 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     try:
         validate_benchmark_args(args)
+        _parse_csv_choices(
+            args.dataset_modes,
+            {"generated", "materialized"},
+            name="dataset modes",
+        )
+        _parse_csv_choices(
+            args.compile_modes,
+            {"compile", "no-compile"},
+            name="compile modes",
+        )
+        _parse_worker_counts(args.worker_counts)
     except ValueError as exc:
         parser.error(str(exc))
     return args
@@ -171,6 +599,7 @@ def _run_args(args: argparse.Namespace, dataset_mode: str, compile_mode: str, wo
         runs=args.runs,
         learning_rate=args.learning_rate,
         seed=args.seed,
+        meter_fast_mode=args.meter_fast_mode,
         collect_profile=args.collect_profile or args.profile_model,
         profile_sync=args.profile_sync,
         profile_distribution=args.profile_distribution,
@@ -209,13 +638,9 @@ def main() -> None:
                         "matrix_compile_mode": compile_mode,
                         "matrix_workers": workers,
                     })
+                    _annotate_profile_bottleneck_candidates(result)
                     rows.append(result)
-                    print(
-                        f"{dataset_mode:>12} {compile_mode:>10} workers={workers:<2} "
-                        f"run={run_index:<2} "
-                        f"steady={result.get('reported_samples_per_sec', 0.0):.1f}/s "
-                        f"e2e={result.get('end_to_end_wall_time_s', result['wall_time_s']):.2f}s"
-                    )
+                    print(_format_run_row(dataset_mode, compile_mode, workers, run_index, result))
 
     summary = summarize_rows(rows)
     if summary["best_reported"]:
@@ -227,13 +652,13 @@ def main() -> None:
         out_path = Path(args.json_out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("w") as handle:
-            json.dump(rows, handle, indent=2)
+            dump_json(rows, handle)
         print(f"Wrote matrix results to {out_path}")
     if args.summary_out:
         out_path = Path(args.summary_out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("w") as handle:
-            json.dump(summary, handle, indent=2)
+            dump_json(summary, handle)
         print(f"Wrote matrix summary to {out_path}")
 
 

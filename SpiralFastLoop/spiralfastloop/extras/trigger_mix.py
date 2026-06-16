@@ -19,14 +19,22 @@ retune:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable, Deque, Dict, Optional, Sequence, Tuple
 
 import torch
 
-from ..engine import TriggerResult
+from ..engine import TriggerResult, _infer_batch_size
 from ..metrics import GLOBAL_NORMALIZATION_METRICS, NormalizationMetricsCollector
+from ..utils import (
+    _device_setting,
+    _non_negative_finite_float_setting,
+    _non_negative_int_setting,
+    _optional_positive_int_setting,
+    _positive_int_setting,
+)
 
 # Exposed tolerances so downstream callers (or tests) can tune them if their
 # loss scales differ drastically from the default cross-entropy-ish regime.
@@ -62,9 +70,13 @@ def _select_indices(batch: Any, indices: Sequence[int]) -> Any:
     if isinstance(batch, torch.Tensor):
         return batch.index_select(0, torch.tensor(indices, device=batch.device))
     if isinstance(batch, dict):
+        if not batch and len(indices) > 0:
+            raise ValueError("batch mapping must not be empty when selecting samples.")
         return {k: _select_indices(v, indices) for k, v in batch.items()}
     if isinstance(batch, (list, tuple)):
         if len(batch) == 0:
+            if len(indices) > 0:
+                raise ValueError("batch sequence must not be empty when selecting samples.")
             return batch
         if isinstance(batch[0], torch.Tensor):
             selected = [_select_indices(v, indices) for v in batch]
@@ -86,6 +98,8 @@ def _split_batch(batch: Any, batch_size: int) -> list[Any]:
     if isinstance(batch, torch.Tensor):
         return [batch[i] for i in range(batch_size)]
     if isinstance(batch, dict):
+        if not batch and batch_size > 0:
+            raise ValueError("batch mapping must not be empty when splitting samples.")
         per_key = {k: _split_batch(v, batch_size) for k, v in batch.items()}
         return [{k: per_key[k][i] for k in per_key} for i in range(batch_size)]
     if isinstance(batch, (list, tuple)):
@@ -106,13 +120,106 @@ def _split_batch(batch: Any, batch_size: int) -> list[Any]:
     return [batch for _ in range(batch_size)]
 
 
+def _stack_samples(samples: Sequence[Any]) -> Any:
+    if len(samples) == 0:
+        raise ValueError("sample sequence must not be empty when batching samples.")
+    first = samples[0]
+    if isinstance(first, torch.Tensor):
+        tensor_samples: list[torch.Tensor] = []
+        for sample in samples:
+            if not isinstance(sample, torch.Tensor):
+                raise ValueError("hard samples must share structure when batching samples.")
+            tensor_samples.append(sample)
+        return torch.stack(tensor_samples, dim=0)
+    if isinstance(first, Mapping):
+        first_keys = set(first.keys())
+        mapping_samples: list[Mapping[Any, Any]] = []
+        for sample in samples:
+            if not isinstance(sample, Mapping) or set(sample.keys()) != first_keys:
+                raise ValueError("hard samples must share structure when batching samples.")
+            mapping_samples.append(sample)
+        return {key: _stack_samples([sample[key] for sample in mapping_samples]) for key in first.keys()}
+    if isinstance(first, list):
+        list_samples: list[list[Any]] = []
+        for sample in samples:
+            if not isinstance(sample, list) or len(sample) != len(first):
+                raise ValueError("hard samples must share structure when batching samples.")
+            list_samples.append(sample)
+        return [_stack_samples([sample[index] for sample in list_samples]) for index in range(len(first))]
+    if isinstance(first, tuple):
+        first_namedtuple = hasattr(first, "_fields")
+        tuple_samples: list[tuple[Any, ...]] = []
+        for sample in samples:
+            if not isinstance(sample, tuple) or len(sample) != len(first):
+                raise ValueError("hard samples must share structure when batching samples.")
+            sample_namedtuple = hasattr(sample, "_fields")
+            if first_namedtuple != sample_namedtuple or (first_namedtuple and type(sample) is not type(first)):
+                raise ValueError("hard samples must share structure when batching samples.")
+            tuple_samples.append(sample)
+        values = [_stack_samples([sample[index] for sample in tuple_samples]) for index in range(len(first))]
+        if first_namedtuple:
+            return type(first)(*values)
+        return tuple(values)
+    for sample in samples:
+        if isinstance(sample, (torch.Tensor, Mapping, list, tuple)):
+            raise ValueError("hard samples must share structure when batching samples.")
+    return list(samples)
+
+
+def _sample_structure(sample: Any) -> Any:
+    if isinstance(sample, torch.Tensor):
+        return ("tensor", tuple(sample.shape), sample.dtype)
+    if isinstance(sample, Mapping):
+        return ("mapping", frozenset((key, _sample_structure(value)) for key, value in sample.items()))
+    if isinstance(sample, list):
+        return ("list", tuple(_sample_structure(value) for value in sample))
+    if isinstance(sample, tuple):
+        kind = ("namedtuple", type(sample)) if hasattr(sample, "_fields") else ("tuple",)
+        return kind + tuple(_sample_structure(value) for value in sample)
+    return ("leaf",)
+
+
+def _ensure_sample_structures_match(samples: Sequence[Any]) -> Any:
+    if len(samples) == 0:
+        raise ValueError("hard samples must not be empty when validating sample structure.")
+    expected = _sample_structure(samples[0])
+    for sample in samples[1:]:
+        if _sample_structure(sample) != expected:
+            raise ValueError("hard samples must share structure when batching samples.")
+    return expected
+
+
+def _trigger_context_setting(ctx: Any) -> Dict[str, Any]:
+    if not isinstance(ctx, Mapping):
+        raise ValueError("ctx must be a mapping")
+    return dict(ctx)
+
+
+def _callable_setting(value: Any, name: str) -> Any:
+    if not callable(value):
+        raise ValueError(f"{name} must be callable")
+    return value
+
+
+def _finite_loss_vector_setting(loss_vec: Any) -> torch.Tensor:
+    if not isinstance(loss_vec, torch.Tensor):
+        raise TypeError("loss_vec must be a torch.Tensor")
+    if not torch.is_floating_point(loss_vec):
+        raise ValueError("loss_vec must be a floating-point tensor")
+    if not torch.isfinite(loss_vec).all().item():
+        raise ValueError("loss_vec must contain only finite values")
+    return loss_vec
+
+
 class HardSampleBuffer:
     """Ring buffer of hard samples to support trigger-based injections."""
 
     def __init__(self, *, max_samples: int = 2048) -> None:
-        self.max_samples = max(0, int(max_samples))
+        self.max_samples = _non_negative_int_setting(max_samples, "max_samples")
         self._inputs: Deque[Any] = deque(maxlen=self.max_samples)
         self._targets: Deque[Any] = deque(maxlen=self.max_samples)
+        self._input_structure: Any = None
+        self._target_structure: Any = None
 
     def __len__(self) -> int:
         return len(self._inputs)
@@ -127,33 +234,54 @@ class HardSampleBuffer:
     ) -> None:
         if self.max_samples <= 0:
             return
+        loss_vec = _finite_loss_vector_setting(loss_vec)
         if loss_vec.ndim != 1:
             raise ValueError("loss_vec must be a 1D tensor for hard-sample selection.")
         batch_size = loss_vec.shape[0]
         if batch_size == 0:
             return
-        k = batch_size if top_k is None else max(1, min(batch_size, int(top_k)))
+        try:
+            input_batch_size = _infer_batch_size(inputs)
+            target_batch_size = _infer_batch_size(targets)
+        except Exception as exc:
+            raise ValueError("inputs and targets must match loss_vec batch dimension") from exc
+        if input_batch_size != batch_size or target_batch_size != batch_size:
+            raise ValueError("inputs and targets must match loss_vec batch dimension")
+        requested_top_k = _optional_positive_int_setting(top_k, "top_k")
+        k = batch_size if requested_top_k is None else min(batch_size, requested_top_k)
         _, indices = torch.topk(loss_vec, k=k, largest=True)
-        selected_inputs = _select_indices(inputs, indices.tolist())
-        selected_targets = _select_indices(targets, indices.tolist())
-        cpu_inputs = _detach_to_cpu(selected_inputs)
-        cpu_targets = _detach_to_cpu(selected_targets)
-        input_samples = _split_batch(cpu_inputs, k)
-        target_samples = _split_batch(cpu_targets, k)
+        try:
+            selected_indices = indices.tolist()
+            selected_inputs = _select_indices(inputs, selected_indices)
+            selected_targets = _select_indices(targets, selected_indices)
+            cpu_inputs = _detach_to_cpu(selected_inputs)
+            cpu_targets = _detach_to_cpu(selected_targets)
+            input_samples = _split_batch(cpu_inputs, k)
+            target_samples = _split_batch(cpu_targets, k)
+        except Exception as exc:
+            raise ValueError("inputs and targets must match loss_vec batch dimension") from exc
+        if len(input_samples) != k or len(target_samples) != k:
+            raise ValueError("inputs and targets must match loss_vec batch dimension")
+        input_structure = _ensure_sample_structures_match(input_samples)
+        target_structure = _ensure_sample_structures_match(target_samples)
+        if len(self._inputs) > 0 and (
+            input_structure != self._input_structure or target_structure != self._target_structure
+        ):
+            raise ValueError("hard samples must share structure when batching samples.")
         for item_in, item_tgt in zip(input_samples, target_samples):
             self._inputs.append(item_in)
             self._targets.append(item_tgt)
+        self._input_structure = input_structure
+        self._target_structure = target_structure
 
     def sample(self, num_samples: int) -> Tuple[Any, Any]:
         if len(self._inputs) == 0:
             raise ValueError("HardSampleBuffer is empty; cannot sample.")
-        requested = max(1, int(num_samples))
+        requested = _positive_int_setting(num_samples, "num_samples")
         indices = torch.randint(0, len(self._inputs), (requested,))
         samples_in = [self._inputs[i] for i in indices.tolist()]
         samples_tgt = [self._targets[i] for i in indices.tolist()]
-        if isinstance(samples_in[0], torch.Tensor):
-            return torch.stack(samples_in, dim=0), torch.stack(samples_tgt, dim=0)
-        return samples_in, samples_tgt
+        return _stack_samples(samples_in), _stack_samples(samples_tgt)
 
 
 class HardSampleProvider:
@@ -167,24 +295,41 @@ class HardSampleProvider:
         fallback: Optional[Callable[[int, str, Dict[str, Any]], Tuple[Any, Any]]] = None,
         select_top_k: Optional[int] = None,
     ) -> None:
+        if not isinstance(buffer, HardSampleBuffer):
+            raise ValueError("buffer must be a HardSampleBuffer")
+        if augmenter is not None:
+            _callable_setting(augmenter, "augmenter")
+        if fallback is not None:
+            _callable_setting(fallback, "fallback")
         self.buffer = buffer
         self.augmenter = augmenter
         self.fallback = fallback
-        self.select_top_k = select_top_k
+        self.select_top_k = _optional_positive_int_setting(select_top_k, "select_top_k")
 
     def observe(self, ctx: Dict[str, Any]) -> None:
-        loss_vec = ctx["loss_vec"]
+        ctx_value = _trigger_context_setting(ctx)
+        loss_vec = ctx_value.get("loss_vec")
         if not isinstance(loss_vec, torch.Tensor):
             return
-        self.buffer.add_batch(ctx["inputs"], ctx["targets"], loss_vec, top_k=self.select_top_k)
+        if "inputs" not in ctx_value or "targets" not in ctx_value:
+            raise ValueError("ctx must include inputs and targets when loss_vec is a tensor")
+        self.buffer.add_batch(
+            ctx_value["inputs"],
+            ctx_value["targets"],
+            _finite_loss_vector_setting(loss_vec),
+            top_k=self.select_top_k,
+        )
 
     def __call__(self, requested: int, device: str, ctx: Dict[str, Any]) -> Tuple[Any, Any]:
+        requested_value = _positive_int_setting(requested, "requested")
+        device_value = _device_setting(device)
+        ctx_value = _trigger_context_setting(ctx)
         try:
-            inputs, targets = self.buffer.sample(requested)
+            inputs, targets = self.buffer.sample(requested_value)
         except ValueError:
             if self.fallback is None:
                 raise
-            inputs, targets = self.fallback(requested, device, ctx)
+            inputs, targets = self.fallback(requested_value, device_value, ctx_value)
         if self.augmenter is not None:
             inputs, targets = self.augmenter(inputs, targets)
         return inputs, targets
@@ -200,6 +345,29 @@ class LossStdConfig:
     budget_frac: float = 0.03  # token/sample budget per epoch (approx)
     pulse_every: int = 800  # force a pulse every N steps
     max_injected_per_step: int = 128
+
+    def __post_init__(self) -> None:
+        self.std_threshold = _non_negative_finite_float_setting(
+            self.std_threshold,
+            "std_threshold",
+        )
+        self.inject_ratio = _non_negative_finite_float_setting(
+            self.inject_ratio,
+            "inject_ratio",
+        )
+        self.weight_alpha = _non_negative_finite_float_setting(
+            self.weight_alpha,
+            "weight_alpha",
+        )
+        self.budget_frac = _non_negative_finite_float_setting(
+            self.budget_frac,
+            "budget_frac",
+        )
+        self.pulse_every = _non_negative_int_setting(self.pulse_every, "pulse_every")
+        self.max_injected_per_step = _non_negative_int_setting(
+            self.max_injected_per_step,
+            "max_injected_per_step",
+        )
 
 
 class LossStdTrigger:
@@ -219,6 +387,16 @@ class LossStdTrigger:
         cfg: Optional[LossStdConfig] = None,
         normalization_metrics: Optional[NormalizationMetricsCollector] = None,
     ) -> None:
+        _callable_setting(provider, "provider")
+        if cfg is not None and not isinstance(cfg, LossStdConfig):
+            raise ValueError("cfg must be a LossStdConfig or None")
+        if normalization_metrics is not None and not isinstance(
+            normalization_metrics,
+            NormalizationMetricsCollector,
+        ):
+            raise ValueError(
+                "normalization_metrics must be a NormalizationMetricsCollector or None"
+            )
         self.provider = provider
         self.cfg = cfg or LossStdConfig()
         self.spent: int = 0  # approximate budget spent (injected samples)
@@ -233,8 +411,10 @@ class LossStdTrigger:
 
     def observe(self, ctx: Dict[str, Any]) -> None:
         provider = self.provider
-        if hasattr(provider, "observe"):
-            provider.observe(ctx)
+        observe = getattr(provider, "observe", None)
+        if observe is not None:
+            _callable_setting(observe, "provider.observe")
+            observe(_trigger_context_setting(ctx))
 
     def _drop_rounding_noise(self, value: float, *, context: str = "budget_buffer") -> float:
         """Elide microscopic float residue that should count as zero.
@@ -258,24 +438,36 @@ class LossStdTrigger:
         self._budget_buffer = 0.0
 
     def __call__(self, ctx: Dict[str, Any]) -> Optional[TriggerResult]:
-        loss_tensor = ctx["loss_vec"]
+        ctx_value = _trigger_context_setting(ctx)
+        if "loss_vec" not in ctx_value:
+            raise ValueError("ctx must include loss_vec")
+        if "device" not in ctx_value:
+            raise ValueError("ctx must include device")
+
+        loss_tensor = ctx_value["loss_vec"]
         if not isinstance(loss_tensor, torch.Tensor):
             raise TypeError("Loss vector in trigger context must be a torch.Tensor.")
-        loss_vec = loss_tensor.detach()
+        loss_vec = _finite_loss_vector_setting(loss_tensor.detach())
         if loss_vec.numel() == 0:
             return None
 
-        device = ctx["device"]
-        raw_step = ctx.get("step")
-        step = int(raw_step) if raw_step is not None else 0
+        device = _device_setting(ctx_value["device"])
+        raw_step = ctx_value.get("step")
+        step = _non_negative_int_setting(raw_step, "step") if raw_step is not None else 0
         has_step = raw_step is not None
+        spent = self.spent
+        total = self.total
+        budget_buffer = self._budget_buffer
+        last_pulse_step = self._last_pulse_step
         if has_step:
             if self._last_step is not None and step < self._last_step:
-                self._reset_budget_counters()
-            self._last_step = step
+                spent = 0
+                total = 0
+                last_pulse_step = None
+                budget_buffer = 0.0
 
         batch = loss_vec.numel()
-        self.total += batch
+        next_total = total + batch
 
         coefvar = loss_vec.std(unbiased=False) / (
             loss_vec.mean().abs() + COEFVAR_STABILIZER
@@ -283,56 +475,78 @@ class LossStdTrigger:
         pulse_due = (
             self.cfg.pulse_every > 0 and step > 0 and step % self.cfg.pulse_every == 0
         )
-        force_pulse = pulse_due and step != self._last_pulse_step
+        force_pulse = pulse_due and step != last_pulse_step
         need = coefvar.item() <= self.cfg.std_threshold or force_pulse
 
-        budget_ok = self.spent <= self.cfg.budget_frac * max(1, self.total)
+        def commit_state(
+            *,
+            spent_value: int = spent,
+            total_value: int = next_total,
+            budget_buffer_value: float = budget_buffer,
+            pulse_step_value: Optional[int] = last_pulse_step,
+        ) -> None:
+            self.spent = spent_value
+            self.total = total_value
+            self._budget_buffer = budget_buffer_value
+            self._last_pulse_step = pulse_step_value
+            if has_step:
+                self._last_step = step
+
+        budget_ok = spent <= self.cfg.budget_frac * max(1, next_total)
         if not (need and budget_ok):
             if force_pulse and has_step:
-                self._last_pulse_step = step
+                last_pulse_step = step
+            commit_state(pulse_step_value=last_pulse_step)
             return None
 
         requested = min(int(batch * self.cfg.inject_ratio), self.cfg.max_injected_per_step)
         if requested <= 0:
             if force_pulse and has_step:
-                self._last_pulse_step = step
+                last_pulse_step = step
+            commit_state(pulse_step_value=last_pulse_step)
             return None
 
-        budget_limit = self.cfg.budget_frac * max(1, self.total)
-        remaining_budget = budget_limit - self.spent
-        available_budget = max(0.0, remaining_budget + self._budget_buffer)
+        budget_limit = self.cfg.budget_frac * max(1, next_total)
+        remaining_budget = budget_limit - spent
+        available_budget = max(0.0, remaining_budget + budget_buffer)
         if available_budget <= 0.0:
-            self._budget_buffer = 0.0
             if force_pulse and has_step:
-                self._last_pulse_step = step
+                last_pulse_step = step
+            commit_state(budget_buffer_value=0.0, pulse_step_value=last_pulse_step)
             return None
 
         allowed_whole = int(available_budget)
-        fractional_credit = self._drop_rounding_noise(
-            max(0.0, available_budget - allowed_whole), context="fractional_credit"
-        )
         if allowed_whole <= 0:
-            self._budget_buffer = fractional_credit
+            fractional_credit = self._drop_rounding_noise(
+                max(0.0, available_budget - allowed_whole), context="fractional_credit"
+            )
             if force_pulse and has_step:
-                self._last_pulse_step = step
+                last_pulse_step = step
+            commit_state(
+                budget_buffer_value=fractional_credit,
+                pulse_step_value=last_pulse_step,
+            )
             return None
         requested = min(requested, allowed_whole)
         if requested <= 0:
-            self._budget_buffer = fractional_credit
             if force_pulse and has_step:
-                self._last_pulse_step = step
+                last_pulse_step = step
+            commit_state(pulse_step_value=last_pulse_step)
             return None
 
-        extra_x, extra_y = self.provider(requested, device, ctx)
-        self.spent += requested
+        extra_x, extra_y = self.provider(requested, device, ctx_value)
         leftover_available = max(0.0, available_budget - requested)
         remaining_budget_after = max(0.0, remaining_budget - requested)
         carryover_credit = self._drop_rounding_noise(
             max(0.0, leftover_available - remaining_budget_after), context="carryover_credit"
         )
-        self._budget_buffer = carryover_credit
         if force_pulse:
-            self._last_pulse_step = step
+            last_pulse_step = step
+        commit_state(
+            spent_value=spent + requested,
+            budget_buffer_value=carryover_credit,
+            pulse_step_value=last_pulse_step,
+        )
 
         # weights: original ones at 1.0, injected at alpha
         weights = torch.ones(batch + requested, device=loss_vec.device)

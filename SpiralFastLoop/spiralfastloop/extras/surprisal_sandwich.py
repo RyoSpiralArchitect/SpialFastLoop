@@ -6,9 +6,12 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Optional, Tuple, cast
 
 import torch
+
+from ..utils import _positive_int_setting, _strict_finite_float_setting
 
 if TYPE_CHECKING:
     class _LogitsProcessorBase:
@@ -47,11 +50,37 @@ __all__ = [
 ]
 
 
+def _string_setting(value: Any, name: str, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a string.")
+    normalized = value.strip()
+    if not allow_empty and not normalized:
+        raise ValueError(f"{name} must be a non-empty string.")
+    return normalized if not allow_empty else value
+
+
+def _optional_model_name_setting(value: Any, name: str) -> Optional[str]:
+    if value is None:
+        return None
+    return _string_setting(value, name)
+
+
 def _validate_fraction(name: str, value: float) -> float:
-    value = float(value)
+    if isinstance(value, (bool, str, bytes, bytearray)):
+        raise ValueError(f"{name} must be a finite value in [0, 1].")
+    value = _strict_finite_float_setting(value, name)
     if not math.isfinite(value) or value < 0.0 or value > 1.0:
         raise ValueError(f"{name} must be a finite value in [0, 1].")
     return value
+
+
+def _validate_finite_float(name: str, value: float) -> float:
+    if isinstance(value, (bool, str, bytes, bytearray)):
+        raise ValueError(f"{name} must be finite.")
+    normalized = _strict_finite_float_setting(value, name)
+    if not math.isfinite(normalized):
+        raise ValueError(f"{name} must be finite.")
+    return normalized
 
 
 def _validate_window(start_frac: float, end_frac: float) -> tuple[float, float]:
@@ -60,6 +89,46 @@ def _validate_window(start_frac: float, end_frac: float) -> tuple[float, float]:
     if start >= end:
         raise ValueError("start_frac must be less than end_frac.")
     return start, end
+
+
+def _validate_middle(middle: Any) -> tuple[float, float]:
+    if isinstance(middle, (str, bytes, bytearray, Mapping)):
+        raise ValueError("middle must contain exactly two fractions.")
+    try:
+        values = tuple(middle)
+    except Exception as exc:
+        raise ValueError("middle must contain exactly two fractions.") from exc
+    if len(values) != 2:
+        raise ValueError("middle must contain exactly two fractions.")
+    start_frac, end_frac = values
+    return _validate_window(start_frac, end_frac)
+
+
+def _max_steps_setting(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    return _positive_int_setting(value, "max_steps")
+
+
+def _processor_tensor_inputs(
+    input_ids: Any,
+    scores: Any,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if not isinstance(input_ids, torch.Tensor):
+        raise TypeError("input_ids must be a torch.Tensor.")
+    if not isinstance(scores, torch.Tensor):
+        raise TypeError("scores must be a torch.Tensor.")
+    if input_ids.ndim < 2:
+        raise ValueError("input_ids must have shape [batch, sequence].")
+    if scores.ndim != 2:
+        raise ValueError("scores must have shape [batch, vocab].")
+    if scores.shape[-1] <= 0:
+        raise ValueError("scores must have a non-empty vocabulary dimension.")
+    if input_ids.shape[0] != scores.shape[0]:
+        raise ValueError("input_ids and scores batch dimensions must match.")
+    if not torch.is_floating_point(scores):
+        raise ValueError("scores must be a floating-point tensor.")
+    return input_ids, scores
 
 
 def _require_transformers() -> None:
@@ -83,28 +152,26 @@ class AntiTopKMiddle(_LogitsProcessorBase):
         alpha: float = 10.0,
     ) -> None:
         start, end = _validate_window(start_frac, end_frac)
-        if topk <= 0:
-            raise ValueError("topk must be a positive integer.")
-        if not math.isfinite(float(alpha)):
-            raise ValueError("alpha must be finite.")
         self.sf: float = start
         self.ef: float = end
-        self.topk: int = int(topk)
-        self.alpha: float = float(alpha)
+        self.topk: int = _positive_int_setting(topk, "topk")
+        self.alpha: float = _validate_finite_float("alpha", alpha)
         self.step: int = 0
         self.max_steps: Optional[int] = None
 
     def __call__(self, input_ids: torch.Tensor, scores: torch.Tensor) -> torch.Tensor:
-        if self.max_steps is None:
+        max_steps = _max_steps_setting(self.max_steps)
+        if max_steps is None:
             return scores
+        _, scores = _processor_tensor_inputs(input_ids, scores)
         pos = self.step
-        self.step += 1
-        if self.sf * self.max_steps <= pos < self.ef * self.max_steps:
+        if self.sf * max_steps <= pos < self.ef * max_steps:
             k = min(self.topk, scores.shape[-1])
             if k <= 0:
                 return scores
             vals, idx = torch.topk(scores, k, dim=-1)
             scores.scatter_(dim=-1, index=idx, src=vals - self.alpha)
+        self.step = pos + 1
         return scores
 
 class CoherenceTailBoost(_LogitsProcessorBase):
@@ -120,9 +187,7 @@ class CoherenceTailBoost(_LogitsProcessorBase):
         tiny_tokenizer: Optional[Any] = None,
     ) -> None:
         self.sf: float = _validate_fraction("start_frac", start_frac)
-        if not math.isfinite(float(mu)):
-            raise ValueError("mu must be finite.")
-        self.mu: float = float(mu)
+        self.mu: float = _validate_finite_float("mu", mu)
         self.tiny: Optional[Any] = tiny_model
         self.step: int = 0
         self.max_steps: Optional[int] = None
@@ -142,16 +207,18 @@ class CoherenceTailBoost(_LogitsProcessorBase):
 
     @torch.no_grad()
     def __call__(self, input_ids: torch.Tensor, scores: torch.Tensor) -> torch.Tensor:
-        if self.max_steps is None or self.tiny is None:
+        max_steps = _max_steps_setting(self.max_steps)
+        if max_steps is None or self.tiny is None:
             return scores
+        input_ids, scores = _processor_tensor_inputs(input_ids, scores)
         pos = self.step
-        self.step += 1
-        if pos >= self.sf * self.max_steps:
+        if pos >= self.sf * max_steps:
             if self._tokenizers_compatible:
                 tiny_input_ids = input_ids.to(self.tiny.device)
                 past = self.past
             else:
                 if self.primary_tokenizer is None or self.tiny_tokenizer is None:
+                    self.step = pos + 1
                     return scores
                 text = self.primary_tokenizer.decode(
                     input_ids[0],
@@ -163,6 +230,8 @@ class CoherenceTailBoost(_LogitsProcessorBase):
                     return_tensors="pt",
                     add_special_tokens=False,
                 )
+                if not isinstance(tiny_encoding, Mapping) or "input_ids" not in tiny_encoding:
+                    raise ValueError("tiny_tokenizer must return a mapping with input_ids.")
                 tiny_input_ids = tiny_encoding["input_ids"].to(self.tiny.device)
                 past = None
 
@@ -171,11 +240,14 @@ class CoherenceTailBoost(_LogitsProcessorBase):
                 use_cache=True,
                 past_key_values=past,
             )
-            self.past = out.past_key_values if self._tokenizers_compatible else None
+            next_past = out.past_key_values if self._tokenizers_compatible else None
             tiny_logits = out.logits[:, -1, :]
             if tiny_logits.shape != scores.shape:
+                self.step = pos + 1
                 return scores
             scores = scores + self.mu * tiny_logits
+            self.past = next_past
+        self.step = pos + 1
         return scores
 
 @torch.no_grad()
@@ -190,27 +262,40 @@ def surprise_repair_generate(
     mu: float = 0.4,
     **genkw: Any,
 ) -> str:
+    max_new_tokens = _positive_int_setting(max_new_tokens, "max_new_tokens")
+    middle_start, middle_end = _validate_middle(middle)
+    prompt_value = _string_setting(prompt, "prompt", allow_empty=True)
+    main_name_value = _string_setting(main_name, "main_name")
+    tiny_name_value = _optional_model_name_setting(tiny_name, "tiny_name")
+    alpha_value = _validate_finite_float("alpha", alpha)
+    topk_value = _positive_int_setting(topk, "topk")
+    mu_value = _validate_finite_float("mu", mu)
     _require_transformers()
-    tok: Any = AutoTokenizer.from_pretrained(main_name)
-    main: Any = AutoModelForCausalLM.from_pretrained(main_name, device_map="auto").eval()
+    tok: Any = AutoTokenizer.from_pretrained(main_name_value)
+    main: Any = AutoModelForCausalLM.from_pretrained(main_name_value, device_map="auto").eval()
 
     tiny: Optional[Any] = None
     tiny_tok: Optional[Any] = None
-    if tiny_name is not None:
-        tiny_tok = AutoTokenizer.from_pretrained(tiny_name)
-        tiny = AutoModelForCausalLM.from_pretrained(tiny_name, device_map="auto").eval()
+    if tiny_name_value is not None:
+        tiny_tok = AutoTokenizer.from_pretrained(tiny_name_value)
+        tiny = AutoModelForCausalLM.from_pretrained(tiny_name_value, device_map="auto").eval()
 
-    anti = AntiTopKMiddle(start_frac=middle[0], end_frac=middle[1], topk=topk, alpha=alpha)
+    anti = AntiTopKMiddle(
+        start_frac=middle_start,
+        end_frac=middle_end,
+        topk=topk_value,
+        alpha=alpha_value,
+    )
     coh = CoherenceTailBoost(
-        start_frac=middle[1],
-        mu=mu,
+        start_frac=middle_end,
+        mu=mu_value,
         tiny_model=tiny,
         primary_tokenizer=tok,
         tiny_tokenizer=tiny_tok,
     )
 
     processors = LogitsProcessorList([anti, coh])
-    ids = tok(prompt, return_tensors="pt").to(main.device)
+    ids = tok(prompt_value, return_tensors="pt").to(main.device)
 
     anti.max_steps = max_new_tokens
     coh.max_steps = max_new_tokens

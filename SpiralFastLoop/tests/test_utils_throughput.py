@@ -1,5 +1,6 @@
 import math
 import sys
+from collections import defaultdict, namedtuple
 from pathlib import Path
 
 import pytest
@@ -8,12 +9,19 @@ from torch.utils.data import TensorDataset
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import spiralfastloop.utils as utils_mod
 from spiralfastloop.utils import (
     ThroughputMeter,
     _PSquareQuantile,
+    autocast_ctx,
     dataloader_from_dataset,
+    get_amp_policy,
+    get_distributed_context,
+    init_distributed,
+    maybe_channels_last,
     safe_compile,
     safe_compile_with_diagnostics,
+    to_device,
 )
 
 
@@ -24,6 +32,98 @@ def _percentile(values, percentile):
     index = int(round(percentile * (len(ordered) - 1)))
     index = max(0, min(len(ordered) - 1, index))
     return ordered[index]
+
+
+class _FailingIndex:
+    def __index__(self) -> int:
+        raise RuntimeError("index conversion failed")
+
+
+class _FailingFloat:
+    def __float__(self) -> float:
+        raise RuntimeError("float conversion failed")
+
+
+class BrokenStrError(Exception):
+    def __str__(self) -> str:
+        raise RuntimeError("string conversion failed")
+
+
+def test_distributed_context_reads_valid_env_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(utils_mod.torch.distributed, "is_available", lambda: False)
+    monkeypatch.setenv("RANK", "2")
+    monkeypatch.setenv("WORLD_SIZE", "4")
+    monkeypatch.setenv("LOCAL_RANK", "1")
+
+    ctx = get_distributed_context()
+
+    assert ctx.rank == 2
+    assert ctx.world_size == 4
+    assert ctx.local_rank == 1
+    assert ctx.backend is None
+    assert ctx.is_initialized is False
+
+
+def test_distributed_context_sanitizes_invalid_env_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(utils_mod.torch.distributed, "is_available", lambda: False)
+    monkeypatch.setenv("RANK", "-2")
+    monkeypatch.setenv("WORLD_SIZE", "0")
+    monkeypatch.setenv("LOCAL_RANK", "-1")
+
+    ctx = get_distributed_context()
+
+    assert ctx.rank == 0
+    assert ctx.world_size == 1
+    assert ctx.local_rank == 0
+
+
+@pytest.mark.parametrize("backend", [True, 1, "", "   ", object()])
+def test_init_distributed_rejects_invalid_backend_values(backend: object) -> None:
+    with pytest.raises(ValueError, match="backend"):
+        init_distributed(backend=backend)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("init_method", [None, True, 1, "", "   ", object()])
+def test_init_distributed_rejects_invalid_init_methods(init_method: object) -> None:
+    with pytest.raises(ValueError, match="init_method"):
+        init_distributed(init_method=init_method)  # type: ignore[arg-type]
+
+
+def test_init_distributed_uses_validated_backend_and_init_method(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setattr(utils_mod.torch.distributed, "is_available", lambda: True)
+    monkeypatch.setattr(utils_mod.torch.distributed, "is_initialized", lambda: False)
+    monkeypatch.setattr(
+        utils_mod.torch.distributed,
+        "init_process_group",
+        lambda *, backend, init_method: calls.append((backend, init_method)),
+    )
+
+    init_distributed(backend=" gloo ", init_method=" env:// ")
+
+    assert calls == [("gloo", "env://")]
+
+
+def test_init_distributed_ignores_invalid_world_size_without_initializing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setenv("WORLD_SIZE", "-2")
+    monkeypatch.setattr(utils_mod.torch.distributed, "is_available", lambda: True)
+    monkeypatch.setattr(utils_mod.torch.distributed, "is_initialized", lambda: False)
+    monkeypatch.setattr(
+        utils_mod.torch.distributed,
+        "init_process_group",
+        lambda *, backend, init_method: calls.append((backend, init_method)),
+    )
+
+    ctx = init_distributed(backend="gloo", init_method="env://")
+
+    assert calls == []
+    assert ctx.world_size == 1
 
 
 def test_throughput_meter_matches_percentiles_with_stream_data():
@@ -69,6 +169,72 @@ def test_throughput_meter_allows_custom_time_source():
     assert summary["samples_per_sec"] > 0.0
 
 
+@pytest.mark.parametrize("time_fn", [True, 1, "clock", object()])
+def test_throughput_meter_rejects_invalid_time_sources(time_fn: object):
+    with pytest.raises(ValueError, match="time_fn"):
+        ThroughputMeter(time_fn=time_fn)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [float("nan"), float("inf"), True, "1.0", b"1.0", object(), _FailingFloat()],
+)
+def test_throughput_meter_rejects_invalid_initial_time_values(timestamp: object):
+    with pytest.raises(ValueError, match="time_fn"):
+        ThroughputMeter(time_fn=lambda: timestamp)  # type: ignore[arg-type, return-value]
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [float("nan"), float("-inf"), True, "1.0", object(), _FailingFloat()],
+)
+def test_throughput_meter_tick_rejects_invalid_time_values_without_mutating_state(timestamp: object):
+    values = iter([0.0, timestamp])
+    meter = ThroughputMeter(time_fn=lambda: next(values))  # type: ignore[arg-type, return-value]
+    summary_before = meter.summary()
+    last_before = meter.last
+
+    with pytest.raises(ValueError, match="time_fn"):
+        meter.tick(batch_size=4)
+
+    assert meter.last == last_before
+    assert meter.summary() == summary_before
+
+
+def test_throughput_meter_tick_rejects_backward_time_without_mutating_state():
+    values = iter([1.0, 0.5])
+    meter = ThroughputMeter(time_fn=lambda: next(values))
+    summary_before = meter.summary()
+    last_before = meter.last
+
+    with pytest.raises(ValueError, match="duration_s"):
+        meter.tick(batch_size=4)
+
+    assert meter.last == last_before
+    assert meter.summary() == summary_before
+
+
+@pytest.mark.parametrize("batch_size", [0, -5, 1.5, "2", True, _FailingIndex()])
+def test_throughput_meter_tick_rejects_invalid_batch_sizes_without_mutating_state(batch_size: object):
+    calls: list[float] = []
+
+    def fake_time() -> float:
+        value = float(len(calls))
+        calls.append(value)
+        return value
+
+    meter = ThroughputMeter(time_fn=fake_time)
+    summary_before = meter.summary()
+    last_before = meter.last
+
+    with pytest.raises(ValueError, match="batch_size"):
+        meter.tick(batch_size)  # type: ignore[arg-type]
+
+    assert calls == [0.0]
+    assert meter.last == last_before
+    assert meter.summary() == summary_before
+
+
 def test_throughput_meter_rejects_invalid_inputs():
     meter = ThroughputMeter()
 
@@ -77,9 +243,58 @@ def test_throughput_meter_rejects_invalid_inputs():
     with pytest.raises(ValueError):
         meter.record(float("nan"), 8)
     with pytest.raises(ValueError):
+        meter.record(_FailingFloat(), 8)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
         meter.record(0.1, 0)
     with pytest.raises(ValueError):
         meter.record(0.1, -5)
+
+
+@pytest.mark.parametrize("batch_size", [1.5, "2", True, _FailingIndex()])
+def test_throughput_meter_rejects_non_integral_batch_sizes(batch_size):
+    meter = ThroughputMeter()
+
+    with pytest.raises(ValueError, match="batch_size"):
+        meter.record(0.1, batch_size)
+    with pytest.raises(ValueError, match="batch_size"):
+        meter.time_batch(batch_size)
+
+
+@pytest.mark.parametrize("record_on_exception", [1, "false", None])
+def test_throughput_meter_time_batch_rejects_invalid_record_on_exception(record_on_exception: object):
+    meter = ThroughputMeter()
+
+    with pytest.raises(ValueError, match="record_on_exception"):
+        meter.time_batch(4, record_on_exception=record_on_exception)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("window", [-1, 1.5, "2", True, _FailingIndex()])
+def test_throughput_meter_rejects_invalid_window_values(window):
+    with pytest.raises(ValueError, match="window"):
+        ThroughputMeter(window=window)
+
+
+@pytest.mark.parametrize("smoothing", [0.0, -0.1, 1.1, float("nan"), True, "bad", _FailingFloat()])
+def test_throughput_meter_rejects_invalid_smoothing_values(smoothing):
+    with pytest.raises(ValueError, match="smoothing"):
+        ThroughputMeter(smoothing=smoothing)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "field"),
+    [
+        ({"track_distribution": 1}, "track_distribution"),
+        ({"track_distribution": "false"}, "track_distribution"),
+        ({"track_distribution": None}, "track_distribution"),
+        ({"track_window": 0}, "track_window"),
+        ({"track_window": "false"}, "track_window"),
+        ({"fast_mode": 1}, "fast_mode"),
+        ({"fast_mode": "true"}, "fast_mode"),
+    ],
+)
+def test_throughput_meter_rejects_invalid_boolean_settings(kwargs, field):
+    with pytest.raises(ValueError, match=field):
+        ThroughputMeter(**kwargs)
 
 
 def test_throughput_meter_reset_clears_state():
@@ -150,6 +365,20 @@ def test_throughput_meter_can_skip_window_tracking():
     assert summary["window_samples_per_sec"] == 0.0
 
 
+def test_throughput_meter_reports_window_untracked_when_window_is_zero():
+    meter = ThroughputMeter(window=0)
+    meter.record(0.1, 4)
+
+    summary = meter.summary()
+
+    assert meter.window_tracked is False
+    assert summary["window_tracked"] is False
+    assert summary["window_batches"] == 0.0
+    assert summary["window_samples"] == 0.0
+    assert summary["window_time_s"] == 0.0
+    assert summary["window_samples_per_sec"] == 0.0
+
+
 def test_throughput_meter_fast_mode_tracks_best_speed_and_headroom():
     meter = ThroughputMeter(fast_mode=True)
     meter.record(0.2, 4)  # 20 samples/s
@@ -203,6 +432,48 @@ def test_throughput_meter_time_batch_context_records_and_handles_exceptions():
     assert summary["window_batches"] == pytest.approx(2)
 
 
+def test_throughput_meter_time_batch_rejects_invalid_exit_time_without_mutating_state():
+    values = iter([0.0, 0.0, "bad"])
+    meter = ThroughputMeter(time_fn=lambda: next(values))  # type: ignore[arg-type, return-value]
+    summary_before = meter.summary()
+    last_before = meter.last
+
+    with pytest.raises(ValueError, match="time_fn"):
+        with meter.time_batch(4):
+            pass
+
+    assert meter.last == last_before
+    assert meter.summary() == summary_before
+
+
+def test_throughput_meter_time_batch_rejects_backward_exit_time_without_mutating_state():
+    values = iter([1.0, 2.0, 1.5])
+    meter = ThroughputMeter(time_fn=lambda: next(values))
+    summary_before = meter.summary()
+    last_before = meter.last
+
+    with pytest.raises(ValueError, match="duration_s"):
+        with meter.time_batch(4):
+            pass
+
+    assert meter.last == last_before
+    assert meter.summary() == summary_before
+
+
+def test_throughput_meter_time_batch_preserves_body_exception_on_backward_exit_time():
+    values = iter([1.0, 2.0, 1.5])
+    meter = ThroughputMeter(time_fn=lambda: next(values))
+    summary_before = meter.summary()
+    last_before = meter.last
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with meter.time_batch(4):
+            raise RuntimeError("boom")
+
+    assert meter.last == last_before
+    assert meter.summary() == summary_before
+
+
 def test_p_square_quantile_reports_inconsistent_state() -> None:
     quantile = _PSquareQuantile(0.5)
     quantile._q = [0.1, 0.2, 0.3, 0.4, 0.5]
@@ -219,6 +490,31 @@ def test_p_square_quantile_update_requires_initialized_state() -> None:
 
     with pytest.raises(RuntimeError, match="not initialized"):
         quantile._linear_update(2, 1)
+
+
+@pytest.mark.parametrize(
+    "quantile",
+    [0.0, 1.0, -0.1, 1.1, float("nan"), float("inf"), True, "0.5", b"0.5", object(), _FailingFloat()],
+)
+def test_p_square_quantile_rejects_invalid_quantiles(quantile: object) -> None:
+    with pytest.raises(ValueError, match="quantile"):
+        _PSquareQuantile(quantile)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [float("nan"), float("-inf"), True, "0.1", b"0.1", object(), _FailingFloat()],
+)
+def test_p_square_quantile_rejects_invalid_values_without_mutating_state(value: object) -> None:
+    quantile = _PSquareQuantile(0.5)
+    quantile.add(0.1)
+    initial_before = list(quantile._initial)
+
+    with pytest.raises(ValueError, match="value"):
+        quantile.add(value)  # type: ignore[arg-type]
+
+    assert quantile._initial == initial_before
+    assert quantile._q is None
 
 
 def test_safe_compile_rejects_non_module_compile_result(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -250,6 +546,23 @@ def test_safe_compile_with_diagnostics_reports_exception(monkeypatch: pytest.Mon
     assert result.fallback_reason == "RuntimeError: compile exploded"
 
 
+def test_safe_compile_with_diagnostics_handles_unstringifiable_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = torch.nn.Linear(1, 1)
+
+    def fake_compile(_: torch.nn.Module, mode: str) -> object:
+        raise BrokenStrError()
+
+    monkeypatch.setattr(torch, "compile", fake_compile, raising=False)
+
+    result = safe_compile_with_diagnostics(model)
+
+    assert result.model is model
+    assert result.compiled is False
+    assert result.fallback_reason == "BrokenStrError"
+
+
 def test_safe_compile_with_diagnostics_reports_non_module_result(monkeypatch: pytest.MonkeyPatch) -> None:
     model = torch.nn.Linear(1, 1)
 
@@ -263,6 +576,125 @@ def test_safe_compile_with_diagnostics_reports_non_module_result(monkeypatch: py
     assert result.model is model
     assert result.compiled is False
     assert result.fallback_reason == "non_module_result:object"
+
+
+@pytest.mark.parametrize("mode", [None, True, 1, "", "   ", b"mode", object()])
+def test_safe_compile_rejects_invalid_compile_modes(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: object,
+) -> None:
+    model = torch.nn.Linear(1, 1)
+
+    def fake_compile(_: torch.nn.Module, mode: str) -> object:
+        raise AssertionError("torch.compile should not be called for invalid mode")
+
+    monkeypatch.setattr(torch, "compile", fake_compile, raising=False)
+
+    with pytest.raises(ValueError, match="mode"):
+        safe_compile(model, mode=mode)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="mode"):
+        safe_compile_with_diagnostics(model, mode=mode)  # type: ignore[arg-type]
+
+
+def test_safe_compile_with_diagnostics_passes_normalized_compile_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = torch.nn.Linear(1, 1)
+    seen_modes: list[str] = []
+
+    def fake_compile(module: torch.nn.Module, mode: str) -> torch.nn.Module:
+        seen_modes.append(mode)
+        return module
+
+    monkeypatch.setattr(torch, "compile", fake_compile, raising=False)
+
+    result = safe_compile_with_diagnostics(model, mode=" reduce-overhead ")
+
+    assert result.compiled is True
+    assert result.model is model
+    assert seen_modes == ["reduce-overhead"]
+
+
+@pytest.mark.parametrize("model", [None, True, 1, object()])
+def test_safe_compile_rejects_invalid_models(
+    monkeypatch: pytest.MonkeyPatch,
+    model: object,
+) -> None:
+    def fake_compile(_: torch.nn.Module, mode: str) -> object:
+        raise AssertionError("torch.compile should not be called for invalid model")
+
+    monkeypatch.setattr(torch, "compile", fake_compile, raising=False)
+
+    with pytest.raises(ValueError, match="model"):
+        safe_compile(model)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="model"):
+        safe_compile_with_diagnostics(model)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("use_amp", ["false", "auto ", 1, object()])
+def test_get_amp_policy_rejects_invalid_amp_settings(use_amp: object) -> None:
+    with pytest.raises(ValueError, match="use_amp"):
+        get_amp_policy("cpu", use_amp=use_amp)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("device", [None, True, 1, "", "   ", object()])
+def test_get_amp_policy_rejects_invalid_device_settings(device: object) -> None:
+    with pytest.raises(ValueError, match="device"):
+        get_amp_policy(device, use_amp=False)  # type: ignore[arg-type]
+
+
+def test_maybe_channels_last_rejects_invalid_boolean_setting() -> None:
+    model = torch.nn.Linear(2, 2)
+
+    with pytest.raises(ValueError, match="channels_last"):
+        maybe_channels_last(model, channels_last="true")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("model", [None, True, 1, object()])
+def test_maybe_channels_last_rejects_invalid_models(model: object) -> None:
+    with pytest.raises(ValueError, match="model"):
+        maybe_channels_last(model, channels_last=False)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("enabled", [1, "false", None])
+def test_autocast_ctx_rejects_invalid_enabled_setting(enabled: object) -> None:
+    with pytest.raises(ValueError, match="enabled"):
+        autocast_ctx("cpu", enabled=enabled, amp_dtype=torch.float32)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("device", [None, True, 1, "", "   ", object()])
+def test_autocast_ctx_rejects_invalid_device_settings_when_enabled(device: object) -> None:
+    with pytest.raises(ValueError, match="device"):
+        autocast_ctx(device, enabled=True, amp_dtype=torch.float32)  # type: ignore[arg-type]
+
+
+def test_to_device_preserves_nested_structures() -> None:
+    Pair = namedtuple("Pair", ["left", "right"])
+    batch = {
+        "pair": Pair(torch.tensor([1.0]), (torch.tensor([2.0]),)),
+        "defaults": defaultdict(lambda: torch.tensor([-1.0]), {"x": torch.tensor([3.0])}),
+    }
+
+    moved = to_device(batch, "cpu", non_blocking=False)
+
+    assert isinstance(moved["pair"], Pair)
+    assert isinstance(moved["pair"].right, tuple)
+    assert isinstance(moved["defaults"], defaultdict)
+    assert torch.equal(moved["pair"].left, torch.tensor([1.0]))
+    assert torch.equal(moved["pair"].right[0], torch.tensor([2.0]))
+    assert torch.equal(moved["defaults"]["x"], torch.tensor([3.0]))
+
+
+@pytest.mark.parametrize("non_blocking", [1, "false", None])
+def test_to_device_rejects_invalid_non_blocking_setting(non_blocking: object) -> None:
+    with pytest.raises(ValueError, match="non_blocking"):
+        to_device(torch.tensor([1.0]), "cpu", non_blocking=non_blocking)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("device", [None, True, 1, "", "   ", object()])
+def test_to_device_rejects_invalid_device_settings(device: object) -> None:
+    with pytest.raises(ValueError, match="device"):
+        to_device(torch.tensor([1.0]), device)  # type: ignore[arg-type]
 
 
 def test_dataloader_from_dataset_allows_zero_workers() -> None:
@@ -281,6 +713,100 @@ def test_dataloader_from_dataset_allows_zero_workers() -> None:
 
     assert first_inputs.shape == (4, 2)
     assert first_targets.shape == (4,)
+
+
+def test_dataloader_from_dataset_resolves_auto_device_for_pin_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset = TensorDataset(torch.randn(8, 2), torch.randint(0, 2, (8,)))
+    monkeypatch.setattr(utils_mod, "get_best_device", lambda: "cuda")
+
+    loader = dataloader_from_dataset(
+        dataset,
+        batch_size=4,
+        device="auto",
+        num_workers=0,
+        shuffle=False,
+    )
+
+    assert loader.pin_memory is True
+
+
+@pytest.mark.parametrize(
+    ("loader_kwargs", "match"),
+    [
+        ({"batch_size": 0}, "batch_size"),
+        ({"batch_size": 1.5}, "batch_size"),
+        ({"batch_size": True}, "batch_size"),
+        ({"num_workers": -1}, "num_workers"),
+        ({"num_workers": 1.5}, "num_workers"),
+        ({"prefetch_factor": 0}, "prefetch_factor"),
+        ({"prefetch_factor": 1.5}, "prefetch_factor"),
+        ({"seed": 7.5}, "seed"),
+        ({"seed": "7"}, "seed"),
+        ({"seed": False}, "seed"),
+    ],
+)
+def test_dataloader_from_dataset_rejects_invalid_numeric_settings(
+    loader_kwargs: dict[str, object],
+    match: str,
+) -> None:
+    dataset = TensorDataset(torch.randn(8, 2), torch.randint(0, 2, (8,)))
+    kwargs = {
+        "batch_size": 4,
+        "device": "cpu",
+        "num_workers": 0,
+        "shuffle": False,
+        **loader_kwargs,
+    }
+
+    with pytest.raises(ValueError, match=match):
+        dataloader_from_dataset(dataset, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("loader_kwargs", "match"),
+    [
+        ({"persistent": 1}, "persistent"),
+        ({"persistent": "true"}, "persistent"),
+        ({"pin_memory": 0}, "pin_memory"),
+        ({"pin_memory": "false"}, "pin_memory"),
+        ({"shuffle": 1}, "shuffle"),
+        ({"shuffle": "false"}, "shuffle"),
+        ({"distributed": 1}, "distributed"),
+        ({"distributed": "true"}, "distributed"),
+        ({"drop_last": 0}, "drop_last"),
+        ({"drop_last": "false"}, "drop_last"),
+    ],
+)
+def test_dataloader_from_dataset_rejects_invalid_boolean_settings(
+    loader_kwargs: dict[str, object],
+    match: str,
+) -> None:
+    dataset = TensorDataset(torch.randn(8, 2), torch.randint(0, 2, (8,)))
+    kwargs = {
+        "batch_size": 4,
+        "device": "cpu",
+        "num_workers": 0,
+        "shuffle": False,
+        **loader_kwargs,
+    }
+
+    with pytest.raises(ValueError, match=match):
+        dataloader_from_dataset(dataset, **kwargs)
+
+
+@pytest.mark.parametrize("device", [None, True, 1, "", "   ", object()])
+def test_dataloader_from_dataset_rejects_invalid_device_settings(device: object) -> None:
+    dataset = TensorDataset(torch.randn(4, 2), torch.randint(0, 2, (4,)))
+
+    with pytest.raises(ValueError, match="device"):
+        dataloader_from_dataset(
+            dataset,
+            batch_size=2,
+            device=device,  # type: ignore[arg-type]
+            num_workers=0,
+        )
 
 
 def test_dataloader_from_dataset_applies_seed_to_shuffle_order() -> None:
